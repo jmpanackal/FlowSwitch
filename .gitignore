@@ -1,0 +1,23 @@
+# Node.js
+node_modules/
+dist/
+.env
+.vscode/
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Electron build output
+out/
+release/
+
+# Tailwind cache
+.pnpm-debug.log
+tailwind.config.js.backup
+
+# Others (optional but safe)
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
