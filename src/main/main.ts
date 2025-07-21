@@ -29,19 +29,46 @@ app.whenReady().then(() => {
 
 // Listen for 'launch-profile' IPC events from the renderer process
 ipcMain.on('launch-profile', (event, profileId) => {
-  // Path to the mock profile data JSON file
   const filePath = path.join(__dirname, '../../mock-data/profile-work.json');
+
   try {
-    // Read and parse the profile data
     const profileJson = fs.readFileSync(filePath, 'utf-8');
     const profile = JSON.parse(profileJson);
-    console.log('Loaded profile data:', profile);
 
-    // Send profile back to renderer
+    console.log('🧠 Loaded profile data:', profile);
+
+    // Send profile back to React
     event.reply('profile-loaded', profile);
+
+    // Require node modules for launching things
+    const { spawn } = require('child_process');
+    const { shell } = require('electron');
+
+    // Loop through each action in the profile
+    for (const action of profile.actions) {
+      if (action.type === 'app') {
+        // 🟢 Launch an executable app
+
+        console.log(`🟦 Launching app: ${action.name} -> ${action.path}`);
+
+        // Use spawn to run the app. `{ detached: true }` means it won’t block Electron.
+        spawn(action.path, {
+          detached: true,
+          stdio: 'ignore' // prevent Electron from listening to output
+        }).unref(); // allow child process to live on its own
+
+      } else if (action.type === 'browserTab') {
+        // 🌐 Open a browser URL
+
+        console.log(`🌐 Opening URL in browser: ${action.url}`);
+
+        // Open the URL in the user's default browser
+        shell.openExternal(action.url);
+      }
+    }
+
   } catch (err) {
-    // If loading fails, log the error and send an error message to the renderer
-    console.error('Failed to load profile:', err);
+    console.error('❌ Failed to load or launch profile:', err);
     event.reply('profile-loaded', { error: 'Failed to load profile' });
   }
 });

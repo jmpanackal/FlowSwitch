@@ -2,18 +2,18 @@
   "id": "work-mode",
   "name": "Work Mode",
   "icon": "💼",
-  "tags": ["focus", "daytime"],
+  "tags": ["focus", "work"],
   "volume": 30,
   "actions": [
     {
       "type": "app",
-      "name": "Notion",
-      "path": "C:\\Program Files\\Notion\\Notion.exe",
-      "monitor": 1
+      "name": "Notepadd++",
+      "path": "C:\\Program Files\\Notepad++\\notepad++.exe",
+      "monitor": 3
     },
     {
       "type": "browserTab",
-      "url": "https://mail.google.com",
+      "url": "https://www.thecheesecakefactory.com",
       "browser": "chrome",
       "monitor": 2
     }
