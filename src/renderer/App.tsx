@@ -41,6 +41,13 @@ export default function App() {
         Launch Work Profile
       </button>
 
+      <button
+        onClick={() => console.log('🟦 Create Profile button clicked')}
+        className="mt-4 px-4 py-2 bg-green-500 text-white rounded hover:bg-green-600"
+      >
+        Create Profile
+      </button>
+
       {/* Display profile data if available */}
       {profile && (
         <div className="mt-6 p-4 bg-gray-800 rounded-lg border border-gray-700">
