@@ -73,6 +73,40 @@ ipcMain.on('launch-profile', (event, profileId) => {
   }
 });
 
+// IPC handler: get-installed-apps (Windows Start Menu shortcut scan)
+ipcMain.handle('get-installed-apps', async () => {
+  try {
+    // Windows Start Menu paths
+    const startMenuDirs = [
+      path.join(process.env.ProgramData || 'C:/ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+      path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+    ];
+    const appSet = new Set<string>();
+    for (const dir of startMenuDirs) {
+      if (fs.existsSync(dir)) {
+        const walk = (folder: string) => {
+          const entries = fs.readdirSync(folder, { withFileTypes: true });
+          for (const entry of entries) {
+            const fullPath = path.join(folder, entry.name);
+            if (entry.isDirectory()) {
+              walk(fullPath);
+            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lnk')) {
+              // Remove .lnk extension for display
+              appSet.add(entry.name.replace(/\.lnk$/i, ''));
+            }
+          }
+        };
+        walk(dir);
+      }
+    }
+    // Return sorted array of app names
+    return Array.from(appSet).sort();
+  } catch (err) {
+    console.error('Failed to scan Start Menu for apps:', err);
+    return [];
+  }
+});
+
 
 // Quit the app when all windows are closed (except on macOS)
 app.on('window-all-closed', () => {

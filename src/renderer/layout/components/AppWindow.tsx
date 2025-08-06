@@ -1,11 +1,21 @@
+
 import { useState, useRef } from "react";
 import { Settings, Trash2, Move, Shield, Minimize2, File, Folder, Link } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 
+// Type guards for app types
+function isDiscoveredApp(app: any): app is { iconPath: string | null } {
+  return 'iconPath' in app;
+}
+function isFallbackApp(app: any): app is { icon: LucideIcon } {
+  return 'icon' in app && typeof app.icon === 'function';
+}
+
 interface AppWindowProps {
   app: {
     name: string;
-    icon: LucideIcon;
+    iconPath?: string | null;
+    icon?: LucideIcon;
     color: string;
     position: { x: number; y: number };
     size: { width: number; height: number };
@@ -83,35 +93,33 @@ export function AppWindow({
     monitorElement: null as HTMLElement | null
   });
 
-  // FIXED: Bigger app icons with proper CSS classes
+  // Render the app icon: prefer real iconPath, fallback to LucideIcon, then emoji
   const renderIcon = () => {
-    if (!app.icon) {
+    if (isDiscoveredApp(app) && app.iconPath) {
       return (
-        <div className="app-icon-fallback bg-white/20 rounded">
-          <span className="text-white text-sm">📱</span>
-        </div>
+        <img
+          src={app.iconPath}
+          alt={app.name}
+          className="app-icon w-8 h-8 object-contain rounded"
+          draggable={false}
+          onError={e => {
+            // Hide broken image and show fallback below
+            const target = e.target as HTMLImageElement;
+            target.style.display = 'none';
+            const fallback = target.nextElementSibling as HTMLElement;
+            if (fallback) fallback.style.display = 'flex';
+          }}
+        />
       );
     }
-    
-    // Check if it's a valid React component
-    if (typeof app.icon === 'function') {
-      try {
-        const IconComponent = app.icon;
-        return <IconComponent className="app-icon text-white" />;
-      } catch (error) {
-        console.warn('Failed to render icon for app:', app.name, error);
-        return (
-          <div className="app-icon-fallback bg-white/20 rounded">
-            <span className="text-white text-sm">⚠️</span>
-          </div>
-        );
-      }
+    if (isFallbackApp(app)) {
+      const IconComponent = app.icon;
+      return <IconComponent className="app-icon text-white w-8 h-8" />;
     }
-    
-    // If it's not a function, show fallback
+    // Fallback: emoji
     return (
-      <div className="app-icon-fallback bg-white/20 rounded">
-        <span className="text-white text-sm">❓</span>
+      <div className="app-icon-fallback bg-white/20 rounded w-8 h-8 flex items-center justify-center">
+        <span className="text-white text-sm">📱</span>
       </div>
     );
   };

@@ -7,6 +7,7 @@ declare global {
     electron: {
       launchProfile: (profileId: string) => void;
       onProfileLoaded: (callback: (profile: Profile) => void) => void;
+      getInstalledApps: () => Promise<{ name: string; iconPath: string | null }[]>;
     };
   }
 }
