@@ -7,51 +7,29 @@ interface AppSearchControlProps {
   placeholder?: string;
 }
 
-// Expanded list of common applications for search
-const availableApps = [
-  // Browsers
+
+// Fallback: Expanded list of common applications for search
+const fallbackApps = [
   'Chrome', 'Firefox', 'Safari', 'Edge', 'Opera', 'Brave', 'Vivaldi',
-  
-  // Communication
   'Discord', 'Slack', 'Microsoft Teams', 'Zoom', 'Skype', 'WhatsApp', 'Telegram',
-  
-  // Development
   'Visual Studio Code', 'Visual Studio', 'IntelliJ IDEA', 'PyCharm', 'WebStorm',
   'Android Studio', 'Xcode', 'Sublime Text', 'Atom', 'Notepad++',
-  
-  // Design & Media
   'Photoshop', 'Illustrator', 'After Effects', 'Premiere Pro', 'Figma', 'Sketch',
   'Canva', 'GIMP', 'Blender', 'Cinema 4D', 'Maya', 'Substance Painter',
-  
-  // Gaming
   'Steam', 'Epic Games Launcher', 'Origin', 'Battle.net', 'GOG Galaxy', 
   'Xbox Game Pass', 'Minecraft', 'Roblox', 'Fortnite', 'League of Legends',
-  
-  // Productivity
   'Microsoft Word', 'Microsoft Excel', 'Microsoft PowerPoint', 'Microsoft Outlook',
   'Google Drive', 'Dropbox', 'OneDrive', 'Notion', 'Obsidian', 'Evernote',
   'Trello', 'Asana', 'Monday.com', 'Todoist',
-  
-  // Entertainment
   'Spotify', 'Apple Music', 'YouTube Music', 'VLC Media Player', 'Netflix',
   'Disney+', 'Amazon Prime Video', 'Twitch', 'OBS Studio',
-  
-  // Utilities
   'WinRAR', '7-Zip', 'CCleaner', 'Malwarebytes', 'Norton', 'Avast',
   'TeamViewer', 'AnyDesk', 'FileZilla', 'PuTTY', 'Wireshark',
-  
-  // System & Tools
   'Task Manager', 'Control Panel', 'Registry Editor', 'Command Prompt',
   'PowerShell', 'File Explorer', 'Notepad', 'Calculator', 'Paint',
-  
-  // Finance & Business
   'QuickBooks', 'TurboTax', 'Sage', 'Xero', 'FreshBooks', 'Wave Accounting',
-  
-  // Social Media
   'Facebook', 'Instagram', 'Twitter', 'LinkedIn', 'TikTok', 'Snapchat',
   'Pinterest', 'Reddit', 'YouTube',
-  
-  // Additional Popular Apps
   'VMware', 'VirtualBox', 'Docker', 'Postman', 'Chrome DevTools',
   'Firefox Developer Edition', 'Node.js', 'Python', 'Java',
 ].sort();
@@ -63,11 +41,24 @@ export function AppSearchControl({
 }: AppSearchControlProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
+  const [availableApps, setAvailableApps] = useState<string[]>(fallbackApps);
+
+  // Try to fetch installed apps from main process via IPC on mount
+  useEffect(() => {
+    if (window.electron && typeof window.electron.getInstalledApps === 'function') {
+      window.electron.getInstalledApps()
+        .then((apps: string[]) => {
+          if (Array.isArray(apps) && apps.length > 0) setAvailableApps(apps.sort());
+        })
+        .catch(() => setAvailableApps(fallbackApps));
+    } else {
+      setAvailableApps(fallbackApps);
+    }
+  }, []);
 
   // Filter apps based on search query
   const filteredApps = useMemo(() => {
     if (!searchQuery.trim()) return [];
-    
     const query = searchQuery.toLowerCase().trim();
     return availableApps
       .filter(app => 
@@ -75,7 +66,7 @@ export function AppSearchControl({
         !restrictedApps.includes(app)
       )
       .slice(0, 8); // Limit results to prevent overwhelming UI
-  }, [searchQuery, restrictedApps]);
+  }, [searchQuery, restrictedApps, availableApps]);
 
   // Handle adding app to restricted list
   const handleAddApp = (appName: string) => {

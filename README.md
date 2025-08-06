@@ -49,7 +49,7 @@ npm install
 ```bash
 src/
 ├── main/                 # Electron backend logic
-│   └── main.ts
+│   └── main.js
 ├── renderer/             # React frontend
 │   └── App.tsx
 ├── types/
@@ -67,5 +67,3 @@ npm run dev           # Full dev (frontend + Electron)
 npm run dev:frontend  # Vite frontend only
 npm run dev:electron  # Electron only
 ```
-
-

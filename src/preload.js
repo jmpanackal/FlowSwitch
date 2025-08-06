@@ -14,5 +14,8 @@ contextBridge.exposeInMainWorld('electron', {
       // Call the React-side handler with the profile data
       callback(profileData);
     });
-  }
+  },
+
+  // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)
+  getInstalledApps: () => ipcRenderer.invoke('get-installed-apps')
 });
