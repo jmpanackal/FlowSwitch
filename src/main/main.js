@@ -2,7 +2,6 @@ const { app, BrowserWindow, ipcMain, protocol } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ws = require('windows-shortcuts');
-const os = require('os');
 const crypto = require('crypto');
 const iconExtractor = require('icon-extractor');
 const { execFile } = require('child_process');
@@ -46,13 +45,6 @@ function extractIconToIco(exePath, icoPath) {
 }
 const { scanForExeFiles } = require('./scanExeFiles');
 const { getRegistryInstalledApps } = require('./registryApps');
-
-function normalizeAppName(name) {
-  return String(name || '')
-    .toLowerCase()
-    .replace(/\.exe$/i, '')
-    .replace(/[^a-z0-9]/g, '');
-}
 
 const hiddenProcessNamePatterns = [
   /^electron$/i,
@@ -436,7 +428,6 @@ ipcMain.handle('capture-running-app-layout', async () => {
     const { screen } = require('electron');
     const displays = screen.getAllDisplays();
     const processes = await getRunningWindowProcesses();
-    const installedIconMap = new Map();
 
     const monitors = displays.map((display, idx) => ({
       id: `monitor-${display.id}`,
@@ -745,7 +736,7 @@ ipcMain.handle('capture-running-app-layout', async () => {
 
       // Keep capture fast: avoid per-window icon extraction here.
       // Memory capture prioritizes layout correctness and responsiveness.
-      const iconPath = installedIconMap.get(normalizeAppName(windowInfo.name)) || null;
+      const iconPath = null;
 
       const round1 = (n) => Math.round(n * 10) / 10;
       const mappedWindow = {

@@ -97,19 +97,30 @@ export function AppWindow({
   const renderIcon = () => {
     if (isDiscoveredApp(app) && app.iconPath) {
       return (
-        <img
-          src={app.iconPath}
-          alt={app.name}
-          className="app-icon w-8 h-8 object-contain rounded"
-          draggable={false}
-          onError={e => {
-            // Hide broken image and show fallback below
-            const target = e.target as HTMLImageElement;
-            target.style.display = 'none';
-            const fallback = target.nextElementSibling as HTMLElement;
-            if (fallback) fallback.style.display = 'flex';
-          }}
-        />
+        <>
+          <img
+            src={app.iconPath}
+            alt={app.name}
+            className="app-icon w-8 h-8 object-contain rounded"
+            draggable={false}
+            onError={(e) => {
+              const target = e.currentTarget as HTMLImageElement;
+              // Hide broken image and show fallback below
+              target.style.display = 'none';
+              const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as
+                | HTMLElement
+                | null;
+              if (fallback) fallback.style.display = 'flex';
+            }}
+          />
+          <div
+            data-icon-fallback="true"
+            style={{ display: 'none' }}
+            className="app-icon-fallback bg-white/20 rounded w-8 h-8 flex items-center justify-center"
+          >
+            <span className="text-white text-sm">📱</span>
+          </div>
+        </>
       );
     }
     if (isFallbackApp(app)) {

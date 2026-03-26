@@ -21,3 +21,6 @@ tailwind.config.js.backup
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
+
+# Cursor AI local rules (do not commit)
+.cursorrules
