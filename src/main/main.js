@@ -283,12 +283,51 @@ ipcMain.handle('get-installed-apps', async () => {
   try {
     const iconDir = getAppIconDir();
     const appMap = new Map();
+
+    const runWithConcurrencyLimit = async (tasks, limit) => {
+      const safeLimit = Math.max(1, Math.min(limit || 1, tasks.length || 1));
+      let nextIndex = 0;
+
+      const worker = async () => {
+        while (true) {
+          const currentIndex = nextIndex;
+          nextIndex += 1;
+          if (currentIndex >= tasks.length) return;
+          try {
+            await tasks[currentIndex]();
+          } catch (e) {
+            // Keep discovery resilient: one failing shortcut/icon extraction
+            // should not fail the whole installed-app scan.
+          }
+        }
+      };
+
+      const workers = Array.from({ length: safeLimit }, () => worker());
+      await Promise.all(workers);
+    };
+
+    const normalizeWsIconFile = (rawIcon) => {
+      if (!rawIcon) return null;
+      const iconParts = String(rawIcon).split(',');
+      const iconFileRaw = iconParts[0];
+      if (!iconFileRaw) return null;
+
+      // ws icon often comes like: `"C:\Path\App.exe",0` or without quotes.
+      const iconFile = String(iconFileRaw)
+        .replace(/^"(.*)"$/, '$1')
+        .trim();
+
+      if (!iconFile || !fs.existsSync(iconFile)) return null;
+      if (!iconFile.toLowerCase().endsWith('.exe')) return null;
+      return iconFile;
+    };
+
     // 1. Start Menu Shortcuts (.lnk files pointing to .exe only)
     const startMenuDirs = [
       path.join(process.env.ProgramData || 'C:/ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
       path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs')
     ];
-    const shortcutPromises = [];
+    const shortcutTasks = [];
     for (const dir of startMenuDirs) {
       if (fs.existsSync(dir)) {
         const walk = (folder) => {
@@ -300,47 +339,44 @@ ipcMain.handle('get-installed-apps', async () => {
             } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lnk')) {
               try {
                 const name = entry.name.replace(/\.lnk$/i, '');
-                const p = new Promise((resolve) => {
+                shortcutTasks.push(() => new Promise((resolve) => {
                   ws.query(fullPath, async (err, info) => {
-                    let iconPath = null;
-                    let iconSource = null;
-                    if (!err && info && info.icon) {
-                      const iconParts = info.icon.split(',');
-                      const iconFile = iconParts[0];
-                      if (iconFile && fs.existsSync(iconFile) && iconFile.toLowerCase().endsWith('.exe')) {
-                        iconSource = iconFile;
-                      }
-                    }
-                    if (!iconSource) {
-                      // Skip non-.exe shortcuts (no-op).
-                    }
-                    // Only use .exe targets for icon extraction
-                    if (iconSource) {
-                      try {
-                        const hash = crypto.createHash('md5').update(iconSource).digest('hex');
-                        const icoFile = `${hash}.ico`;
-                        const icoPath = path.join(iconDir, icoFile);
-                        if (!fs.existsSync(icoPath)) {
-                          await extractIconToIco(iconSource, icoPath);
-                        }
-                        if (fs.existsSync(icoPath)) {
-                          iconPath = `appicon://${icoFile}`;
-                        } else {
-                          console.warn(`[StartMenu] Icon extraction failed for '${name}' from '${iconSource}'. .ico not created.`);
+                    try {
+                      const normalizedIconSource = !err && info && info.icon
+                        ? normalizeWsIconFile(info.icon)
+                        : null;
+
+                      // If we already discovered this app with an icon, skip expensive rework.
+                      const existing = appMap.get(name);
+                      if (existing?.iconPath) return resolve();
+
+                      let iconPath = null;
+                      if (normalizedIconSource) {
+                        try {
+                          const hash = crypto.createHash('md5').update(normalizedIconSource).digest('hex');
+                          const icoFile = `${hash}.ico`;
+                          const icoPath = path.join(iconDir, icoFile);
+                          if (!fs.existsSync(icoPath)) {
+                            await extractIconToIco(normalizedIconSource, icoPath);
+                          }
+                          if (fs.existsSync(icoPath)) {
+                            iconPath = `appicon://${icoFile}`;
+                          } else {
+                            iconPath = null;
+                          }
+                        } catch {
                           iconPath = null;
                         }
-                      } catch (e) {
-                        console.warn(`[StartMenu] Error extracting icon for '${name}' from '${iconSource}':`, e);
-                        iconPath = null;
                       }
+
+                      if (normalizedIconSource && !appMap.has(name)) {
+                        appMap.set(name, { name, iconPath });
+                      }
+                    } finally {
+                      resolve();
                     }
-                    if (iconSource && !appMap.has(name)) {
-                      appMap.set(name, { name, iconPath });
-                    }
-                    resolve();
                   });
-                });
-                shortcutPromises.push(p);
+                }));
               } catch (e) {
                 console.warn(`[StartMenu] Exception handling shortcut '${entry.name}':`, e);
               }
@@ -415,7 +451,7 @@ ipcMain.handle('get-installed-apps', async () => {
         }
       }
     }
-    await Promise.all(shortcutPromises);
+    await runWithConcurrencyLimit(shortcutTasks, 6);
     return Array.from(appMap.values());
   } catch (err) {
     console.error('Error in get-installed-apps handler:', err);
