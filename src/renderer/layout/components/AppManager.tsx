@@ -5,10 +5,11 @@ function isFallbackApp(app: AppType): app is FallbackApp {
 function isDiscoveredApp(app: AppType): app is DiscoveredApp {
   return 'iconPath' in app;
 }
-import { useState, useEffect } from "react";
+import { useMemo, useState } from "react";
 import { Search, Settings, Trash2, Users, Monitor, Volume2, VolumeX, Shield, Power, Save, Filter, Move } from "lucide-react";
 import { Globe, FileText, MessageCircle, Code, Music, Calendar, Mail, Terminal, Camera, BarChart3 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
+import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface AppManagerProps {
   profiles: any[];
@@ -74,37 +75,26 @@ export function AppManager({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAppSettings, setShowAppSettings] = useState(false);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
-  const [allApps, setAllApps] = useState<AppType[]>(fallbackApps);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
-
-  // On mount, try to fetch installed apps from main process
-  useEffect(() => {
-    let cancelled = false;
-    if (window.electron && typeof window.electron.getInstalledApps === 'function') {
-      window.electron.getInstalledApps()
-        .then((apps: { name: string; iconPath: string | null }[]) => {
-          if (!cancelled && Array.isArray(apps) && apps.length > 0) {
-            setAllApps(apps.map(app => {
-              const meta = appMeta[app.name.toLowerCase()];
-              if (meta) {
-                // Remove icon property for discovered apps to match DiscoveredApp type
-                const { icon, ...rest } = meta;
-                return { ...rest, iconPath: app.iconPath };
-              }
-              return {
-                name: app.name,
-                iconPath: app.iconPath,
-                color: '#888',
-                category: 'Other',
-                firstLetter: app.name.charAt(0).toUpperCase(),
-              };
-            }));
-          }
-        })
-        .catch(() => setAllApps(fallbackApps));
-    }
-    return () => { cancelled = true; };
-  }, []);
+  const installedApps = useInstalledApps(
+    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
+  );
+  const allApps = useMemo<AppType[]>(() => (
+    installedApps.map((app) => {
+      const meta = appMeta[app.name.toLowerCase()];
+      if (meta) {
+        const { icon, ...rest } = meta;
+        return { ...rest, iconPath: app.iconPath };
+      }
+      return {
+        name: app.name,
+        iconPath: app.iconPath,
+        color: '#888',
+        category: 'Other',
+        firstLetter: app.name.charAt(0).toUpperCase(),
+      };
+    })
+  ), [installedApps]);
 
 
   // Helper to get last accessed and size for discovered apps (from iconPath/exePath if available)
@@ -228,9 +218,7 @@ export function AppManager({
   // CUSTOM DRAG SYSTEM - Mouse-based dragging
   const handleMouseDown = (e: React.MouseEvent, app: any) => {
     e.preventDefault();
-    
-    console.log('🎯 CUSTOM DRAG START (SIDEBAR):', app);
-    
+
     const dragData = {
       source: 'sidebar',
       type: 'app',
@@ -360,10 +348,10 @@ export function AppManager({
                         className="w-6 h-6 object-contain rounded"
                         draggable={false}
                         onError={e => {
-                          // Hide broken image and show fallback below
+                          // Hide broken image and show explicit fallback element.
                           const target = e.target as HTMLImageElement;
                           target.style.display = 'none';
-                          const fallback = target.nextElementSibling as HTMLElement;
+                          const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as HTMLElement | null;
                           if (fallback) fallback.style.display = 'flex';
                         }}
                       />
@@ -378,23 +366,15 @@ export function AppManager({
                       </span>
                     ) : null}
                     {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
-                    {isDiscoveredApp(app) && app.iconPath ? (() => {
-                      if (isFallbackApp(app)) {
-                        const fallbackApp = app as FallbackApp;
-                        const FallbackIcon = fallbackApp.icon;
-                        return (
-                          <div style={{display:'none'}} className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded">
-                            <FallbackIcon className="w-4 h-4 text-white" />
-                          </div>
-                        );
-                      } else {
-                        return (
-                          <div style={{display:'none'}} className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded">
-                            {app.firstLetter ? app.firstLetter : <span className="text-white text-xs">?</span>}
-                          </div>
-                        );
-                      }
-                    })() : null}
+                    {isDiscoveredApp(app) && app.iconPath ? (
+                      <div
+                        data-icon-fallback="true"
+                        style={{ display: 'none' }}
+                        className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
+                      >
+                        {app.firstLetter ? app.firstLetter : <span className="text-white text-xs">?</span>}
+                      </div>
+                    ) : null}
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">

@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Search, Plus, Scan, Folder, Monitor, Globe, Gamepad2, Music, Code, MessageCircle, Calendar, Mail, Terminal, Camera, BarChart3, FileText, Settings } from "lucide-react";
-import { LucideIcon } from "lucide-react";
+import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface CreateProfileModalProps {
   isOpen: boolean;
@@ -8,7 +8,7 @@ interface CreateProfileModalProps {
   onCreateProfile: (profile: any) => void;
 }
 
-const availableApps = [
+const fallbackApps = [
   { name: 'Chrome', icon: Globe, color: '#4285F4', category: 'Browser' },
   { name: 'VS Code', icon: Code, color: '#007ACC', category: 'Development' },
   { name: 'Terminal', icon: Terminal, color: '#000000', category: 'Development' },
@@ -24,12 +24,38 @@ const availableApps = [
   { name: 'Steam', icon: Gamepad2, color: '#1B2838', category: 'Gaming' },
 ];
 
-const mockCurrentApps = [
-  { name: 'Chrome', icon: Globe, color: '#4285F4', position: { x: 30, y: 30 }, size: { width: 60, height: 70 }, monitor: 'Monitor 1' },
-  { name: 'VS Code', icon: Code, color: '#007ACC', position: { x: 70, y: 30 }, size: { width: 50, height: 60 }, monitor: 'Monitor 1' },
-  { name: 'Spotify', icon: Music, color: '#1DB954', position: { x: 50, y: 70 }, size: { width: 40, height: 30 }, monitor: 'Monitor 2' },
-  { name: 'Slack', icon: MessageCircle, color: '#4A154B', position: { x: 25, y: 50 }, size: { width: 45, height: 50 }, monitor: 'Monitor 2' },
-];
+const appMetaByName = Object.fromEntries(
+  fallbackApps.map((app) => [app.name.toLowerCase(), app]),
+);
+
+type MemoryCapture = {
+  capturedAt: number;
+  appCount: number;
+  monitors: Array<{
+    id: string;
+    name: string;
+    primary: boolean;
+    resolution: string;
+    orientation: 'landscape' | 'portrait';
+    layoutPosition?: { x: number; y: number };
+    apps: Array<{
+      name: string;
+      iconPath: string | null;
+      position: { x: number; y: number };
+      size: { width: number; height: number };
+    }>;
+  }>;
+  minimizedApps?: Array<{
+    name: string;
+    iconPath: string | null;
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+    targetMonitor?: string;
+    sourcePosition?: { x: number; y: number };
+    sourceSize?: { width: number; height: number };
+  }>;
+  error?: string;
+};
 
 export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateProfileModalProps) {
   const [creationMode, setCreationMode] = useState<'manual' | 'memory'>('manual');
@@ -39,14 +65,62 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   const [selectedApps, setSelectedApps] = useState<any[]>([]);
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
+  const [memoryCapture, setMemoryCapture] = useState<MemoryCapture | null>(null);
+  const [isCapturingMemory, setIsCapturingMemory] = useState(false);
+  const [memoryCaptureError, setMemoryCaptureError] = useState<string | null>(null);
+  const installedApps = useInstalledApps(
+    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
+  );
+  const availableApps = useMemo(() => (
+    installedApps.map((app) => {
+      const meta = appMetaByName[app.name.toLowerCase()];
+      return {
+        name: app.name,
+        icon: meta?.icon || Settings,
+        color: meta?.color || '#666666',
+        category: meta?.category || 'Other',
+        iconPath: app.iconPath,
+      };
+    })
+  ), [installedApps]);
 
   const categories = Array.from(new Set(availableApps.map(app => app.category)));
   
-  const filteredApps = availableApps.filter(app => {
-    const matchesSearch = app.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || app.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const filteredApps = useMemo(() => (
+    availableApps.filter((app) => {
+      const matchesSearch = app.name.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesCategory = !selectedCategory || app.category === selectedCategory;
+      return matchesSearch && matchesCategory;
+    })
+  ), [availableApps, searchTerm, selectedCategory]);
+
+  const totalCapturedApps = useMemo(() => {
+    if (!memoryCapture) return 0;
+    const visibleCount = memoryCapture.monitors.reduce((sum, monitor) => sum + monitor.apps.length, 0);
+    const minimizedCount = memoryCapture.minimizedApps?.length || 0;
+    return visibleCount + minimizedCount;
+  }, [memoryCapture]);
+
+  const captureMemoryLayout = async () => {
+    if (!window.electron || typeof window.electron.captureRunningAppLayout !== 'function') {
+      setMemoryCaptureError('Layout capture is not available in this build.');
+      return;
+    }
+    setIsCapturingMemory(true);
+    setMemoryCaptureError(null);
+    try {
+      const capture = await window.electron.captureRunningAppLayout();
+      if (capture.error) {
+        setMemoryCaptureError(capture.error);
+      }
+      setMemoryCapture(capture);
+    } catch {
+      setMemoryCaptureError('Failed to capture running app layout.');
+      setMemoryCapture(null);
+    } finally {
+      setIsCapturingMemory(false);
+    }
+  };
 
   const toggleApp = (app: any) => {
     setSelectedApps(prev => 
@@ -81,6 +155,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
           apps: selectedApps.slice(0, Math.ceil(selectedApps.length / 2)).map((app, index) => ({
             name: app.name,
             icon: app.icon,
+            iconPath: app.iconPath ?? null,
             color: app.color,
             position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
             size: { width: 35, height: 30 },
@@ -97,6 +172,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
           apps: selectedApps.slice(Math.ceil(selectedApps.length / 2)).map((app, index) => ({
             name: app.name,
             icon: app.icon,
+            iconPath: app.iconPath ?? null,
             color: app.color,
             position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
             size: { width: 35, height: 30 },
@@ -113,55 +189,62 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   };
 
   const createMemoryProfile = () => {
-    if (!profileName.trim()) return;
-    
+    if (!profileName.trim() || !memoryCapture) return;
+    const orderedMonitors = [...memoryCapture.monitors].sort((a, b) => {
+      const ay = a.layoutPosition?.y ?? 0;
+      const by = b.layoutPosition?.y ?? 0;
+      const ax = a.layoutPosition?.x ?? 0;
+      const bx = b.layoutPosition?.x ?? 0;
+      return ay - by || ax - bx;
+    });
+
     const newProfile = {
       id: `memory-${Date.now()}`,
       name: profileName,
       icon: profileIcon,
-      description: profileDescription || `Captured layout with ${mockCurrentApps.length} apps`,
-      appCount: mockCurrentApps.length,
+      description: profileDescription || `Captured layout with ${totalCapturedApps} apps`,
+      appCount: totalCapturedApps,
       tabCount: 0,
       globalVolume: 70,
       backgroundBehavior: 'keep' as const,
       restrictedApps: [],
-      estimatedStartupTime: Math.max(3, mockCurrentApps.length * 0.5),
+      estimatedStartupTime: Math.max(3, totalCapturedApps * 0.5),
       autoLaunch: false,
-      monitors: [
-        {
-          id: 'monitor-1',
-          name: 'Monitor 1',
-          primary: true,
-          resolution: '2560x1440',
-          orientation: 'landscape' as const,
-          apps: mockCurrentApps.filter(app => app.monitor === 'Monitor 1').map(app => ({
+      monitors: orderedMonitors.map((monitor) => ({
+        id: monitor.id,
+        name: monitor.name,
+        primary: monitor.primary,
+        resolution: monitor.resolution,
+        orientation: monitor.orientation,
+        apps: monitor.apps.map((app) => {
+          const meta = appMetaByName[app.name.toLowerCase()];
+          return {
             name: app.name,
-            icon: app.icon,
-            color: app.color,
+            icon: meta?.icon || Settings,
+            iconPath: app.iconPath ?? null,
+            color: meta?.color || '#666666',
             position: app.position,
             size: app.size,
             volume: 50,
-            launchBehavior: 'new' as const
-          }))
-        },
-        {
-          id: 'monitor-2',
-          name: 'Monitor 2',
-          primary: false,
-          resolution: '1920x1080',
-          orientation: 'landscape' as const,
-          apps: mockCurrentApps.filter(app => app.monitor === 'Monitor 2').map(app => ({
-            name: app.name,
-            icon: app.icon,
-            color: app.color,
-            position: app.position,
-            size: app.size,
-            volume: 50,
-            launchBehavior: 'new' as const
-          }))
-        }
-      ],
-      minimizedApps: [],
+            launchBehavior: 'new' as const,
+          };
+        }),
+      })),
+      minimizedApps: (memoryCapture.minimizedApps || []).map((app) => {
+        const meta = appMetaByName[app.name.toLowerCase()];
+        return {
+          name: app.name,
+          icon: meta?.icon || Settings,
+          iconPath: app.iconPath ?? null,
+          color: meta?.color || '#666666',
+          volume: 50,
+          launchBehavior: 'minimize' as const,
+          targetMonitor: app.targetMonitor || (orderedMonitors.find((m) => m.primary)?.id || orderedMonitors[0]?.id || 'monitor-1'),
+          sourcePosition: app.sourcePosition || app.position,
+          sourceSize: app.sourceSize || app.size,
+          instanceId: `${app.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        };
+      }),
       browserTabs: []
     };
     
@@ -202,6 +285,11 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
           </button>
           <button 
             onClick={() => setCreationMode('memory')}
+            onMouseDown={() => {
+              if (!memoryCapture && !isCapturingMemory) {
+                void captureMemoryLayout();
+              }
+            }}
             className={`flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded text-sm transition-colors ${
               creationMode === 'memory' 
                 ? 'bg-purple-500/30 text-purple-200' 
@@ -306,7 +394,11 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
                       className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
                       style={{ backgroundColor: `${app.color}20` }}
                     >
-                      <app.icon className="w-5 h-5 text-white" />
+                      {app.iconPath ? (
+                        <img src={app.iconPath} alt={app.name} className="w-5 h-5 object-contain rounded" />
+                      ) : (
+                        <app.icon className="w-5 h-5 text-white" />
+                      )}
                     </div>
                     <div className="text-white text-xs text-center truncate">{app.name}</div>
                     <div className="text-white/50 text-xs text-center">{app.category}</div>
@@ -321,53 +413,57 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
         {creationMode === 'memory' && (
           <div className="space-y-6">
             <div className="bg-white/5 border border-white/20 rounded-lg p-4">
-              <h4 className="text-white mb-3 flex items-center gap-2">
-                <Scan className="w-4 h-4" />
-                Current App Layout Detection
-              </h4>
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <h4 className="text-white flex items-center gap-2">
+                  <Scan className="w-4 h-4" />
+                  Current App Layout Detection
+                </h4>
+                <button
+                  onClick={() => void captureMemoryLayout()}
+                  disabled={isCapturingMemory}
+                  className="px-3 py-1.5 text-xs bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30 rounded-lg transition-colors disabled:opacity-50"
+                >
+                  {isCapturingMemory ? 'Capturing...' : 'Refresh Capture'}
+                </button>
+              </div>
               <p className="text-white/70 text-sm mb-4">
-                FlowSwitch has detected {mockCurrentApps.length} apps currently running. This will capture their positions and sizes.
+                {memoryCapture
+                  ? `FlowSwitch detected ${totalCapturedApps} running apps across ${memoryCapture.monitors.length} monitor(s).`
+                  : 'Capture your currently running applications and estimated positions.'}
               </p>
+              {memoryCaptureError && (
+                <p className="text-red-300 text-xs mb-3">{memoryCaptureError}</p>
+              )}
               
               <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <h5 className="text-white/80 text-sm mb-2">Monitor 1</h5>
-                  <div className="space-y-2">
-                    {mockCurrentApps.filter(app => app.monitor === 'Monitor 1').map((app, index) => (
-                      <div key={index} className="flex items-center gap-2 text-white/70 text-sm">
-                        <div 
-                          className="w-4 h-4 rounded flex items-center justify-center"
-                          style={{ backgroundColor: `${app.color}40` }}
-                        >
-                          <app.icon className="w-2.5 h-2.5 text-white" />
-                        </div>
-                        <span>{app.name}</span>
-                        <span className="text-white/50 text-xs">
-                          {Math.round(app.size.width)}% × {Math.round(app.size.height)}%
-                        </span>
-                      </div>
-                    ))}
+                {memoryCapture?.monitors.map((monitor) => (
+                  <div key={monitor.id}>
+                    <h5 className="text-white/80 text-sm mb-2">{monitor.name}</h5>
+                    <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-elegant">
+                      {monitor.apps.map((app, index) => {
+                        const meta = appMetaByName[app.name.toLowerCase()];
+                        return (
+                          <div key={`${app.name}-${index}`} className="flex items-center gap-2 text-white/70 text-sm">
+                            <div
+                              className="w-4 h-4 rounded flex items-center justify-center"
+                              style={{ backgroundColor: `${(meta?.color || '#666666')}40` }}
+                            >
+                              {app.iconPath ? (
+                                <img src={app.iconPath} alt={app.name} className="w-3 h-3 object-contain rounded" />
+                              ) : (
+                                <Settings className="w-2.5 h-2.5 text-white" />
+                              )}
+                            </div>
+                            <span className="truncate">{app.name}</span>
+                            <span className="text-white/50 text-xs">
+                              {Math.round(app.size.width)}% x {Math.round(app.size.height)}%
+                            </span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-                <div>
-                  <h5 className="text-white/80 text-sm mb-2">Monitor 2</h5>
-                  <div className="space-y-2">
-                    {mockCurrentApps.filter(app => app.monitor === 'Monitor 2').map((app, index) => (
-                      <div key={index} className="flex items-center gap-2 text-white/70 text-sm">
-                        <div 
-                          className="w-4 h-4 rounded flex items-center justify-center"
-                          style={{ backgroundColor: `${app.color}40` }}
-                        >
-                          <app.icon className="w-2.5 h-2.5 text-white" />
-                        </div>
-                        <span>{app.name}</span>
-                        <span className="text-white/50 text-xs">
-                          {Math.round(app.size.width)}% × {Math.round(app.size.height)}%
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                </div>
+                ))}
               </div>
             </div>
           </div>
@@ -383,7 +479,11 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
           </button>
           <button 
             onClick={creationMode === 'manual' ? createManualProfile : createMemoryProfile}
-            disabled={!profileName.trim() || (creationMode === 'manual' && selectedApps.length === 0)}
+            disabled={
+              !profileName.trim()
+              || (creationMode === 'manual' && selectedApps.length === 0)
+              || (creationMode === 'memory' && totalCapturedApps === 0)
+            }
             className="flex-1 px-4 py-2 bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-400/30 rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             Create Profile

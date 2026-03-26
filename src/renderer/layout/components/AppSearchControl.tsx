@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, X, Shield, AlertCircle } from 'lucide-react';
+import { useInstalledApps } from '../../hooks/useInstalledApps';
 
 interface AppSearchControlProps {
   restrictedApps: string[];
@@ -32,7 +33,7 @@ const fallbackApps = [
   'Pinterest', 'Reddit', 'YouTube',
   'VMware', 'VirtualBox', 'Docker', 'Postman', 'Chrome DevTools',
   'Firefox Developer Edition', 'Node.js', 'Python', 'Java',
-].sort();
+].sort().map((name) => ({ name, iconPath: null }));
 
 export function AppSearchControl({ 
   restrictedApps, 
@@ -41,20 +42,7 @@ export function AppSearchControl({
 }: AppSearchControlProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
-  const [availableApps, setAvailableApps] = useState<string[]>(fallbackApps);
-
-  // Try to fetch installed apps from main process via IPC on mount
-  useEffect(() => {
-    if (window.electron && typeof window.electron.getInstalledApps === 'function') {
-      window.electron.getInstalledApps()
-        .then((apps: string[]) => {
-          if (Array.isArray(apps) && apps.length > 0) setAvailableApps(apps.sort());
-        })
-        .catch(() => setAvailableApps(fallbackApps));
-    } else {
-      setAvailableApps(fallbackApps);
-    }
-  }, []);
+  const availableApps = useInstalledApps(fallbackApps).map((app) => app.name);
 
   // Filter apps based on search query
   const filteredApps = useMemo(() => {

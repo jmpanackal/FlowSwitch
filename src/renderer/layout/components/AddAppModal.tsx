@@ -1,9 +1,11 @@
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { X, Search, Plus, Monitor, Globe, Code, MessageCircle, Music, Calendar, Mail, Terminal, Camera, BarChart3, FileText, Settings } from "lucide-react";
+import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface App {
   name: string;
   icon: any;
+  iconPath?: string | null;
   color: string;
   position: { x: number; y: number };
   size: { width: number; height: number };
@@ -32,7 +34,7 @@ interface AddAppModalProps {
   allowMonitorSelection?: boolean;
 }
 
-const availableApps = [
+const fallbackApps = [
   { name: 'Chrome', icon: Globe, color: '#4285F4' },
   { name: 'VS Code', icon: Code, color: '#007ACC' },
   { name: 'Terminal', icon: Terminal, color: '#000000' },
@@ -46,6 +48,10 @@ const availableApps = [
   { name: 'Notes', icon: FileText, color: '#FFA500' },
   { name: 'Calculator', icon: Settings, color: '#666666' },
 ];
+
+const appMetaByName = Object.fromEntries(
+  fallbackApps.map((app) => [app.name.toLowerCase(), app]),
+);
 
 export function AddAppModal({ 
   isOpen, 
@@ -61,11 +67,27 @@ export function AddAppModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonitor, setSelectedMonitor] = useState(monitorId || (monitors.length > 0 ? monitors[0].id : ''));
   const [selectedApp, setSelectedApp] = useState<any>(null);
-
-  const filteredApps = availableApps.filter(app =>
-    app.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-    !existingApps.some(existing => existing.name === app.name)
+  const installedApps = useInstalledApps(
+    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
   );
+  const availableApps = useMemo(() => (
+    installedApps.map((app) => {
+      const meta = appMetaByName[app.name.toLowerCase()];
+      return {
+        name: app.name,
+        icon: meta?.icon || Settings,
+        color: meta?.color || '#666666',
+        iconPath: app.iconPath,
+      };
+    })
+  ), [installedApps]);
+
+  const filteredApps = useMemo(() => (
+    availableApps.filter((app) =>
+      app.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
+      !existingApps.some((existing) => existing.name === app.name),
+    )
+  ), [availableApps, existingApps, searchTerm]);
 
   const handleAddApp = () => {
     if (!selectedApp) return;
@@ -77,6 +99,7 @@ export function AddAppModal({
     const newApp = {
       name: selectedApp.name,
       icon: selectedApp.icon,
+      iconPath: selectedApp.iconPath ?? null,
       color: selectedApp.color,
       position: { x: 50, y: 50 },
       size: { 
@@ -184,7 +207,11 @@ export function AddAppModal({
                       className="w-10 h-10 rounded-lg flex items-center justify-center"
                       style={{ backgroundColor: `${app.color}20` }}
                     >
-                      <IconComponent className="w-5 h-5" style={{ color: app.color }} />
+                      {app.iconPath ? (
+                        <img src={app.iconPath} alt={app.name} className="w-5 h-5 object-contain rounded" />
+                      ) : (
+                        <IconComponent className="w-5 h-5" style={{ color: app.color }} />
+                      )}
                     </div>
                     <span className="text-sm font-medium">{app.name}</span>
                   </button>
