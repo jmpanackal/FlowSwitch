@@ -1,4 +1,11 @@
-import { useState } from "react";
+// Type guards for app types
+function isFallbackApp(app: AppType): app is FallbackApp {
+  return 'icon' in app && typeof app.icon === 'function';
+}
+function isDiscoveredApp(app: AppType): app is DiscoveredApp {
+  return 'iconPath' in app;
+}
+import { useState, useEffect } from "react";
 import { Search, Settings, Trash2, Users, Monitor, Volume2, VolumeX, Shield, Power, Save, Filter, Move } from "lucide-react";
 import { Globe, FileText, MessageCircle, Code, Music, Calendar, Mail, Terminal, Camera, BarChart3 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
@@ -14,19 +21,43 @@ interface AppManagerProps {
   compact?: boolean;
 }
 
-const allApps = [
-  { name: 'Chrome', icon: Globe, color: '#4285F4', category: 'Browser' },
-  { name: 'VS Code', icon: Code, color: '#007ACC', category: 'Development' },
-  { name: 'Terminal', icon: Terminal, color: '#000000', category: 'Development' },
-  { name: 'Slack', icon: MessageCircle, color: '#4A154B', category: 'Communication' },
-  { name: 'Discord', icon: MessageCircle, color: '#5865F2', category: 'Communication' },
-  { name: 'Spotify', icon: Music, color: '#1DB954', category: 'Media' },
-  { name: 'Calendar', icon: Calendar, color: '#EA4335', category: 'Productivity' },
-  { name: 'Mail', icon: Mail, color: '#1565C0', category: 'Productivity' },
-  { name: 'Notes', icon: FileText, color: '#FFA500', category: 'Productivity' },
-  { name: 'Camera', icon: Camera, color: '#8B5CF6', category: 'Media' },
-  { name: 'Analytics', icon: BarChart3, color: '#FF6B35', category: 'Business' },
+
+
+// Types for discovered and fallback apps
+type DiscoveredApp = {
+  name: string;
+  iconPath: string | null;
+  icon?: undefined;
+  color?: string;
+  category?: string;
+  firstLetter?: string;
+};
+type FallbackApp = {
+  name: string;
+  icon: LucideIcon;
+  color: string;
+  category: string;
+  firstLetter?: string;
+  iconPath?: undefined;
+};
+type AppType = DiscoveredApp | FallbackApp;
+
+const fallbackApps: FallbackApp[] = [
+  { name: 'Chrome', icon: Globe, color: '#4285F4', category: 'Browser', firstLetter: 'C' },
+  { name: 'VS Code', icon: Code, color: '#007ACC', category: 'Development', firstLetter: 'V' },
+  { name: 'Terminal', icon: Terminal, color: '#000000', category: 'Development', firstLetter: 'T' },
+  { name: 'Slack', icon: MessageCircle, color: '#4A154B', category: 'Communication', firstLetter: 'S' },
+  { name: 'Discord', icon: MessageCircle, color: '#5865F2', category: 'Communication', firstLetter: 'D' },
+  { name: 'Spotify', icon: Music, color: '#1DB954', category: 'Media', firstLetter: 'S' },
+  { name: 'Calendar', icon: Calendar, color: '#EA4335', category: 'Productivity', firstLetter: 'C' },
+  { name: 'Mail', icon: Mail, color: '#1565C0', category: 'Productivity', firstLetter: 'M' },
+  { name: 'Notes', icon: FileText, color: '#FFA500', category: 'Productivity', firstLetter: 'N' },
+  { name: 'Camera', icon: Camera, color: '#8B5CF6', category: 'Media', firstLetter: 'C' },
+  { name: 'Analytics', icon: BarChart3, color: '#FF6B35', category: 'Business', firstLetter: 'A' },
 ];
+
+// Map of known app names to icon/color/category for enrichment
+const appMeta = Object.fromEntries(fallbackApps.map(app => [app.name.toLowerCase(), app]));
 
 export function AppManager({ 
   profiles, 
@@ -43,13 +74,80 @@ export function AppManager({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAppSettings, setShowAppSettings] = useState(false);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
+  const [allApps, setAllApps] = useState<AppType[]>(fallbackApps);
+  const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
+
+  // On mount, try to fetch installed apps from main process
+  useEffect(() => {
+    let cancelled = false;
+    if (window.electron && typeof window.electron.getInstalledApps === 'function') {
+      window.electron.getInstalledApps()
+        .then((apps: { name: string; iconPath: string | null }[]) => {
+          if (!cancelled && Array.isArray(apps) && apps.length > 0) {
+            setAllApps(apps.map(app => {
+              const meta = appMeta[app.name.toLowerCase()];
+              if (meta) {
+                // Remove icon property for discovered apps to match DiscoveredApp type
+                const { icon, ...rest } = meta;
+                return { ...rest, iconPath: app.iconPath };
+              }
+              return {
+                name: app.name,
+                iconPath: app.iconPath,
+                color: '#888',
+                category: 'Other',
+                firstLetter: app.name.charAt(0).toUpperCase(),
+              };
+            }));
+          }
+        })
+        .catch(() => setAllApps(fallbackApps));
+    }
+    return () => { cancelled = true; };
+  }, []);
+
+
+  // Helper to get last accessed and size for discovered apps (from iconPath/exePath if available)
+  function getAppFileStats(app: AppType) {
+    if (isDiscoveredApp(app) && app.iconPath) {
+      // Try to extract the .ico file name from appicon:// protocol
+      try {
+        const icoFile = app.iconPath.startsWith('appicon://') ? app.iconPath.replace('appicon://', '') : null;
+        if (icoFile) {
+          // The .ico files are stored in userData/app-icons, but we can't access fs from renderer.
+          // Instead, try to get stats from a cached property if available (future improvement).
+          // For now, return nulls.
+          return { lastAccessed: 0, size: 0 };
+        }
+      } catch {
+        return { lastAccessed: 0, size: 0 };
+      }
+    }
+    return { lastAccessed: 0, size: 0 };
+  }
 
   const categories = Array.from(new Set(allApps.map(app => app.category)));
-  
-  const filteredApps = allApps.filter(app => {
+  let filteredApps = allApps.filter(app => {
     const matchesSearch = app.name.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = !selectedCategory || app.category === selectedCategory;
     return matchesSearch && matchesCategory;
+  });
+
+  // Sorting logic
+  filteredApps = filteredApps.slice().sort((a, b) => {
+    if (sortOption === 'name') {
+      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
+    } else if (sortOption === 'lastAccessed') {
+      // Placeholder: all 0 for now, but structure is ready for future real data
+      const aStats = getAppFileStats(a);
+      const bStats = getAppFileStats(b);
+      return bStats.lastAccessed - aStats.lastAccessed;
+    } else if (sortOption === 'size') {
+      const aStats = getAppFileStats(a);
+      const bStats = getAppFileStats(b);
+      return bStats.size - aStats.size;
+    }
+    return 0;
   });
 
   const getAppUsage = (appName: string) => {
@@ -144,7 +242,11 @@ export function AppManager({
     
     const preview = (
       <div className="flex items-center gap-2">
-        <app.icon className="w-4 h-4" style={{ color: app.color }} />
+        {app.iconPath ? (
+          <img src={app.iconPath} alt={app.name} className="w-4 h-4 rounded" />
+        ) : (
+          app.icon && <app.icon className="w-4 h-4" style={{ color: app.color }} />
+        )}
         <span>{app.name}</span>
       </div>
     );
@@ -176,6 +278,7 @@ export function AppManager({
         </div>
 
         {/* Search and Filters - CLEAN: Consistent with content section */}
+
         <div className="space-y-3 mb-4">
           {/* Search Bar */}
           <div className="relative">
@@ -189,7 +292,7 @@ export function AppManager({
             />
           </div>
 
-          {/* Category Filter - Compact design */}
+          {/* Category and Sort Filter - Compact design */}
           <div className="flex items-center gap-2">
             <select
               value={selectedCategory || ''}
@@ -197,12 +300,21 @@ export function AppManager({
               className="flex-1 px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
               title="Filter by category"
             >
-              <option value="">All Categories</option>
-              {categories.map(category => (
-                <option key={category} value={category}>{category}</option>
+              <option value="">All</option>
+              {categories.map((cat) => (
+                <option key={cat || 'other'} value={cat || ''}>{cat || 'Other'}</option>
               ))}
             </select>
-
+            <select
+              value={sortOption}
+              onChange={e => setSortOption(e.target.value as 'name' | 'lastAccessed' | 'size')}
+              className="px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
+              title="Sort apps"
+            >
+              <option value="name">A-Z</option>
+              <option value="lastAccessed">Last Opened</option>
+              <option value="size">Size</option>
+            </select>
             <button
               onClick={() => setExpandedApp(expandedApp ? null : 'toggle-all')}
               className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded transition-colors ${
@@ -229,7 +341,6 @@ export function AppManager({
           {filteredApps.map((app, index) => {
             const usage = getAppUsage(app.name);
             const isExpanded = expandedApp === app.name || expandedApp === 'toggle-all';
-            
             return (
               <div 
                 key={index} 
@@ -237,14 +348,54 @@ export function AppManager({
               >
                 <div className="flex items-center gap-3 p-3">
                   <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform hover:scale-105 select-none"
-                    style={{ backgroundColor: `${app.color}20` }}
+                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform hover:scale-105 select-none relative"
+                    style={{ backgroundColor: `${app.color ?? '#888'}20` }}
                     onMouseDown={(e) => handleMouseDown(e, app)}
                     title="Drag to add to monitor or minimized apps"
                   >
-                    <app.icon className="w-4 h-4 text-white" />
+                    {isDiscoveredApp(app) && app.iconPath ? (
+                      <img
+                        src={app.iconPath}
+                        alt={app.name}
+                        className="w-6 h-6 object-contain rounded"
+                        draggable={false}
+                        onError={e => {
+                          // Hide broken image and show fallback below
+                          const target = e.target as HTMLImageElement;
+                          target.style.display = 'none';
+                          const fallback = target.nextElementSibling as HTMLElement;
+                          if (fallback) fallback.style.display = 'flex';
+                        }}
+                      />
+                    ) : null}
+                    {/* Fallback: Lucide icon or first letter */}
+                    {isFallbackApp(app) ? (
+                      <app.icon className="w-4 h-4 text-white" />
+                    ) : null}
+                    {!isFallbackApp(app) && 'firstLetter' in app && app.firstLetter ? (
+                      <span className="absolute bottom-0 right-0 bg-gray-800 text-white text-[10px] font-bold rounded px-1 pb-0.5 leading-none border border-white/10 pointer-events-none">
+                        {app.firstLetter}
+                      </span>
+                    ) : null}
+                    {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
+                    {isDiscoveredApp(app) && app.iconPath ? (() => {
+                      if (isFallbackApp(app)) {
+                        const fallbackApp = app as FallbackApp;
+                        const FallbackIcon = fallbackApp.icon;
+                        return (
+                          <div style={{display:'none'}} className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded">
+                            <FallbackIcon className="w-4 h-4 text-white" />
+                          </div>
+                        );
+                      } else {
+                        return (
+                          <div style={{display:'none'}} className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded">
+                            {app.firstLetter ? app.firstLetter : <span className="text-white text-xs">?</span>}
+                          </div>
+                        );
+                      }
+                    })() : null}
                   </div>
-                  
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
                       <h4 className="text-flow-text-primary text-sm font-medium truncate">{app.name}</h4>
@@ -253,10 +404,10 @@ export function AppManager({
                           <span className="text-yellow-400 text-xs" title="Run as Admin">⚡</span>
                         )}
                         {usage.forceCloseOnExit && (
-                          <Power className="w-3 h-3 text-flow-accent-red" title="Force Close" />
+                          <Power className="w-3 h-3 text-flow-accent-red" />
                         )}
                         {usage.smartSave && (
-                          <Save className="w-3 h-3 text-flow-accent-green" title="Smart Save" />
+                          <Save className="w-3 h-3 text-flow-accent-green" />
                         )}
                       </div>
                     </div>
@@ -270,7 +421,6 @@ export function AppManager({
                       )}
                     </div>
                   </div>
-                  
                   <button
                     onClick={() => setExpandedApp(isExpanded ? null : app.name)}
                     className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
@@ -279,7 +429,6 @@ export function AppManager({
                     <Settings className="w-3 h-3" />
                   </button>
                 </div>
-
                 {/* Expanded Details - CLEAN: More compact */}
                 {isExpanded && usage.profiles.length > 0 && (
                   <div className="px-3 pb-3 space-y-1">
