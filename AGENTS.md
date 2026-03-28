@@ -25,6 +25,21 @@ This file is the repository-level source of truth for git workflow and change cl
 - Slug must be lowercase kebab-case (`a-z`, `0-9`, `-` only)
 - Branch intent must match change intent (`fix/*` for bug fixes, `feature/*` for features)
 
+## Branch Relevance Gate (Mandatory)
+
+Before making edits or creating commits, enforce branch-scope alignment:
+
+1. Identify the change intent (`fix`, `feature`, `chore`, `hotfix`).
+2. Compare intent against current branch name and purpose.
+3. If scope does not match, stop and move work to the correct branch before editing/committing.
+
+Hard rules:
+
+- Do not place docs/process/tooling-only changes on a `fix/*` branch unless they are required to deliver that fix.
+- Do not mix unrelated concerns in the same branch (for example, runtime bugfix + QA policy docs).
+- If a request contains multiple unrelated concerns, split into separate branches before first commit.
+- If a mismatch is discovered after local commits, split history into scoped branches before pushing.
+
 ## Safety Rules
 
 - Do not use destructive git commands unless explicitly requested.
@@ -41,6 +56,10 @@ git status --short
 git push
 git checkout <target-branch>
 ```
+
+Exception:
+
+- During branch-hygiene correction (splitting unrelated local commits), branch switching is allowed before push to avoid publishing mixed-scope history.
 
 ## Default QA Protocol (After Every Code Change)
 
