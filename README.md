@@ -55,8 +55,6 @@ src/
 ├── types/
 │   └── profile.ts        # Shared Profile & Action types
 ├── preload.js            # Exposes Electron APIs to frontend securely
-mock-data/
-└── profile-work.json     # Sample profile file
 ```
 
 ### Run Commands

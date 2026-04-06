@@ -5,6 +5,10 @@ const ws = require('windows-shortcuts');
 const { scanForExeFiles } = require('./scanExeFiles');
 const { getRegistryInstalledApps } = require('./registryApps');
 const {
+  readProfilesFromDisk,
+  writeProfilesToDisk,
+} = require('./services/profile-store');
+const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
@@ -350,42 +354,59 @@ app.on('second-instance', () => {
   existingWindow.focus();
 });
 
-// Listen for 'launch-profile' IPC events from the renderer process
-ipcMain.on('launch-profile', (event) => {
-  const filePath = path.join(__dirname, '../../mock-data/profile-work.json');
-
+ipcMain.handle('profiles:list', async () => {
   try {
-    const profileJson = fs.readFileSync(filePath, 'utf-8');
-    const profile = JSON.parse(profileJson);
+    return readProfilesFromDisk();
+  } catch (error) {
+    console.error('[profiles:list] Failed to list profiles:', error);
+    return [];
+  }
+});
+
+ipcMain.handle('profiles:save-all', async (_event, profiles) => {
+  try {
+    const savedProfiles = writeProfilesToDisk(profiles);
+    return { ok: true, count: savedProfiles.length };
+  } catch (error) {
+    console.error('[profiles:save-all] Failed to save profiles:', error);
+    return { ok: false, error: 'Failed to save profiles' };
+  }
+});
+
+// Listen for 'launch-profile' IPC events from the renderer process
+ipcMain.on('launch-profile', (event, profileId) => {
+  try {
+    const profiles = readProfilesFromDisk();
+    const profile = profiles.find((candidate) => candidate?.id === profileId);
+
+    if (!profile) {
+      event.reply('profile-loaded', { error: 'Profile not found' });
+      return;
+    }
 
     // Send profile back to React
     event.reply('profile-loaded', profile);
+
+    const actions = Array.isArray(profile.actions) ? profile.actions : [];
+    if (actions.length === 0) return;
 
     // Require node modules for launching things
     const { spawn } = require('child_process');
     const { shell } = require('electron');
 
     // Loop through each action in the profile
-    for (const action of profile.actions) {
-      if (action.type === 'app') {
-        // 🟢 Launch an executable app
-
-        // Use spawn to run the app. `{ detached: true }` means it won’t block Electron.
+    for (const action of actions) {
+      if (action?.type === 'app' && action.path) {
         spawn(action.path, {
           detached: true,
-          stdio: 'ignore' // prevent Electron from listening to output
-        }).unref(); // allow child process to live on its own
-
-      } else if (action.type === 'browserTab') {
-        // 🌐 Open a browser URL
-
-        // Open the URL in the user's default browser
+          stdio: 'ignore',
+        }).unref();
+      } else if (action?.type === 'browserTab' && action.url) {
         shell.openExternal(action.url);
       }
     }
-
   } catch (err) {
-    console.error('❌ Failed to load or launch profile:', err);
+    console.error('Failed to load or launch profile:', err);
     event.reply('profile-loaded', { error: 'Failed to load profile' });
   }
 });

@@ -12,6 +12,7 @@ type UseInstalledAppsOptions = {
    * (e.g. running renderer standalone in browser).
    */
   allowFallbackWithoutElectron?: boolean;
+  fallbackApps?: InstalledApp[];
 };
 
 const CACHE_TTL_MS = 5 * 60 * 1000;
@@ -59,10 +60,9 @@ function fetchInstalledAppsShared(): Promise<InstalledApp[]> {
 }
 
 export function useInstalledApps(
-  fallbackApps: InstalledApp[],
   options: UseInstalledAppsOptions = {},
 ) {
-  const { allowFallbackWithoutElectron = false } = options;
+  const { allowFallbackWithoutElectron = false, fallbackApps = [] } = options;
   const hasElectronBridge = !!window.electron && typeof window.electron.getInstalledApps === 'function';
   const [apps, setApps] = useState<InstalledApp[]>(
     hasElectronBridge ? [] : (allowFallbackWithoutElectron ? fallbackApps : []),

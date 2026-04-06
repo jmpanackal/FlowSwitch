@@ -139,216 +139,6 @@ const DEFAULT_APP_MAPPINGS = {
   'folder': 'File Explorer'
 };
 
-// Sample folders and content data with better relationships
-const SAMPLE_FOLDERS: ContentFolder[] = [
-  {
-    id: 'folder-dev',
-    name: 'Development',
-    type: 'folder',
-    contentType: 'mixed',
-    children: ['link-github', 'file-app-tsx', 'folder-dev-docs'],
-    isExpanded: false,
-    isFavorite: true,
-    lastUsed: '2024-01-15',
-    defaultApp: 'Visual Studio Code'
-  },
-  {
-    id: 'folder-dev-docs',
-    name: 'Documentation',
-    type: 'folder',
-    contentType: 'link',
-    parentId: 'folder-dev',
-    children: ['link-figma', 'link-api-docs'],
-    isExpanded: false,
-    isFavorite: false,
-    lastUsed: '2024-01-14',
-    defaultApp: 'Chrome'
-  },
-  {
-    id: 'folder-work',
-    name: 'Work Documents',
-    type: 'folder',
-    contentType: 'file',
-    children: ['file-specs', 'file-budget', 'file-presentation'],
-    isExpanded: false,
-    isFavorite: false,
-    lastUsed: '2024-01-13',
-    defaultApp: 'File Explorer'
-  },
-  {
-    id: 'folder-media',
-    name: 'Media & Entertainment',
-    type: 'folder',
-    contentType: 'mixed',
-    children: ['file-screenshots', 'link-youtube', 'link-spotify'],
-    isExpanded: false,
-    isFavorite: true,
-    lastUsed: '2024-01-12',
-    defaultApp: 'VLC Media Player'
-  }
-];
-
-const SAMPLE_CONTENT: ContentItem[] = [
-  // Development folder contents
-  {
-    id: 'link-github',
-    type: 'link',
-    name: 'GitHub Dashboard',
-    url: 'https://github.com/dashboard',
-    defaultApp: 'Chrome',
-    description: 'Main GitHub workspace for project management and code reviews',
-    parentId: 'folder-dev',
-    isFavorite: true,
-    lastUsed: '2024-01-15',
-    dateAdded: '2024-01-10'
-  },
-  {
-    id: 'file-app-tsx',
-    type: 'file',
-    name: 'app.tsx',
-    path: 'C:\\Projects\\flowswitch\\src\\app.tsx',
-    fileType: 'tsx',
-    defaultApp: 'Visual Studio Code',
-    description: 'Main application component file containing the root React component',
-    parentId: 'folder-dev',
-    isFavorite: true,
-    lastUsed: '2024-01-16',
-    dateAdded: '2024-01-04'
-  },
-  
-  // Documentation subfolder contents
-  {
-    id: 'link-figma',
-    type: 'link',
-    name: 'Figma Design System',
-    url: 'https://figma.com/files/design-system',
-    defaultApp: 'Chrome',
-    description: 'UI component library and design tokens for consistent interface design',
-    parentId: 'folder-dev-docs',
-    isFavorite: false,
-    lastUsed: '2024-01-14',
-    dateAdded: '2024-01-09'
-  },
-  {
-    id: 'link-api-docs',
-    type: 'link',
-    name: 'API Documentation',
-    url: 'https://docs.api.com',
-    defaultApp: 'Chrome',
-    description: 'REST API reference with endpoints, authentication, and examples',
-    parentId: 'folder-dev-docs',
-    isFavorite: false,
-    lastUsed: '2024-01-13',
-    dateAdded: '2024-01-08'
-  },
-  
-  // Work folder contents
-  {
-    id: 'file-specs',
-    type: 'file',
-    name: 'Project Specs.pdf',
-    path: 'C:\\Documents\\Projects\\specs.pdf',
-    fileType: 'pdf',
-    defaultApp: 'Adobe Acrobat',
-    description: 'Technical specifications and requirements document for the current project',
-    parentId: 'folder-work',
-    isFavorite: false,
-    lastUsed: '2024-01-13',
-    dateAdded: '2024-01-07'
-  },
-  {
-    id: 'file-budget',
-    type: 'file',
-    name: 'Budget Template.xlsx',
-    path: 'C:\\Documents\\Templates\\budget.xlsx',
-    fileType: 'xlsx',
-    defaultApp: 'Microsoft Excel',
-    description: 'Financial planning template with formulas for project cost tracking',
-    parentId: 'folder-work',
-    isFavorite: false,
-    lastUsed: '2024-01-12',
-    dateAdded: '2024-01-06'
-  },
-  {
-    id: 'file-presentation',
-    type: 'file',
-    name: 'Q4 Review.pptx',
-    path: 'C:\\Documents\\Presentations\\Q4-review.pptx',
-    fileType: 'pptx',
-    defaultApp: 'Microsoft PowerPoint',
-    description: 'Quarterly business review presentation with performance metrics and goals',
-    parentId: 'folder-work',
-    isFavorite: true,
-    lastUsed: '2024-01-11',
-    dateAdded: '2024-01-05'
-  },
-  
-  // Media folder contents
-  {
-    id: 'file-screenshots',
-    type: 'file',
-    name: 'Screenshots',
-    path: 'C:\\Users\\Desktop\\Screenshots',
-    fileType: 'folder',
-    isFolder: true,
-    defaultApp: 'File Explorer',
-    description: 'UI mockups and screenshots folder for design reference and documentation',
-    parentId: 'folder-media',
-    isFavorite: true,
-    lastUsed: '2024-01-11',
-    dateAdded: '2024-01-05'
-  },
-  {
-    id: 'link-youtube',
-    type: 'link',
-    name: 'YouTube Music',
-    url: 'https://music.youtube.com',
-    defaultApp: 'Chrome',
-    description: 'Music streaming service for background music during work sessions',
-    parentId: 'folder-media',
-    isFavorite: true,
-    lastUsed: '2024-01-16',
-    dateAdded: '2024-01-08'
-  },
-  {
-    id: 'link-spotify',
-    type: 'link',
-    name: 'Spotify Web Player',
-    url: 'https://open.spotify.com',
-    defaultApp: 'Chrome',
-    description: 'Alternative music streaming platform with curated playlists',
-    parentId: 'folder-media',
-    isFavorite: false,
-    lastUsed: '2024-01-10',
-    dateAdded: '2024-01-03'
-  },
-  
-  // Root level items (no parentId)
-  {
-    id: 'link-email',
-    type: 'link',
-    name: 'Gmail',
-    url: 'https://mail.google.com',
-    defaultApp: 'Chrome',
-    description: 'Primary email client for personal and work communication',
-    isFavorite: true,
-    lastUsed: '2024-01-16',
-    dateAdded: '2024-01-01'
-  },
-  {
-    id: 'file-notes',
-    type: 'file',
-    name: 'Daily Notes.txt',
-    path: 'C:\\Users\\Documents\\notes.txt',
-    fileType: 'txt',
-    defaultApp: 'Notepad',
-    description: 'Personal notes file for quick thoughts and reminders',
-    isFavorite: false,
-    lastUsed: '2024-01-15',
-    dateAdded: '2024-01-02'
-  }
-];
-
 type SortOption = 'name' | 'lastUsed' | 'dateAdded' | 'type' | 'favorites';
 type ViewMode = 'normal' | 'detailed' | 'simplified';
 
@@ -360,8 +150,8 @@ export function ContentManager({
   onDragStart, 
   compact = false 
 }: ContentManagerProps) {
-  const [content, setContent] = useState<ContentItem[]>(SAMPLE_CONTENT);
-  const [folders, setFolders] = useState<ContentFolder[]>(SAMPLE_FOLDERS);
+  const [content, setContent] = useState<ContentItem[]>([]);
+  const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedType, setSelectedType] = useState<'all' | 'link' | 'file' | 'folder'>('all');
   const [sortBy, setSortBy] = useState<SortOption>('name');
@@ -375,6 +165,34 @@ export function ContentManager({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'link' | 'file'>('link');
   const [appDropdownOpen, setAppDropdownOpen] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!currentProfile) {
+      setContent([]);
+      setFolders([]);
+      setCurrentFolderId(null);
+      return;
+    }
+
+    const profileContent = Array.isArray(currentProfile.contentItems)
+      ? currentProfile.contentItems
+      : [];
+    const profileFolders = Array.isArray(currentProfile.contentFolders)
+      ? currentProfile.contentFolders
+      : [];
+
+    setContent(profileContent);
+    setFolders(profileFolders);
+    setCurrentFolderId(null);
+  }, [currentProfile?.id]);
+
+  useEffect(() => {
+    if (!currentProfile?.id || !onUpdateProfile) return;
+    onUpdateProfile(currentProfile.id, {
+      contentItems: content,
+      contentFolders: folders,
+    });
+  }, [content, folders, currentProfile?.id, onUpdateProfile]);
 
   // Timer and state for click vs drag detection
   const dragTimerRef = useRef<NodeJS.Timeout | null>(null);

@@ -1,14 +1,5 @@
-// Type guards for app types
-function isFallbackApp(app: AppType): app is FallbackApp {
-  return 'icon' in app && typeof app.icon === 'function';
-}
-function isDiscoveredApp(app: AppType): app is DiscoveredApp {
-  return 'iconPath' in app;
-}
 import { useMemo, useState } from "react";
-import { Search, Settings, Trash2, Users, Monitor, Volume2, VolumeX, Shield, Power, Save, Filter, Move } from "lucide-react";
-import { Globe, FileText, MessageCircle, Code, Music, Calendar, Mail, Terminal, Camera, BarChart3 } from "lucide-react";
-import { LucideIcon } from "lucide-react";
+import { Search, Settings, Trash2, Power, Save, Move } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface AppManagerProps {
@@ -24,42 +15,34 @@ interface AppManagerProps {
 
 
 
-// Types for discovered and fallback apps
-type DiscoveredApp = {
+type AppType = {
   name: string;
   iconPath: string | null;
   executablePath?: string | null;
-  icon?: undefined;
   color?: string;
   category?: string;
   firstLetter?: string;
 };
-type FallbackApp = {
-  name: string;
-  icon: LucideIcon;
-  color: string;
-  category: string;
-  firstLetter?: string;
-  iconPath?: undefined;
+
+const getStableColor = (name: string) => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
 };
-type AppType = DiscoveredApp | FallbackApp;
 
-const fallbackApps: FallbackApp[] = [
-  { name: 'Chrome', icon: Globe, color: '#4285F4', category: 'Browser', firstLetter: 'C' },
-  { name: 'VS Code', icon: Code, color: '#007ACC', category: 'Development', firstLetter: 'V' },
-  { name: 'Terminal', icon: Terminal, color: '#000000', category: 'Development', firstLetter: 'T' },
-  { name: 'Slack', icon: MessageCircle, color: '#4A154B', category: 'Communication', firstLetter: 'S' },
-  { name: 'Discord', icon: MessageCircle, color: '#5865F2', category: 'Communication', firstLetter: 'D' },
-  { name: 'Spotify', icon: Music, color: '#1DB954', category: 'Media', firstLetter: 'S' },
-  { name: 'Calendar', icon: Calendar, color: '#EA4335', category: 'Productivity', firstLetter: 'C' },
-  { name: 'Mail', icon: Mail, color: '#1565C0', category: 'Productivity', firstLetter: 'M' },
-  { name: 'Notes', icon: FileText, color: '#FFA500', category: 'Productivity', firstLetter: 'N' },
-  { name: 'Camera', icon: Camera, color: '#8B5CF6', category: 'Media', firstLetter: 'C' },
-  { name: 'Analytics', icon: BarChart3, color: '#FF6B35', category: 'Business', firstLetter: 'A' },
-];
-
-// Map of known app names to icon/color/category for enrichment
-const appMeta = Object.fromEntries(fallbackApps.map(app => [app.name.toLowerCase(), app]));
+const inferCategory = (name: string) => {
+  const normalized = name.toLowerCase();
+  if (/(chrome|firefox|edge|brave|vivaldi|opera|safari|browser)/.test(normalized)) return "Browser";
+  if (/(code|studio|terminal|intellij|pycharm|webstorm|developer)/.test(normalized)) return "Development";
+  if (/(discord|slack|teams|zoom|mail|outlook|telegram|whatsapp)/.test(normalized)) return "Communication";
+  if (/(spotify|music|vlc|media|camera|photos|video)/.test(normalized)) return "Media";
+  if (/(calendar|note|notion|office|word|excel|powerpoint|task)/.test(normalized)) return "Productivity";
+  if (/(steam|epic|game|xbox|battle\\.net|gog)/.test(normalized)) return "Gaming";
+  return "Other";
+};
 
 export function AppManager({ 
   profiles, 
@@ -77,44 +60,22 @@ export function AppManager({
   const [showAppSettings, setShowAppSettings] = useState(false);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
-  const installedApps = useInstalledApps(
-    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
-  );
+  const installedApps = useInstalledApps();
   const allApps = useMemo<AppType[]>(() => (
-    installedApps.map((app) => {
-      const meta = appMeta[app.name.toLowerCase()];
-      if (meta) {
-        const { icon, ...rest } = meta;
-        return { ...rest, iconPath: app.iconPath, executablePath: app.executablePath ?? null };
-      }
-      return {
-        name: app.name,
-        iconPath: app.iconPath,
-        executablePath: app.executablePath ?? null,
-        color: '#888',
-        category: 'Other',
-        firstLetter: app.name.charAt(0).toUpperCase(),
-      };
-    })
+    installedApps.map((app) => ({
+      name: app.name,
+      iconPath: app.iconPath,
+      executablePath: app.executablePath ?? null,
+      color: getStableColor(app.name),
+      category: inferCategory(app.name),
+      firstLetter: app.name.charAt(0).toUpperCase(),
+    }))
   ), [installedApps]);
 
 
-  // Helper to get last accessed and size for discovered apps (from iconPath/exePath if available)
+  // Last-accessed and executable size are not tracked yet in renderer.
   function getAppFileStats(app: AppType) {
-    if (isDiscoveredApp(app) && app.iconPath) {
-      // Try to extract the .ico file name from appicon:// protocol
-      try {
-        const icoFile = app.iconPath.startsWith('appicon://') ? app.iconPath.replace('appicon://', '') : null;
-        if (icoFile) {
-          // The .ico files are stored in userData/app-icons, but we can't access fs from renderer.
-          // Instead, try to get stats from a cached property if available (future improvement).
-          // For now, return nulls.
-          return { lastAccessed: 0, size: 0 };
-        }
-      } catch {
-        return { lastAccessed: 0, size: 0 };
-      }
-    }
+    void app;
     return { lastAccessed: 0, size: 0 };
   }
 
@@ -130,7 +91,6 @@ export function AppManager({
     if (sortOption === 'name') {
       return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
     } else if (sortOption === 'lastAccessed') {
-      // Placeholder: all 0 for now, but structure is ready for future real data
       const aStats = getAppFileStats(a);
       const bStats = getAppFileStats(b);
       return bStats.lastAccessed - aStats.lastAccessed;
@@ -225,7 +185,6 @@ export function AppManager({
       source: 'sidebar',
       type: 'app',
       name: app.name,
-      icon: app.icon,
       iconPath: app.iconPath ?? null,
       executablePath: app.executablePath ?? null,
       color: app.color,
@@ -238,7 +197,7 @@ export function AppManager({
         {app.iconPath ? (
           <img src={app.iconPath} alt={app.name} className="w-4 h-4 rounded" />
         ) : (
-          app.icon && <app.icon className="w-4 h-4" style={{ color: app.color }} />
+          <Settings className="w-4 h-4 text-white" />
         )}
         <span>{app.name}</span>
       </div>
@@ -346,7 +305,7 @@ export function AppManager({
                     onMouseDown={(e) => handleMouseDown(e, app)}
                     title="Drag to add to monitor or minimized apps"
                   >
-                    {isDiscoveredApp(app) && app.iconPath ? (
+                    {app.iconPath ? (
                       <img
                         src={app.iconPath}
                         alt={app.name}
@@ -362,22 +321,19 @@ export function AppManager({
                       />
                     ) : null}
                     {/* Fallback: Lucide icon or first letter */}
-                    {isFallbackApp(app) ? (
-                      <app.icon className="w-4 h-4 text-white" />
-                    ) : null}
-                    {!isFallbackApp(app) && 'firstLetter' in app && app.firstLetter ? (
+                    {'firstLetter' in app && app.firstLetter ? (
                       <span className="absolute bottom-0 right-0 bg-gray-800 text-white text-[10px] font-bold rounded px-1 pb-0.5 leading-none border border-white/10 pointer-events-none">
                         {app.firstLetter}
                       </span>
                     ) : null}
                     {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
-                    {isDiscoveredApp(app) && app.iconPath ? (
+                    {app.iconPath ? (
                       <div
                         data-icon-fallback="true"
                         style={{ display: 'none' }}
                         className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
                       >
-                        {app.firstLetter ? app.firstLetter : <span className="text-white text-xs">?</span>}
+                        {app.firstLetter ? app.firstLetter : <Settings className="w-3 h-3 text-white" />}
                       </div>
                     ) : null}
                   </div>
@@ -465,7 +421,7 @@ export function AppManager({
                     className="p-2 rounded-lg"
                     style={{ backgroundColor: `${selectedApp.color}20` }}
                   >
-                    <selectedApp.icon className="w-5 h-5 text-white" />
+                    <Settings className="w-5 h-5 text-white" />
                   </div>
                   <div>
                     <h3 className="text-flow-text-primary font-medium">{selectedApp.name}</h3>

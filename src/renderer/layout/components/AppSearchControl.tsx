@@ -8,33 +8,6 @@ interface AppSearchControlProps {
   placeholder?: string;
 }
 
-
-// Fallback: Expanded list of common applications for search
-const fallbackApps = [
-  'Chrome', 'Firefox', 'Safari', 'Edge', 'Opera', 'Brave', 'Vivaldi',
-  'Discord', 'Slack', 'Microsoft Teams', 'Zoom', 'Skype', 'WhatsApp', 'Telegram',
-  'Visual Studio Code', 'Visual Studio', 'IntelliJ IDEA', 'PyCharm', 'WebStorm',
-  'Android Studio', 'Xcode', 'Sublime Text', 'Atom', 'Notepad++',
-  'Photoshop', 'Illustrator', 'After Effects', 'Premiere Pro', 'Figma', 'Sketch',
-  'Canva', 'GIMP', 'Blender', 'Cinema 4D', 'Maya', 'Substance Painter',
-  'Steam', 'Epic Games Launcher', 'Origin', 'Battle.net', 'GOG Galaxy', 
-  'Xbox Game Pass', 'Minecraft', 'Roblox', 'Fortnite', 'League of Legends',
-  'Microsoft Word', 'Microsoft Excel', 'Microsoft PowerPoint', 'Microsoft Outlook',
-  'Google Drive', 'Dropbox', 'OneDrive', 'Notion', 'Obsidian', 'Evernote',
-  'Trello', 'Asana', 'Monday.com', 'Todoist',
-  'Spotify', 'Apple Music', 'YouTube Music', 'VLC Media Player', 'Netflix',
-  'Disney+', 'Amazon Prime Video', 'Twitch', 'OBS Studio',
-  'WinRAR', '7-Zip', 'CCleaner', 'Malwarebytes', 'Norton', 'Avast',
-  'TeamViewer', 'AnyDesk', 'FileZilla', 'PuTTY', 'Wireshark',
-  'Task Manager', 'Control Panel', 'Registry Editor', 'Command Prompt',
-  'PowerShell', 'File Explorer', 'Notepad', 'Calculator', 'Paint',
-  'QuickBooks', 'TurboTax', 'Sage', 'Xero', 'FreshBooks', 'Wave Accounting',
-  'Facebook', 'Instagram', 'Twitter', 'LinkedIn', 'TikTok', 'Snapchat',
-  'Pinterest', 'Reddit', 'YouTube',
-  'VMware', 'VirtualBox', 'Docker', 'Postman', 'Chrome DevTools',
-  'Firefox Developer Edition', 'Node.js', 'Python', 'Java',
-].sort().map((name) => ({ name, iconPath: null }));
-
 export function AppSearchControl({ 
   restrictedApps, 
   onUpdateRestrictedApps, 
@@ -42,7 +15,7 @@ export function AppSearchControl({
 }: AppSearchControlProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
-  const availableApps = useInstalledApps(fallbackApps).map((app) => app.name);
+  const availableApps = useInstalledApps().map((app) => app.name);
 
   // Filter apps based on search query
   const filteredApps = useMemo(() => {

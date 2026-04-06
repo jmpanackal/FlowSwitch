@@ -30,8 +30,36 @@ import {
   ChevronDown,
   Check,
 } from "lucide-react";
-import { initialProfiles } from "./data/initialProfiles";
 import { DragState, DragSourceType } from "./types/dragTypes";
+
+type FlowProfile = {
+  id: string;
+  name: string;
+  description: string;
+  icon: string;
+  appCount: number;
+  tabCount: number;
+  fileCount: number;
+  globalVolume: number;
+  backgroundBehavior: "keep" | "minimize" | "close";
+  restrictedApps: string[];
+  estimatedStartupTime: number;
+  onStartup: boolean;
+  autoLaunchOnBoot: boolean;
+  autoSwitchTime: string | null;
+  hotkey: string;
+  schedule?: any;
+  launchMinimized: boolean;
+  launchMaximized: boolean;
+  launchOrder: "all-at-once" | "sequential";
+  appLaunchDelays: Record<string, number>;
+  monitors: any[];
+  minimizedApps: any[];
+  minimizedFiles: any[];
+  files: any[];
+  browserTabs: any[];
+  [key: string]: any;
+};
 
 interface SelectedApp {
   type: "app" | "browser";
@@ -42,9 +70,10 @@ interface SelectedApp {
 }
 
 export default function App() {
-  const [profiles, setProfiles] = useState(initialProfiles);
+  const [profiles, setProfiles] = useState<FlowProfile[]>([]);
+  const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] =
-    useState<string>("work");
+    useState<string>("");
   const [isLaunching, setIsLaunching] = useState(false);
   const [isEditMode, setIsEditMode] = useState(false);
   const [
@@ -62,6 +91,97 @@ export default function App() {
     useState(false);
   const [showProfileDropdown, setShowProfileDropdown] =
     useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const normalizeProfile = (rawProfile: any): FlowProfile => ({
+      ...rawProfile,
+      id: String(rawProfile?.id || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
+      name: String(rawProfile?.name || "Untitled Profile"),
+      description: String(rawProfile?.description || "Profile without description"),
+      icon: String(rawProfile?.icon || "work"),
+      appCount: Number(rawProfile?.appCount || 0),
+      tabCount: Number(rawProfile?.tabCount || 0),
+      fileCount: Number(rawProfile?.fileCount || 0),
+      globalVolume: Number(rawProfile?.globalVolume || 70),
+      backgroundBehavior: (
+        rawProfile?.backgroundBehavior === "minimize"
+        || rawProfile?.backgroundBehavior === "close"
+      ) ? rawProfile.backgroundBehavior : "keep",
+      estimatedStartupTime: Number(rawProfile?.estimatedStartupTime || 3),
+      onStartup: Boolean(rawProfile?.onStartup),
+      autoLaunchOnBoot: Boolean(rawProfile?.autoLaunchOnBoot),
+      autoSwitchTime: rawProfile?.autoSwitchTime || null,
+      hotkey: rawProfile?.hotkey || "",
+      launchMinimized: Boolean(rawProfile?.launchMinimized),
+      launchMaximized: Boolean(rawProfile?.launchMaximized),
+      launchOrder: rawProfile?.launchOrder === "sequential" ? "sequential" : "all-at-once",
+      monitors: Array.isArray(rawProfile?.monitors) ? rawProfile.monitors : [],
+      minimizedApps: Array.isArray(rawProfile?.minimizedApps) ? rawProfile.minimizedApps : [],
+      minimizedFiles: Array.isArray(rawProfile?.minimizedFiles) ? rawProfile.minimizedFiles : [],
+      browserTabs: Array.isArray(rawProfile?.browserTabs) ? rawProfile.browserTabs : [],
+      files: Array.isArray(rawProfile?.files) ? rawProfile.files : [],
+      contentItems: Array.isArray(rawProfile?.contentItems) ? rawProfile.contentItems : [],
+      contentFolders: Array.isArray(rawProfile?.contentFolders) ? rawProfile.contentFolders : [],
+      restrictedApps: Array.isArray(rawProfile?.restrictedApps) ? rawProfile.restrictedApps : [],
+      appLaunchDelays: rawProfile?.appLaunchDelays && typeof rawProfile.appLaunchDelays === "object"
+        ? rawProfile.appLaunchDelays
+        : {},
+    });
+
+    const loadProfiles = async () => {
+      if (!window.electron?.listProfiles) {
+        if (!cancelled) setProfilesLoaded(true);
+        return;
+      }
+
+      try {
+        const storedProfiles = await window.electron.listProfiles();
+        if (cancelled) return;
+
+        const normalizedProfiles = Array.isArray(storedProfiles)
+          ? storedProfiles.map(normalizeProfile)
+          : [];
+        setProfiles(normalizedProfiles);
+        setSelectedProfile((prev) => prev || normalizedProfiles[0]?.id || "");
+      } catch (error) {
+        console.error("Failed to load persisted profiles:", error);
+      } finally {
+        if (!cancelled) setProfilesLoaded(true);
+      }
+    };
+
+    void loadProfiles();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!profilesLoaded) return;
+    if (!window.electron?.saveProfiles) return;
+
+    const timer = window.setTimeout(() => {
+      void window.electron.saveProfiles(profiles).catch((error) => {
+        console.error("Failed to save persisted profiles:", error);
+      });
+    }, 200);
+
+    return () => {
+      window.clearTimeout(timer);
+    };
+  }, [profiles, profilesLoaded]);
+
+  useEffect(() => {
+    if (!profilesLoaded) return;
+
+    setSelectedProfile((prev) => {
+      if (prev && profiles.some((profile) => profile.id === prev)) return prev;
+      return profiles[0]?.id || "";
+    });
+  }, [profiles, profilesLoaded]);
 
   // Ref for the dropdown container
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -82,10 +202,10 @@ export default function App() {
 
   const currentProfile = profiles.find(
     (p) => p.id === selectedProfile,
-  );
+  ) || null;
   const profileForSettings = profiles.find(
     (p) => p.id === selectedProfileForSettings,
-  );
+  ) || null;
 
   // FIXED: Document click listener for dropdown
   useEffect(() => {
@@ -173,7 +293,7 @@ export default function App() {
               instanceId: appData.instanceId,
               monitor: monitorId,
               tabCount: freshAppData.browserTabs.length,
-              tabs: freshAppData.browserTabs.map((t) => t.name),
+              tabs: freshAppData.browserTabs.map((t: any) => t.name),
             },
           );
         } else if (source === "minimized") {
@@ -186,7 +306,7 @@ export default function App() {
               browser: appData.name,
               instanceId: appData.instanceId,
               tabCount: freshAppData.browserTabs.length,
-              tabs: freshAppData.browserTabs.map((t) => t.name),
+              tabs: freshAppData.browserTabs.map((t: any) => t.name),
               rawAppData: {
                 name: appData.name,
                 instanceId: appData.instanceId,
@@ -823,7 +943,7 @@ export default function App() {
             (dragData.type === "content" && dragData.url)
           ) {
             // Create browser app instance with link as tab
-            const newApp = {
+            const newApp: any = {
               name: dragData.defaultApp,
               icon: getBrowserIcon(dragData.defaultApp),
               color: getBrowserColor(dragData.defaultApp),
@@ -856,7 +976,7 @@ export default function App() {
             addBrowserTab(currentProfile.id, newTab);
           } else {
             // Create app instance with file content
-            const newApp = {
+            const newApp: any = {
               name:
                 dragData.defaultApp ||
                 dragData.associatedApp ||
@@ -898,7 +1018,7 @@ export default function App() {
           }
         } else {
           // Add new app to monitor
-          const newApp = {
+          const newApp: any = {
             name: dragData.name,
             icon: dragData.icon,
             iconPath: dragData.iconPath ?? null,
@@ -966,7 +1086,7 @@ export default function App() {
             dragData,
           );
 
-          const newApp = {
+          const newApp: any = {
             name:
               dragData.defaultApp ||
               dragData.associatedApp ||
@@ -1027,7 +1147,7 @@ export default function App() {
           }
         } else {
           // Add new app to minimized
-          const newApp = {
+          const newApp: any = {
             name: dragData.name,
             icon: dragData.icon,
             iconPath: dragData.iconPath ?? null,
@@ -1130,7 +1250,7 @@ export default function App() {
 
             return {
               ...monitor,
-              apps: monitor.apps.map((app, index) =>
+              apps: monitor.apps.map((app: any, index: number) =>
                 index === appIndex
                   ? { ...app, ...updates }
                   : app,
@@ -1189,7 +1309,7 @@ export default function App() {
               if (monitor.id !== monitorId) return monitor;
 
               const updatedApps = monitor.apps.map(
-                (app, index) => {
+                (app: any, index: number) => {
                   if (index === draggedAppIndex) {
                     const updated = {
                       ...app,
@@ -1244,7 +1364,7 @@ export default function App() {
 
             return {
               ...monitor,
-              apps: monitor.apps.map((app, index) => {
+              apps: monitor.apps.map((app: any, index: number) => {
                 if (index === appIndex) {
                   const currentFiles =
                     app.associatedFiles || [];
@@ -1370,7 +1490,7 @@ export default function App() {
             return {
               ...monitor,
               apps: monitor.apps.filter(
-                (_, index) => index !== appIndex,
+                (_: any, index: number) => index !== appIndex,
               ),
             };
           }),
@@ -1478,7 +1598,7 @@ export default function App() {
         }
 
         // IMPORTANT: Remember the source monitor, not the primary monitor
-        const minimizedApp = {
+        const minimizedApp: any = {
           name: appToMove.name,
           icon: appToMove.icon,
           iconPath: (appToMove as any).iconPath ?? null,
@@ -1517,7 +1637,7 @@ export default function App() {
             return {
               ...monitor,
               apps: monitor.apps.filter(
-                (_, index) => index !== appIndex,
+                (_: any, index: number) => index !== appIndex,
               ),
             };
           }),
@@ -1639,7 +1759,7 @@ export default function App() {
               return {
                 ...monitor,
                 apps: monitor.apps.filter(
-                  (_, index) => index !== appIndex,
+                  (_: any, index: number) => index !== appIndex,
                 ),
               };
             } else if (monitor.id === targetMonitorId) {
@@ -1695,7 +1815,7 @@ export default function App() {
         ) {
           // Convert minimized app tabs back to main browserTabs format with instance ID
           const restoredTabs = minimizedApp.browserTabs.map(
-            (tab, tabIndex) => ({
+            (tab: any, tabIndex: number) => ({
               name: tab.name,
               url: tab.url,
               browser: minimizedApp.name,
@@ -1718,13 +1838,13 @@ export default function App() {
               browser: minimizedApp.name,
               instanceId: minimizedApp.instanceId,
               tabCount: restoredTabs.length,
-              tabs: restoredTabs.map((t) => t.name),
+              tabs: restoredTabs.map((t: any) => t.name),
             },
           );
         }
 
         // Create app object for target monitor, using remembered position/size if available
-        const newApp = {
+        const newApp: any = {
           name: minimizedApp.name,
           icon: minimizedApp.icon,
           iconPath: (minimizedApp as any).iconPath ?? null,
@@ -1783,7 +1903,7 @@ export default function App() {
           (m) =>
             m.id ===
             (targetMonitorId ||
-              minimizedApp?.targetMonitor ||
+              (updatedProfile.minimizedApps?.[appIndex]?.targetMonitor) ||
               "monitor-1"),
         );
         const newAppIndex = targetMonitor
@@ -1797,7 +1917,7 @@ export default function App() {
                 source: "monitor",
                 monitorId:
                   targetMonitorId ||
-                  minimizedApp?.targetMonitor ||
+                  (updatedProfile.minimizedApps?.[appIndex]?.targetMonitor) ||
                   "monitor-1",
                 appIndex: newAppIndex,
               }
@@ -2000,7 +2120,7 @@ export default function App() {
               if (monitor.id !== monitorId) return monitor;
 
               const updatedApps = monitor.apps.map(
-                (app, index) => {
+                (app: any, index: number) => {
                   const update = appUpdates.find(
                     (u) => u.appIndex === index,
                   );
@@ -2338,7 +2458,7 @@ export default function App() {
           }`}
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
-          {currentProfile && (
+          {currentProfile ? (
             <header className="px-8 py-6 border-b border-flow-border bg-flow-bg-secondary relative z-10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
@@ -2542,6 +2662,43 @@ export default function App() {
                         Launch Profile
                       </>
                     )}
+                  </button>
+                </div>
+              </div>
+            </header>
+          ) : (
+            <header className="px-8 py-6 border-b border-flow-border bg-flow-bg-secondary relative z-10">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-4">
+                  <div className="flex items-center gap-3 p-3 rounded-lg border bg-flow-surface border-flow-border text-flow-text-muted">
+                    <h2 className="text-xl font-semibold text-flow-text-secondary">
+                      No profile selected
+                    </h2>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-3">
+                  <button
+                    disabled
+                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                  >
+                    <Edit className="w-4 h-4" />
+                    Edit Profile
+                  </button>
+                  <button
+                    disabled
+                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                    title="Profile Settings"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Settings
+                  </button>
+                  <button
+                    disabled
+                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-accent-blue text-flow-text-primary opacity-50 cursor-not-allowed"
+                  >
+                    <Play className="w-4 h-4" />
+                    Launch Profile
                   </button>
                 </div>
               </div>

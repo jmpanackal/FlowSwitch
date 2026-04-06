@@ -1,38 +1,34 @@
 import { useState } from "react";
 import { Search, Bookmark, Globe, Folder, Star, Plus, Link, Trash2 } from "lucide-react";
 
+type BookmarkItem = {
+  id: string;
+  name: string;
+  url: string;
+  category: string;
+  icon?: string;
+};
+
 interface BookmarkManagerProps {
   compact?: boolean;
   onDragStart?: () => void;
   onBookmarkDrop?: (bookmark: any, targetType: string, targetId: string) => void;
+  bookmarks?: BookmarkItem[];
 }
 
-const sampleBookmarks = [
-  { id: '1', name: 'GitHub', url: 'https://github.com', category: 'Development', icon: '🐙' },
-  { id: '2', name: 'Stack Overflow', url: 'https://stackoverflow.com', category: 'Development', icon: '📚' },
-  { id: '3', name: 'MDN Web Docs', url: 'https://developer.mozilla.org', category: 'Development', icon: '📖' },
-  { id: '4', name: 'CodePen', url: 'https://codepen.io', category: 'Development', icon: '✏️' },
-  { id: '5', name: 'Figma', url: 'https://figma.com', category: 'Design', icon: '🎨' },
-  { id: '6', name: 'Dribbble', url: 'https://dribbble.com', category: 'Design', icon: '🏀' },
-  { id: '7', name: 'Unsplash', url: 'https://unsplash.com', category: 'Resources', icon: '📸' },
-  { id: '8', name: 'YouTube', url: 'https://youtube.com', category: 'Media', icon: '📺' },
-  { id: '9', name: 'Netflix', url: 'https://netflix.com', category: 'Media', icon: '🎬' },
-  { id: '10', name: 'Spotify', url: 'https://spotify.com', category: 'Media', icon: '🎵' },
-  { id: '11', name: 'Gmail', url: 'https://gmail.com', category: 'Productivity', icon: '📧' },
-  { id: '12', name: 'Google Drive', url: 'https://drive.google.com', category: 'Productivity', icon: '💾' },
-  { id: '13', name: 'Notion', url: 'https://notion.so', category: 'Productivity', icon: '📝' },
-  { id: '14', name: 'Slack', url: 'https://slack.com', category: 'Communication', icon: '💬' },
-  { id: '15', name: 'Discord', url: 'https://discord.com', category: 'Communication', icon: '🎮' },
-];
-
-export function BookmarkManager({ compact = false, onDragStart, onBookmarkDrop }: BookmarkManagerProps) {
+export function BookmarkManager({
+  compact = false,
+  onDragStart,
+  onBookmarkDrop,
+  bookmarks = [],
+}: BookmarkManagerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [draggedBookmark, setDraggedBookmark] = useState<any>(null);
 
-  const categories = Array.from(new Set(sampleBookmarks.map(b => b.category)));
+  const categories = Array.from(new Set(bookmarks.map((b) => b.category)));
   
-  const filteredBookmarks = sampleBookmarks.filter(bookmark => {
+  const filteredBookmarks = bookmarks.filter((bookmark) => {
     const matchesSearch = bookmark.name.toLowerCase().includes(searchTerm.toLowerCase()) ||
                          bookmark.url.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesCategory = !selectedCategory || bookmark.category === selectedCategory;
@@ -137,7 +133,7 @@ export function BookmarkManager({ compact = false, onDragStart, onBookmarkDrop }
                     onDragEnd={handleDragEnd}
                     title="Drag to add to profile"
                   >
-                    <span className="text-sm">{bookmark.icon}</span>
+                    <span className="text-sm">{bookmark.icon || "🔗"}</span>
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">

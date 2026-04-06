@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { X, Search, Plus, Monitor, Globe, Code, MessageCircle, Music, Calendar, Mail, Terminal, Camera, BarChart3, FileText, Settings } from "lucide-react";
+import { X, Search, Plus, Monitor, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface App {
@@ -35,24 +35,14 @@ interface AddAppModalProps {
   allowMonitorSelection?: boolean;
 }
 
-const fallbackApps = [
-  { name: 'Chrome', icon: Globe, color: '#4285F4' },
-  { name: 'VS Code', icon: Code, color: '#007ACC' },
-  { name: 'Terminal', icon: Terminal, color: '#000000' },
-  { name: 'Slack', icon: MessageCircle, color: '#4A154B' },
-  { name: 'Discord', icon: MessageCircle, color: '#5865F2' },
-  { name: 'Spotify', icon: Music, color: '#1DB954' },
-  { name: 'Calendar', icon: Calendar, color: '#EA4335' },
-  { name: 'Mail', icon: Mail, color: '#1565C0' },
-  { name: 'Analytics', icon: BarChart3, color: '#FF6B35' },
-  { name: 'Camera', icon: Camera, color: '#8B5CF6' },
-  { name: 'Notes', icon: FileText, color: '#FFA500' },
-  { name: 'Calculator', icon: Settings, color: '#666666' },
-];
-
-const appMetaByName = Object.fromEntries(
-  fallbackApps.map((app) => [app.name.toLowerCase(), app]),
-);
+const getStableColor = (name: string) => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+};
 
 export function AddAppModal({ 
   isOpen, 
@@ -68,16 +58,13 @@ export function AddAppModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonitor, setSelectedMonitor] = useState(monitorId || (monitors.length > 0 ? monitors[0].id : ''));
   const [selectedApp, setSelectedApp] = useState<any>(null);
-  const installedApps = useInstalledApps(
-    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
-  );
+  const installedApps = useInstalledApps();
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
-      const meta = appMetaByName[app.name.toLowerCase()];
       return {
         name: app.name,
-        icon: meta?.icon || Settings,
-        color: meta?.color || '#666666',
+        icon: Settings,
+        color: getStableColor(app.name),
         iconPath: app.iconPath,
         executablePath: app.executablePath ?? null,
       };

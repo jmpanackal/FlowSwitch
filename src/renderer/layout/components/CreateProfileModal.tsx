@@ -1,5 +1,5 @@
 import { useMemo, useState } from "react";
-import { X, Search, Plus, Scan, Folder, Monitor, Globe, Gamepad2, Music, Code, MessageCircle, Calendar, Mail, Terminal, Camera, BarChart3, FileText, Settings } from "lucide-react";
+import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface CreateProfileModalProps {
@@ -8,25 +8,25 @@ interface CreateProfileModalProps {
   onCreateProfile: (profile: any) => void;
 }
 
-const fallbackApps = [
-  { name: 'Chrome', icon: Globe, color: '#4285F4', category: 'Browser' },
-  { name: 'VS Code', icon: Code, color: '#007ACC', category: 'Development' },
-  { name: 'Terminal', icon: Terminal, color: '#000000', category: 'Development' },
-  { name: 'Slack', icon: MessageCircle, color: '#4A154B', category: 'Communication' },
-  { name: 'Discord', icon: MessageCircle, color: '#5865F2', category: 'Communication' },
-  { name: 'Spotify', icon: Music, color: '#1DB954', category: 'Media' },
-  { name: 'Calendar', icon: Calendar, color: '#EA4335', category: 'Productivity' },
-  { name: 'Mail', icon: Mail, color: '#1565C0', category: 'Productivity' },
-  { name: 'Notes', icon: FileText, color: '#FFA500', category: 'Productivity' },
-  { name: 'Calculator', icon: Settings, color: '#666666', category: 'Utility' },
-  { name: 'Camera', icon: Camera, color: '#8B5CF6', category: 'Media' },
-  { name: 'Analytics', icon: BarChart3, color: '#FF6B35', category: 'Business' },
-  { name: 'Steam', icon: Gamepad2, color: '#1B2838', category: 'Gaming' },
-];
+const getStableColor = (name: string) => {
+  let hash = 0;
+  for (let i = 0; i < name.length; i += 1) {
+    hash = name.charCodeAt(i) + ((hash << 5) - hash);
+  }
+  const hue = Math.abs(hash) % 360;
+  return `hsl(${hue}, 65%, 55%)`;
+};
 
-const appMetaByName = Object.fromEntries(
-  fallbackApps.map((app) => [app.name.toLowerCase(), app]),
-);
+const inferCategory = (name: string) => {
+  const normalized = name.toLowerCase();
+  if (/(chrome|firefox|edge|brave|vivaldi|opera|safari|browser)/.test(normalized)) return "Browser";
+  if (/(code|studio|terminal|intellij|pycharm|webstorm|developer)/.test(normalized)) return "Development";
+  if (/(discord|slack|teams|zoom|mail|outlook|telegram|whatsapp)/.test(normalized)) return "Communication";
+  if (/(spotify|music|vlc|media|camera|photos|video)/.test(normalized)) return "Media";
+  if (/(calendar|note|notion|office|word|excel|powerpoint|task)/.test(normalized)) return "Productivity";
+  if (/(steam|epic|game|xbox|battle\\.net|gog)/.test(normalized)) return "Gaming";
+  return "Other";
+};
 
 type MemoryCapture = {
   capturedAt: number;
@@ -70,17 +70,14 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   const [memoryCapture, setMemoryCapture] = useState<MemoryCapture | null>(null);
   const [isCapturingMemory, setIsCapturingMemory] = useState(false);
   const [memoryCaptureError, setMemoryCaptureError] = useState<string | null>(null);
-  const installedApps = useInstalledApps(
-    fallbackApps.map((app) => ({ name: app.name, iconPath: null })),
-  );
+  const installedApps = useInstalledApps();
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
-      const meta = appMetaByName[app.name.toLowerCase()];
       return {
         name: app.name,
-        icon: meta?.icon || Settings,
-        color: meta?.color || '#666666',
-        category: meta?.category || 'Other',
+        icon: Settings,
+        color: getStableColor(app.name),
+        category: inferCategory(app.name),
         iconPath: app.iconPath,
         executablePath: app.executablePath ?? null,
       };
@@ -221,29 +218,25 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
         primary: monitor.primary,
         resolution: monitor.resolution,
         orientation: monitor.orientation,
-        apps: monitor.apps.map((app) => {
-          const meta = appMetaByName[app.name.toLowerCase()];
-          return {
-            name: app.name,
-            icon: meta?.icon || Settings,
-            iconPath: app.iconPath ?? null,
-            executablePath: app.executablePath ?? null,
-            color: meta?.color || '#666666',
-            position: app.position,
-            size: app.size,
-            volume: 50,
-            launchBehavior: 'new' as const,
-          };
-        }),
-      })),
-      minimizedApps: (memoryCapture.minimizedApps || []).map((app) => {
-        const meta = appMetaByName[app.name.toLowerCase()];
-        return {
+        apps: monitor.apps.map((app) => ({
           name: app.name,
-          icon: meta?.icon || Settings,
+          icon: Settings,
           iconPath: app.iconPath ?? null,
           executablePath: app.executablePath ?? null,
-          color: meta?.color || '#666666',
+          color: getStableColor(app.name),
+          position: app.position,
+          size: app.size,
+          volume: 50,
+          launchBehavior: 'new' as const,
+        })),
+      })),
+      minimizedApps: (memoryCapture.minimizedApps || []).map((app) => {
+        return {
+          name: app.name,
+          icon: Settings,
+          iconPath: app.iconPath ?? null,
+          executablePath: app.executablePath ?? null,
+          color: getStableColor(app.name),
           volume: 50,
           launchBehavior: 'minimize' as const,
           targetMonitor: app.targetMonitor || (orderedMonitors.find((m) => m.primary)?.id || orderedMonitors[0]?.id || 'monitor-1'),
@@ -448,12 +441,11 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
                     <h5 className="text-white/80 text-sm mb-2">{monitor.name}</h5>
                     <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-elegant">
                       {monitor.apps.map((app, index) => {
-                        const meta = appMetaByName[app.name.toLowerCase()];
                         return (
                           <div key={`${app.name}-${index}`} className="flex items-center gap-2 text-white/70 text-sm">
                             <div
                               className="w-4 h-4 rounded flex items-center justify-center"
-                              style={{ backgroundColor: `${(meta?.color || '#666666')}40` }}
+                              style={{ backgroundColor: `${getStableColor(app.name)}40` }}
                             >
                               {app.iconPath ? (
                                 <img src={app.iconPath} alt={app.name} className="w-3 h-3 object-contain rounded" />
