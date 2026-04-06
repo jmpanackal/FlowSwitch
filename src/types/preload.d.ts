@@ -7,7 +7,7 @@ declare global {
     electron: {
       launchProfile: (profileId: string) => void;
       onProfileLoaded: (callback: (profile: Profile) => void) => void;
-      getInstalledApps: () => Promise<{ name: string; iconPath: string | null }[]>;
+      getInstalledApps: () => Promise<{ name: string; iconPath: string | null; executablePath?: string | null }[]>;
       captureRunningAppLayout: () => Promise<{
         capturedAt: number;
         appCount: number;
@@ -21,6 +21,7 @@ declare global {
           apps: Array<{
             name: string;
             iconPath: string | null;
+            executablePath?: string | null;
             position: { x: number; y: number };
             size: { width: number; height: number };
           }>;
@@ -28,6 +29,7 @@ declare global {
         minimizedApps?: Array<{
           name: string;
           iconPath: string | null;
+          executablePath?: string | null;
           position: { x: number; y: number };
           size: { width: number; height: number };
           targetMonitor?: string;

@@ -6,6 +6,7 @@ interface App {
   name: string;
   icon: any;
   iconPath?: string | null;
+  executablePath?: string | null;
   color: string;
   position: { x: number; y: number };
   size: { width: number; height: number };
@@ -78,6 +79,7 @@ export function AddAppModal({
         icon: meta?.icon || Settings,
         color: meta?.color || '#666666',
         iconPath: app.iconPath,
+        executablePath: app.executablePath ?? null,
       };
     })
   ), [installedApps]);
@@ -100,6 +102,7 @@ export function AddAppModal({
       name: selectedApp.name,
       icon: selectedApp.icon,
       iconPath: selectedApp.iconPath ?? null,
+      executablePath: selectedApp.executablePath ?? null,
       color: selectedApp.color,
       position: { x: 50, y: 50 },
       size: { 

@@ -5,7 +5,9 @@ import { FileIcon, getFileTypeColor } from "./FileIcon";
 
 interface MinimizedApp {
   name: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  iconPath?: string | null;
+  executablePath?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -90,6 +92,17 @@ export function MinimizedApps({
 
   // Safely handle the icon component
   const renderIcon = (app: MinimizedApp) => {
+    if (app.iconPath) {
+      return (
+        <img
+          src={app.iconPath}
+          alt={app.name}
+          className="w-5 h-5 object-contain rounded"
+          draggable={false}
+        />
+      );
+    }
+
     if (!app.icon) {
       return (
         <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
@@ -280,6 +293,8 @@ export function MinimizedApps({
         app: {
           name: app.name,
           icon: app.icon,
+          iconPath: app.iconPath ?? null,
+          executablePath: app.executablePath ?? null,
           color: app.color,
           volume: app.volume,
           targetMonitor: app.targetMonitor
@@ -288,7 +303,13 @@ export function MinimizedApps({
       
       const preview = (
         <div className="flex items-center gap-2">
-          <app.icon className="w-4 h-4" style={{ color: app.color }} />
+          {app.iconPath ? (
+            <img src={app.iconPath} alt={app.name} className="w-4 h-4 object-contain rounded" />
+          ) : app.icon ? (
+            <app.icon className="w-4 h-4" style={{ color: app.color }} />
+          ) : (
+            <Package className="w-4 h-4 text-flow-text-muted" />
+          )}
           <span>{app.name}</span>
         </div>
       );

@@ -83,7 +83,6 @@ const extractIconSourcePath = (raw) => (
 );
 
 const imageMimeTypeByExt = {
-  '.ico': 'image/x-icon',
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
   '.jpeg': 'image/jpeg',
@@ -93,6 +92,8 @@ const imageMimeTypeByExt = {
 
 const toImageDataUrlFromFile = (filePath) => {
   const ext = path.extname(filePath).toLowerCase();
+  // Let Electron/nativeImage handle .ico so we don't accidentally use a tiny embedded frame.
+  if (ext === '.ico') return null;
   const mime = imageMimeTypeByExt[ext];
   if (!mime) return null;
   try {
@@ -117,7 +118,11 @@ const getSafeIconDataUrl = async (iconSourcePath) => {
       return directImageDataUrl;
     }
 
-    const nativeIcon = await app.getFileIcon(safePath, { size: 'normal' });
+    // Prefer large icons for sharper rendering in monitor layout previews.
+    let nativeIcon = await app.getFileIcon(safePath, { size: 'large' });
+    if (!nativeIcon || nativeIcon.isEmpty()) {
+      nativeIcon = await app.getFileIcon(safePath, { size: 'normal' });
+    }
     if (!nativeIcon || nativeIcon.isEmpty()) {
       // Fallback for files that can be loaded directly as image assets.
       const imageFallback = nativeImage.createFromPath(safePath);
@@ -410,9 +415,11 @@ ipcMain.handle('get-installed-apps', async () => {
       }
 
       if (!existing) {
+        const executablePath = context.targetExe || extractExecutablePath(sourcePath) || null;
         appMap.set(key, {
           name: normalizedName,
           iconPath: iconPath || null,
+          executablePath,
           priority: nextPriority,
         });
         return;
@@ -422,10 +429,12 @@ ipcMain.handle('get-installed-apps', async () => {
       const preferredName = currentPriority >= nextPriority ? existing.name : normalizedName;
       const preferredPriority = Math.max(currentPriority, nextPriority);
       const preferredIcon = existing.iconPath || iconPath || null;
+      const preferredExecutablePath = existing.executablePath || context.targetExe || extractExecutablePath(sourcePath) || null;
 
       appMap.set(key, {
         name: preferredName,
         iconPath: preferredIcon,
+        executablePath: preferredExecutablePath,
         priority: preferredPriority,
       });
     };
@@ -651,7 +660,7 @@ ipcMain.handle('get-installed-apps', async () => {
       );
     }
     return Array.from(appMap.values())
-      .map(({ name, iconPath }) => ({ name, iconPath }))
+      .map(({ name, iconPath, executablePath }) => ({ name, iconPath, executablePath: executablePath || null }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } catch (err) {
     console.error('Error in get-installed-apps handler:', err);
@@ -970,14 +979,17 @@ ipcMain.handle('capture-running-app-layout', async () => {
       const relX = relLeft + (relW / 2);
       const relY = relTop + (relH / 2);
 
-      // Keep capture fast: avoid per-window icon extraction here.
-      // Memory capture prioritizes layout correctness and responsiveness.
-      const iconPath = null;
+      // Preserve app icon metadata for layout-memory-created profiles and previews.
+      let iconPath = null;
+      if (windowInfo.executablePath) {
+        iconPath = await getSafeIconDataUrl(windowInfo.executablePath);
+      }
 
       const round1 = (n) => Math.round(n * 10) / 10;
       const mappedWindow = {
         name: windowInfo.name,
         iconPath,
+        executablePath: windowInfo.executablePath || null,
         position: {
           x: Math.max(0, Math.min(100, round1(relX))),
           y: Math.max(0, Math.min(100, round1(relY))),

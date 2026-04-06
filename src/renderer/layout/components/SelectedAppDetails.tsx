@@ -79,6 +79,22 @@ export function SelectedAppDetails({
 
   // Render app icon with proper fallback
   const renderAppIcon = (app: any, size: string = "w-12 h-12") => {
+    if (app.iconPath) {
+      return (
+        <div
+          className={`${size} rounded-xl flex items-center justify-center border border-white/20 shadow-sm overflow-hidden`}
+          style={{ backgroundColor: `${app.color || '#666666'}40` }}
+        >
+          <img
+            src={app.iconPath}
+            alt={app.name || 'App'}
+            className="w-3/4 h-3/4 object-contain"
+            draggable={false}
+          />
+        </div>
+      );
+    }
+
     if (!app.icon) {
       return (
         <div className={`${size} bg-flow-surface rounded-xl flex items-center justify-center border border-flow-border`}>
@@ -745,7 +761,7 @@ export function SelectedAppDetails({
               </span>
             </div>
             <p className="text-sm text-flow-text-muted truncate font-mono">
-              {currentData.executablePath || 'C:\\Program Files\\App\\app.exe'}
+              {currentData.executablePath || 'Executable path not available'}
             </p>
             {monitorId && (
               <p className="text-xs text-flow-text-muted mt-1">

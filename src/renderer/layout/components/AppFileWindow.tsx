@@ -13,7 +13,9 @@ interface BaseItem {
 
 interface AppItem extends BaseItem {
   type: 'app';
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  iconPath?: string | null;
+  executablePath?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -223,13 +225,14 @@ export function AppFileWindow({
       const app = item as AppItem;
       return {
         icon: app.icon,
+        iconPath: app.iconPath ?? null,
         color: app.color,
         fileColor: null
       };
     }
   };
 
-  const { icon: mainIcon, color: mainColor, fileColor } = getIconAndColor();
+  const { icon: mainIcon, iconPath: mainIconPath, color: mainColor, fileColor } = getIconAndColor();
 
   // Get the file count for display
   const getFileCount = () => {
@@ -251,6 +254,20 @@ export function AppFileWindow({
 
   // FIXED: Bigger app icons with proper CSS classes
   const renderMainIcon = () => {
+    if (mainIconPath) {
+      return (
+        <img
+          src={mainIconPath}
+          alt={item.name}
+          className="app-icon object-contain rounded"
+          draggable={false}
+          onError={(e) => {
+            (e.target as HTMLImageElement).style.display = 'none';
+          }}
+        />
+      );
+    }
+
     if (!mainIcon) {
       return (
         <div className="app-icon-fallback bg-white/20 rounded-lg">
@@ -535,6 +552,8 @@ export function AppFileWindow({
       app: {
         name: item.name,
         icon: (item as AppItem).icon,
+        iconPath: (item as AppItem).iconPath ?? null,
+        executablePath: (item as AppItem).executablePath ?? null,
         color: (item as AppItem).color,
         volume: (item as AppItem).volume,
         runAsAdmin: (item as AppItem).runAsAdmin,

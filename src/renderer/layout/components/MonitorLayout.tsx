@@ -10,7 +10,9 @@ import { DragState } from "../types/dragTypes";
 
 interface App {
   name: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  iconPath?: string | null;
+  executablePath?: string | null;
   color: string;
   position: { x: number; y: number };
   size: { width: number; height: number };
@@ -33,7 +35,9 @@ interface App {
 
 interface MinimizedApp {
   name: string;
-  icon: LucideIcon;
+  icon?: LucideIcon;
+  iconPath?: string | null;
+  executablePath?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -974,6 +978,8 @@ export function MonitorLayout({
                               type: 'app',
                               name: app.name,
                               icon: app.icon,
+                              iconPath: app.iconPath ?? null,
+                              executablePath: app.executablePath ?? null,
                               color: app.color,
                               position: app.position,
                               size: app.size,
@@ -1001,6 +1007,8 @@ export function MonitorLayout({
                                 app: {
                                   name: app.name,
                                   icon: app.icon,
+                                  iconPath: app.iconPath ?? null,
+                                  executablePath: app.executablePath ?? null,
                                   color: app.color,
                                   volume: app.volume,
                                   position: app.position,
