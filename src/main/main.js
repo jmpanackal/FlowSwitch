@@ -1,16 +1,317 @@
-const { app, BrowserWindow, ipcMain, protocol } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const ws = require('windows-shortcuts');
-const crypto = require('crypto');
 const { scanForExeFiles } = require('./scanExeFiles');
 const { getRegistryInstalledApps } = require('./registryApps');
-const { getAppIconDir, extractIconToIco } = require('./services/icon-service');
 const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
 } = require('./services/windows-process-service');
+
+const gotSingleInstanceLock = app.requestSingleInstanceLock();
+if (!gotSingleInstanceLock) {
+  app.quit();
+  process.exit(0);
+}
+
+const iconDataUrlCache = new Map();
+
+const normalizePathForWindows = (value) => (
+  String(value || '')
+    .replace(/\//g, '\\')
+    .trim()
+);
+
+const extractPathFromRawValue = (raw, allowedExtensions) => {
+  if (!raw) return null;
+  const rawValue = String(raw).trim();
+  if (!rawValue || rawValue.includes('\0')) return null;
+
+  const extAlternation = allowedExtensions
+    .map((ext) => ext.replace('.', '\\.'))
+    .join('|');
+  const pathRegex = new RegExp(`([a-zA-Z]:\\\\[^,\\r\\n]*?\\.(?:${extAlternation}))`, 'i');
+  const quotedRegex = new RegExp(`"([^"]+\\.(?:${extAlternation}))"`, 'i');
+
+  const sanitized = rawValue.replace(/^"(.*)"$/, '$1').trim();
+  const withoutIconIndex = sanitized.split(',')[0]?.trim() || '';
+
+  const quotedMatch = rawValue.match(quotedRegex);
+  const unquotedMatch = rawValue.match(pathRegex);
+  const candidates = [
+    quotedMatch?.[1],
+    unquotedMatch?.[1],
+    withoutIconIndex,
+  ].filter(Boolean);
+
+  let resolvedPath = null;
+  for (const candidate of candidates) {
+    const normalized = normalizePathForWindows(candidate);
+    const lower = normalized.toLowerCase();
+    const hasAllowedExtension = allowedExtensions.some((ext) => lower.endsWith(ext));
+    if (!hasAllowedExtension) continue;
+    if (normalized.startsWith('\\\\') || normalized.startsWith('\\\\?\\')) continue;
+    if (!path.isAbsolute(normalized) || !fs.existsSync(normalized)) continue;
+    try {
+      if (!fs.statSync(normalized).isFile()) continue;
+    } catch {
+      continue;
+    }
+    resolvedPath = normalized;
+    break;
+  }
+
+  if (!resolvedPath) return null;
+  return resolvedPath;
+};
+
+const extractExecutablePath = (raw) => {
+  const exePath = extractPathFromRawValue(raw, ['.exe']);
+  if (!exePath) return null;
+  try {
+    if (!fs.statSync(exePath).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return exePath;
+};
+
+const extractIconSourcePath = (raw) => (
+  extractPathFromRawValue(raw, ['.exe', '.ico', '.dll', '.png', '.jpg', '.jpeg', '.webp', '.bmp'])
+);
+
+const imageMimeTypeByExt = {
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+};
+
+const toImageDataUrlFromFile = (filePath) => {
+  const ext = path.extname(filePath).toLowerCase();
+  const mime = imageMimeTypeByExt[ext];
+  if (!mime) return null;
+  try {
+    const binary = fs.readFileSync(filePath);
+    return `data:${mime};base64,${binary.toString('base64')}`;
+  } catch {
+    return null;
+  }
+};
+
+const getSafeIconDataUrl = async (iconSourcePath) => {
+  const safePath = extractIconSourcePath(iconSourcePath);
+  if (!safePath) return null;
+
+  const cached = iconDataUrlCache.get(safePath);
+  if (cached !== undefined) return cached;
+
+  try {
+    const directImageDataUrl = toImageDataUrlFromFile(safePath);
+    if (directImageDataUrl) {
+      iconDataUrlCache.set(safePath, directImageDataUrl);
+      return directImageDataUrl;
+    }
+
+    const nativeIcon = await app.getFileIcon(safePath, { size: 'normal' });
+    if (!nativeIcon || nativeIcon.isEmpty()) {
+      // Fallback for files that can be loaded directly as image assets.
+      const imageFallback = nativeImage.createFromPath(safePath);
+      if (imageFallback && !imageFallback.isEmpty()) {
+        const fallbackDataUrl = imageFallback.toDataURL();
+        iconDataUrlCache.set(safePath, fallbackDataUrl);
+        return fallbackDataUrl;
+      }
+      iconDataUrlCache.set(safePath, null);
+      return null;
+    }
+    const dataUrl = nativeIcon.toDataURL();
+    iconDataUrlCache.set(safePath, dataUrl);
+    return dataUrl;
+  } catch {
+    iconDataUrlCache.set(safePath, null);
+    return null;
+  }
+};
+
+const SHELL_HOST_EXECUTABLES = new Set([
+  'cmd.exe',
+  'powershell.exe',
+  'pwsh.exe',
+  'wscript.exe',
+  'cscript.exe',
+  'conhost.exe',
+]);
+
+const isInstallerLikeExecutable = (filePath = '') => {
+  if (!filePath) return false;
+  const baseName = path.basename(String(filePath), path.extname(String(filePath))).toLowerCase();
+  if (!baseName) return false;
+  return (
+    baseName.includes('setup')
+    || baseName.includes('install')
+    || baseName.includes('uninstall')
+    || baseName.includes('repair')
+    || baseName.includes('prereq')
+    || baseName === 'vc_redist.x64'
+    || baseName === 'vc_redist.x86'
+    || baseName === 'vcredist_x64'
+    || baseName === 'vcredist_x86'
+    || baseName === 'launcherprereqsetup_x64'
+  );
+};
+
+const expandWindowsEnvVars = (raw = '') => (
+  String(raw).replace(/%([^%]+)%/g, (_match, varName) => process.env[varName] || '')
+);
+
+const parseInternetShortcut = (shortcutPath) => {
+  try {
+    const rawContent = fs.readFileSync(shortcutPath, 'utf8');
+    const values = {};
+    for (const line of rawContent.split(/\r?\n/)) {
+      const idx = line.indexOf('=');
+      if (idx <= 0) continue;
+      const key = line.slice(0, idx).trim();
+      const value = line.slice(idx + 1).trim();
+      if (!key) continue;
+      values[key] = value;
+    }
+    return {
+      url: values.URL || '',
+      iconFile: expandWindowsEnvVars(values.IconFile || ''),
+    };
+  } catch {
+    return { url: '', iconFile: '' };
+  }
+};
+
+const isAppProtocolUrl = (value = '') => {
+  const raw = String(value || '').trim();
+  const match = raw.match(/^([a-z][a-z0-9+.-]*):\/\//i);
+  if (!match) return false;
+  const protocol = match[1].toLowerCase();
+  return protocol !== 'http' && protocol !== 'https' && protocol !== 'file';
+};
+
+const getCanonicalAppKey = (value = '') => (
+  String(value || '')
+    .toLowerCase()
+    // Drop common trailing version tokens: "App 1.2.3", "App v2", "App (64-bit)".
+    .replace(/\s+v?\d+([._-]\d+)*(\s*(x64|x86|64-bit|32-bit))?$/i, '')
+    .replace(/\s+\(?(x64|x86|64-bit|32-bit)\)?$/i, '')
+    .replace(/[^\p{L}\p{N}]+/gu, '')
+    .trim()
+);
+
+const SERVICE_LIKE_EXECUTABLE_TOKENS = [
+  'service',
+  'helper',
+  'container',
+  'telemetry',
+  'runtimebroker',
+  'crashpad',
+];
+
+const isLikelyBackgroundBinary = (filePath = '') => {
+  if (!filePath) return false;
+  const baseName = path.basename(String(filePath), path.extname(String(filePath))).toLowerCase();
+  return SERVICE_LIKE_EXECUTABLE_TOKENS.some((token) => baseName.includes(token));
+};
+
+const parseSteamGameId = (value = '') => {
+  const match = String(value).match(/steam:\/\/rungameid\/(\d+)/i);
+  return match?.[1] || null;
+};
+
+const getSteamInstallCandidates = () => {
+  const candidates = [
+    path.join(process.env['ProgramFiles(x86)'] || '', 'Steam'),
+    path.join(process.env.ProgramFiles || '', 'Steam'),
+    path.join(process.env.LOCALAPPDATA || '', 'Steam'),
+  ].filter(Boolean);
+  return [...new Set(candidates)];
+};
+
+const resolveSteamGameIconPath = (appId) => {
+  if (!appId) return null;
+  const roots = getSteamInstallCandidates();
+  const relativeCandidates = [
+    path.join('steam', 'games', `${appId}.ico`),
+    path.join('appcache', 'librarycache', `${appId}_icon.jpg`),
+    path.join('appcache', 'librarycache', `${appId}_icon.png`),
+  ];
+
+  for (const root of roots) {
+    for (const rel of relativeCandidates) {
+      const full = path.join(root, rel);
+      if (fs.existsSync(full)) return full;
+    }
+  }
+  return null;
+};
+
+const isLikelyUserApp = (name, sourcePath = '', context = {}) => {
+  const safeName = String(name || '').trim();
+  if (!safeName) return false;
+
+  const targetExe = normalizePathForWindows(context.targetExe || '').toLowerCase();
+  if (targetExe && SHELL_HOST_EXECUTABLES.has(path.basename(targetExe))) {
+    return false;
+  }
+  if (targetExe && isLikelyBackgroundBinary(targetExe)) {
+    return false;
+  }
+
+  const lowerSourcePath = String(sourcePath || '').toLowerCase();
+  if (
+    lowerSourcePath.includes('\\windows\\system32\\')
+    || lowerSourcePath.includes('\\windows\\syswow64\\')
+    || lowerSourcePath.includes('\\programdata\\package cache\\')
+  ) {
+    return false;
+  }
+
+  if (isInstallerLikeExecutable(sourcePath)) {
+    return false;
+  }
+
+  const registryMeta = context.registryMeta || null;
+  if (registryMeta) {
+    if (registryMeta.systemComponent) return false;
+    if (registryMeta.parentKeyName) return false;
+    const releaseType = String(registryMeta.releaseType || '').toLowerCase();
+    if (
+      releaseType.includes('update')
+      || releaseType.includes('hotfix')
+      || releaseType.includes('security')
+    ) {
+      return false;
+    }
+    if (isInstallerLikeExecutable(registryMeta.uninstallString || '')) {
+      return false;
+    }
+  }
+
+  if (
+    context.source === 'start-menu-shortcut'
+    && !context.targetExe
+    && !context.iconSource
+    && !context.hasShortcutIcon
+  ) {
+    return false;
+  }
+
+  if (context.source === 'start-menu-url' && !context.isAppProtocol) {
+    return false;
+  }
+
+  return true;
+};
 
 // Function to create the main application window
 const createWindow = () => {
@@ -28,16 +329,6 @@ const createWindow = () => {
 
 app.disableHardwareAcceleration();
 
-// Register custom protocol for app icons
-app.whenReady().then(() => {
-  protocol.registerFileProtocol('appicon', (request, callback) => {
-    const url = request.url.substr('appicon://'.length);
-    const iconPath = path.join(getAppIconDir(), url);
-    callback({ path: iconPath });
-  });
-});
-
-// When Electron is ready, create the window
 app.whenReady().then(() => {
   createWindow();
 
@@ -47,8 +338,15 @@ app.whenReady().then(() => {
   });
 });
 
+app.on('second-instance', () => {
+  const existingWindow = BrowserWindow.getAllWindows()[0];
+  if (!existingWindow) return;
+  if (existingWindow.isMinimized()) existingWindow.restore();
+  existingWindow.focus();
+});
+
 // Listen for 'launch-profile' IPC events from the renderer process
-ipcMain.on('launch-profile', (event, profileId) => {
+ipcMain.on('launch-profile', (event) => {
   const filePath = path.join(__dirname, '../../mock-data/profile-work.json');
 
   try {
@@ -90,8 +388,70 @@ ipcMain.on('launch-profile', (event, profileId) => {
 ipcMain.handle('get-installed-apps', async () => {
   // IPC handler: get-installed-apps (Start Menu, Registry, Program Files)
   try {
-    const iconDir = getAppIconDir();
     const appMap = new Map();
+    const seenStartMenuKeys = new Set();
+    const sourcePriority = {
+      'start-menu-shortcut': 3,
+      'start-menu-url': 3,
+      registry: 2,
+      'exe-scan': 1,
+    };
+    const upsertDiscoveredApp = (appName, iconPath, sourcePath = '', context = {}) => {
+      if (!isLikelyUserApp(appName, sourcePath, context)) return;
+      const normalizedName = String(appName || '').trim();
+      const key = getCanonicalAppKey(normalizedName) || normalizedName.toLowerCase();
+      if (!key) return;
+
+      const nextPriority = sourcePriority[context.source] || 0;
+      const existing = appMap.get(key);
+
+      if (context.source === 'start-menu-shortcut' || context.source === 'start-menu-url') {
+        seenStartMenuKeys.add(key);
+      }
+
+      if (!existing) {
+        appMap.set(key, {
+          name: normalizedName,
+          iconPath: iconPath || null,
+          priority: nextPriority,
+        });
+        return;
+      }
+
+      const currentPriority = existing.priority || 0;
+      const preferredName = currentPriority >= nextPriority ? existing.name : normalizedName;
+      const preferredPriority = Math.max(currentPriority, nextPriority);
+      const preferredIcon = existing.iconPath || iconPath || null;
+
+      appMap.set(key, {
+        name: preferredName,
+        iconPath: preferredIcon,
+        priority: preferredPriority,
+      });
+    };
+
+    const isRegistryCandidateAllowedWithoutStartMenu = (appMeta, iconSourcePath) => {
+      const canonicalKey = getCanonicalAppKey(appMeta.name);
+      if (seenStartMenuKeys.has(canonicalKey)) return true;
+
+      // Include registry-only apps only when they look like user-launchable GUI apps.
+      const source = String(iconSourcePath || '').toLowerCase();
+      if (!source) return false;
+      if (isLikelyBackgroundBinary(source)) return false;
+      if (
+        source.includes('\\nvidia corporation\\')
+        || source.includes('\\windows\\')
+        || source.includes('\\programdata\\package cache\\')
+      ) {
+        return false;
+      }
+
+      return (
+        source.includes('\\program files\\')
+        || source.includes('\\program files (x86)\\')
+        || source.includes('\\appdata\\local\\programs\\')
+      );
+    };
 
     const runWithConcurrencyLimit = async (tasks, limit) => {
       const safeLimit = Math.max(1, Math.min(limit || 1, tasks.length || 1));
@@ -104,7 +464,7 @@ ipcMain.handle('get-installed-apps', async () => {
           if (currentIndex >= tasks.length) return;
           try {
             await tasks[currentIndex]();
-          } catch (e) {
+          } catch {
             // Keep discovery resilient: one failing shortcut/icon extraction
             // should not fail the whole installed-app scan.
           }
@@ -115,20 +475,9 @@ ipcMain.handle('get-installed-apps', async () => {
       await Promise.all(workers);
     };
 
-    const normalizeWsIconFile = (rawIcon) => {
-      if (!rawIcon) return null;
-      const iconParts = String(rawIcon).split(',');
-      const iconFileRaw = iconParts[0];
-      if (!iconFileRaw) return null;
-
-      // ws icon often comes like: `"C:\Path\App.exe",0` or without quotes.
-      const iconFile = String(iconFileRaw)
-        .replace(/^"(.*)"$/, '$1')
-        .trim();
-
-      if (!iconFile || !fs.existsSync(iconFile)) return null;
-      if (!iconFile.toLowerCase().endsWith('.exe')) return null;
-      return iconFile;
+    const iconFailureSummary = {
+      shortcut: 0,
+      registry: 0,
     };
 
     // 1. Start Menu Shortcuts (.lnk files pointing to .exe only)
@@ -149,11 +498,16 @@ ipcMain.handle('get-installed-apps', async () => {
               try {
                 const name = entry.name.replace(/\.lnk$/i, '');
                 shortcutTasks.push(() => new Promise((resolve) => {
+                  const timeout = setTimeout(() => resolve(), 400);
                   ws.query(fullPath, async (err, info) => {
                     try {
-                      const normalizedIconSource = !err && info && info.icon
-                        ? normalizeWsIconFile(info.icon)
+                      clearTimeout(timeout);
+                      const normalizedTargetExe = !err && info
+                        ? extractExecutablePath(info.target || info.targetPath || info.path)
                         : null;
+                      const normalizedIconSource = !err && info && info.icon
+                        ? extractIconSourcePath(info.icon)
+                        : normalizedTargetExe;
 
                       // If we already discovered this app with an icon, skip expensive rework.
                       const existing = appMap.get(name);
@@ -161,26 +515,32 @@ ipcMain.handle('get-installed-apps', async () => {
 
                       let iconPath = null;
                       if (normalizedIconSource) {
-                        try {
-                          const hash = crypto.createHash('md5').update(normalizedIconSource).digest('hex');
-                          const icoFile = `${hash}.ico`;
-                          const icoPath = path.join(iconDir, icoFile);
-                          if (!fs.existsSync(icoPath)) {
-                            await extractIconToIco(normalizedIconSource, icoPath);
-                          }
-                          if (fs.existsSync(icoPath)) {
-                            iconPath = `appicon://${icoFile}`;
-                          } else {
-                            iconPath = null;
-                          }
-                        } catch {
-                          iconPath = null;
+                        iconPath = await getSafeIconDataUrl(normalizedIconSource);
+                        if (!iconPath) {
+                          iconFailureSummary.shortcut += 1;
                         }
                       }
 
-                      if (normalizedIconSource && !appMap.has(name)) {
-                        appMap.set(name, { name, iconPath });
+                      // Safe fallback: get icon from the shortcut itself (helps game launchers/Steam links).
+                      if (!iconPath) {
+                        const shortcutIcon = await getSafeIconDataUrl(fullPath);
+                        if (shortcutIcon) {
+                          iconPath = shortcutIcon;
+                        }
                       }
+
+                      upsertDiscoveredApp(
+                        name,
+                        iconPath,
+                        normalizedIconSource || normalizedTargetExe || fullPath,
+                        {
+                          source: 'start-menu-shortcut',
+                          shortcutPath: fullPath,
+                          targetExe: normalizedTargetExe,
+                          iconSource: normalizedIconSource,
+                          hasShortcutIcon: !!iconPath,
+                        },
+                      );
                     } finally {
                       resolve();
                     }
@@ -189,6 +549,41 @@ ipcMain.handle('get-installed-apps', async () => {
               } catch (e) {
                 console.warn(`[StartMenu] Exception handling shortcut '${entry.name}':`, e);
               }
+            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.url')) {
+              const name = entry.name.replace(/\.url$/i, '');
+              const shortcut = parseInternetShortcut(fullPath);
+              const iconSource = extractIconSourcePath(shortcut.iconFile);
+              const isProtocolApp = isAppProtocolUrl(shortcut.url);
+              const steamAppId = parseSteamGameId(shortcut.url);
+              shortcutTasks.push(async () => {
+                let iconPath = null;
+                if (iconSource) {
+                  iconPath = await getSafeIconDataUrl(iconSource);
+                }
+                if (!iconPath && steamAppId) {
+                  const steamIconPath = resolveSteamGameIconPath(steamAppId);
+                  if (steamIconPath) {
+                    iconPath = await getSafeIconDataUrl(steamIconPath);
+                  }
+                }
+                if (!iconPath) {
+                  const shortcutIcon = await getSafeIconDataUrl(fullPath);
+                  if (shortcutIcon) iconPath = shortcutIcon;
+                }
+                upsertDiscoveredApp(
+                  name,
+                  iconPath,
+                  iconSource || fullPath,
+                  {
+                    source: 'start-menu-url',
+                    shortcutPath: fullPath,
+                    iconSource,
+                    hasShortcutIcon: !!iconPath,
+                    isAppProtocol: isProtocolApp,
+                    steamAppId,
+                  },
+                );
+              });
             }
           }
         };
@@ -201,32 +596,22 @@ ipcMain.handle('get-installed-apps', async () => {
       if (!app.name || !app.iconSource) {
         continue;
       }
-      const normalizedIconSource = String(app.iconSource).replace(/^"(.*)"$/, '$1');
-      if (!fs.existsSync(normalizedIconSource) || !normalizedIconSource.toLowerCase().endsWith('.exe')) {
-        if (!appMap.has(app.name)) {
-          appMap.set(app.name, { name: app.name, iconPath: null });
-        }
+      const normalizedIconSource = extractIconSourcePath(app.iconSource);
+      if (!isLikelyUserApp(app.name, normalizedIconSource || app.iconSource, { source: 'registry', registryMeta: app })) {
         continue;
       }
-      let iconPath = null;
-      try {
-        const hash = crypto.createHash('md5').update(normalizedIconSource).digest('hex');
-        const icoFile = `${hash}.ico`;
-        const icoPath = path.join(iconDir, icoFile);
-        if (!fs.existsSync(icoPath)) {
-          await extractIconToIco(normalizedIconSource, icoPath);
-        }
-        if (fs.existsSync(icoPath)) {
-          iconPath = `appicon://${icoFile}`;
-        } else {
-          console.warn(`[Registry] Icon extraction failed for '${app.name}' from '${normalizedIconSource}'. .ico not created.`);
-        }
-      } catch (e) {
-        console.warn(`[Registry] Error extracting icon for '${app.name}' from '${normalizedIconSource}':`, e);
+      if (!isRegistryCandidateAllowedWithoutStartMenu(app, normalizedIconSource || app.iconSource)) {
+        continue;
       }
-      if (!appMap.has(app.name)) {
-        appMap.set(app.name, { name: app.name, iconPath });
+      if (!normalizedIconSource) {
+        upsertDiscoveredApp(app.name, null, app.iconSource, { source: 'registry', registryMeta: app });
+        continue;
       }
+      const iconPath = await getSafeIconDataUrl(normalizedIconSource);
+      if (!iconPath) {
+        iconFailureSummary.registry += 1;
+      }
+      upsertDiscoveredApp(app.name, iconPath, normalizedIconSource, { source: 'registry', registryMeta: app });
     }
     // 3. Optional Program Files .exe scan (very expensive; disabled by default).
     // Enable only for deep discovery troubleshooting:
@@ -239,29 +624,35 @@ ipcMain.handle('get-installed-apps', async () => {
       const exeFiles = scanForExeFiles(exeDirs, 3); // limit depth for perf
       for (const exePath of exeFiles) {
         const name = path.basename(exePath, '.exe');
+        if (!isLikelyUserApp(name, exePath, { source: 'exe-scan' })) continue;
         if (!appMap.has(name)) {
           let iconPath = null;
           try {
-            const hash = crypto.createHash('md5').update(exePath).digest('hex');
-            const icoFile = `${hash}.ico`;
-            const icoPath = path.join(iconDir, icoFile);
-            if (!fs.existsSync(icoPath)) {
-              await extractIconToIco(exePath, icoPath);
+            iconPath = await getSafeIconDataUrl(exePath);
+            if (!iconPath) {
+              console.warn(`[ExeScan] Safe icon lookup failed for '${name}'.`);
             }
-            if (fs.existsSync(icoPath)) {
-              iconPath = `appicon://${icoFile}`;
-            } else {
-              console.warn(`[ExeScan] Icon extraction failed for '${name}' from '${exePath}'. .ico not created.`);
-            }
-          } catch (e) {
-            console.warn(`[ExeScan] Error extracting icon for '${name}' from '${exePath}':`, e);
+          } catch {
+            console.warn(`[ExeScan] Safe icon lookup threw for '${name}'.`);
           }
-          appMap.set(name, { name, iconPath });
+          upsertDiscoveredApp(name, iconPath, exePath, { source: 'exe-scan' });
+        } else if (!appMap.get(name).iconPath) {
+          const iconPath = await getSafeIconDataUrl(exePath);
+          if (iconPath) {
+            upsertDiscoveredApp(name, iconPath, exePath, { source: 'exe-scan' });
+          }
         }
       }
     }
     await runWithConcurrencyLimit(shortcutTasks, 6);
-    return Array.from(appMap.values());
+    if (iconFailureSummary.shortcut > 0 || iconFailureSummary.registry > 0) {
+      console.warn(
+        `[InstalledApps] Icon extraction failures (shortcut=${iconFailureSummary.shortcut}, registry=${iconFailureSummary.registry}).`,
+      );
+    }
+    return Array.from(appMap.values())
+      .map(({ name, iconPath }) => ({ name, iconPath }))
+      .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } catch (err) {
     console.error('Error in get-installed-apps handler:', err);
     return [];
@@ -625,7 +1016,14 @@ ipcMain.handle('capture-running-app-layout', async () => {
     return {
       capturedAt: Date.now(),
       appCount: uniqueWindows.length,
-      monitors: orderedMonitors.map(({ bounds, workArea, pixelBounds, pixelWorkArea, ...rest }) => rest),
+      monitors: orderedMonitors.map((monitor) => {
+        const cleanedMonitor = { ...monitor };
+        delete cleanedMonitor.bounds;
+        delete cleanedMonitor.workArea;
+        delete cleanedMonitor.pixelBounds;
+        delete cleanedMonitor.pixelWorkArea;
+        return cleanedMonitor;
+      }),
       minimizedApps,
     };
   } catch (err) {

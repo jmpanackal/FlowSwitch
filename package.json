@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "main": "src/main/main.js",
   "scripts": {
+    "predev": "node scripts/free-port.mjs 5173",
     "build": "vite build",
     "lint": "eslint \"src/main/**/*.js\" \"src/preload.js\" \"eslint.config.cjs\" \"tailwind.config.js\" \"postcss.config.js\"",
     "typecheck": "node scripts/typecheck-baseline.mjs check",

@@ -9,7 +9,7 @@ function scanForExeFiles(dirs, maxDepth = 4) {
     let entries;
     try {
       entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch (e) {
+    } catch {
       return;
     }
     for (const entry of entries) {
