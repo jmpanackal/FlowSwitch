@@ -5,6 +5,14 @@ export type InstalledApp = {
   iconPath: string | null;
 };
 
+type UseInstalledAppsOptions = {
+  /**
+   * Show fallback apps only when Electron bridge is unavailable
+   * (e.g. running renderer standalone in browser).
+   */
+  allowFallbackWithoutElectron?: boolean;
+};
+
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedInstalledApps: InstalledApp[] | null = null;
 let cachedAt = 0;
@@ -44,25 +52,39 @@ function fetchInstalledAppsShared(): Promise<InstalledApp[]> {
   return inFlightRequest;
 }
 
-export function useInstalledApps(fallbackApps: InstalledApp[]) {
-  const [apps, setApps] = useState<InstalledApp[]>(fallbackApps);
+export function useInstalledApps(
+  fallbackApps: InstalledApp[],
+  options: UseInstalledAppsOptions = {},
+) {
+  const { allowFallbackWithoutElectron = false } = options;
+  const hasElectronBridge = !!window.electron && typeof window.electron.getInstalledApps === 'function';
+  const [apps, setApps] = useState<InstalledApp[]>(
+    hasElectronBridge ? [] : (allowFallbackWithoutElectron ? fallbackApps : []),
+  );
 
   useEffect(() => {
     let cancelled = false;
 
+    if (!hasElectronBridge) {
+      setApps(allowFallbackWithoutElectron ? fallbackApps : []);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     fetchInstalledAppsShared()
       .then((normalized) => {
         if (cancelled) return;
-        setApps(normalized.length > 0 ? normalized : fallbackApps);
+        setApps(normalized);
       })
       .catch(() => {
-        if (!cancelled) setApps(fallbackApps);
+        if (!cancelled) setApps([]);
       });
 
     return () => {
       cancelled = true;
     };
-  }, [fallbackApps]);
+  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge]);
 
   return useMemo(() => apps, [apps]);
 }
