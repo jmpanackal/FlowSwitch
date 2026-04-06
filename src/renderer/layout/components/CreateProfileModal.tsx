@@ -41,6 +41,7 @@ type MemoryCapture = {
     apps: Array<{
       name: string;
       iconPath: string | null;
+      executablePath?: string | null;
       position: { x: number; y: number };
       size: { width: number; height: number };
     }>;
@@ -48,6 +49,7 @@ type MemoryCapture = {
   minimizedApps?: Array<{
     name: string;
     iconPath: string | null;
+    executablePath?: string | null;
     position: { x: number; y: number };
     size: { width: number; height: number };
     targetMonitor?: string;
@@ -80,6 +82,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
         color: meta?.color || '#666666',
         category: meta?.category || 'Other',
         iconPath: app.iconPath,
+        executablePath: app.executablePath ?? null,
       };
     })
   ), [installedApps]);
@@ -156,6 +159,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             name: app.name,
             icon: app.icon,
             iconPath: app.iconPath ?? null,
+            executablePath: app.executablePath ?? null,
             color: app.color,
             position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
             size: { width: 35, height: 30 },
@@ -173,6 +177,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             name: app.name,
             icon: app.icon,
             iconPath: app.iconPath ?? null,
+            executablePath: app.executablePath ?? null,
             color: app.color,
             position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
             size: { width: 35, height: 30 },
@@ -222,6 +227,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             name: app.name,
             icon: meta?.icon || Settings,
             iconPath: app.iconPath ?? null,
+            executablePath: app.executablePath ?? null,
             color: meta?.color || '#666666',
             position: app.position,
             size: app.size,
@@ -236,6 +242,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
           name: app.name,
           icon: meta?.icon || Settings,
           iconPath: app.iconPath ?? null,
+          executablePath: app.executablePath ?? null,
           color: meta?.color || '#666666',
           volume: 50,
           launchBehavior: 'minimize' as const,

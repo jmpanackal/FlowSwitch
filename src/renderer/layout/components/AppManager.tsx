@@ -28,6 +28,7 @@ interface AppManagerProps {
 type DiscoveredApp = {
   name: string;
   iconPath: string | null;
+  executablePath?: string | null;
   icon?: undefined;
   color?: string;
   category?: string;
@@ -84,11 +85,12 @@ export function AppManager({
       const meta = appMeta[app.name.toLowerCase()];
       if (meta) {
         const { icon, ...rest } = meta;
-        return { ...rest, iconPath: app.iconPath };
+        return { ...rest, iconPath: app.iconPath, executablePath: app.executablePath ?? null };
       }
       return {
         name: app.name,
         iconPath: app.iconPath,
+        executablePath: app.executablePath ?? null,
         color: '#888',
         category: 'Other',
         firstLetter: app.name.charAt(0).toUpperCase(),
@@ -224,8 +226,11 @@ export function AppManager({
       type: 'app',
       name: app.name,
       icon: app.icon,
+      iconPath: app.iconPath ?? null,
+      executablePath: app.executablePath ?? null,
       color: app.color,
-      category: app.category
+      category: app.category,
+      firstLetter: app.firstLetter
     };
     
     const preview = (

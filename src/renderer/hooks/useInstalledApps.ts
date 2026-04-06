@@ -3,6 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 export type InstalledApp = {
   name: string;
   iconPath: string | null;
+  executablePath?: string | null;
 };
 
 type UseInstalledAppsOptions = {
@@ -18,13 +19,18 @@ let cachedInstalledApps: InstalledApp[] | null = null;
 let cachedAt = 0;
 let inFlightRequest: Promise<InstalledApp[]> | null = null;
 
-function normalizeApps(installedApps: { name: string; iconPath: string | null }[]): InstalledApp[] {
+function normalizeApps(installedApps: { name: string; iconPath: string | null; executablePath?: string | null }[]): InstalledApp[] {
   return installedApps
     .map((app) => ({
       name: app?.name,
       iconPath: app?.iconPath ?? null,
+      executablePath: app?.executablePath ?? null,
     }))
-    .filter((app): app is InstalledApp => typeof app.name === 'string' && app.name.trim().length > 0)
+    .filter((app) => typeof app.name === 'string' && app.name.trim().length > 0)
+    .map((app) => ({
+      ...app,
+      name: String(app.name).trim(),
+    }))
     .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
 }
 

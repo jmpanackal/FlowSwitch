@@ -901,6 +901,8 @@ export default function App() {
           const newApp = {
             name: dragData.name,
             icon: dragData.icon,
+            iconPath: dragData.iconPath ?? null,
+            executablePath: dragData.executablePath ?? null,
             color: dragData.color,
             position,
             size: { width: 60, height: 60 },
@@ -1028,6 +1030,8 @@ export default function App() {
           const newApp = {
             name: dragData.name,
             icon: dragData.icon,
+            iconPath: dragData.iconPath ?? null,
+            executablePath: dragData.executablePath ?? null,
             color: dragData.color,
             volume: 50,
             launchBehavior: "minimize" as const,
@@ -1477,6 +1481,8 @@ export default function App() {
         const minimizedApp = {
           name: appToMove.name,
           icon: appToMove.icon,
+          iconPath: (appToMove as any).iconPath ?? null,
+          executablePath: (appToMove as any).executablePath ?? null,
           color: appToMove.color,
           volume: appToMove.volume || 0,
           launchBehavior: "minimize" as const,
@@ -1721,6 +1727,8 @@ export default function App() {
         const newApp = {
           name: minimizedApp.name,
           icon: minimizedApp.icon,
+          iconPath: (minimizedApp as any).iconPath ?? null,
+          executablePath: (minimizedApp as any).executablePath ?? null,
           color: minimizedApp.color,
           position: newPosition ||
             minimizedApp.sourcePosition || { x: 50, y: 50 },
@@ -2776,7 +2784,15 @@ export default function App() {
                   backgroundColor: `${dragState.dragData.color || dragState.dragData.fileColor || "#4A5568"}80`,
                 }}
               >
-                {dragState.dragData.icon && (
+                {dragState.dragData.iconPath && (
+                  <img
+                    src={dragState.dragData.iconPath}
+                    alt={dragState.dragData.name || "App"}
+                    className="w-4.5 h-4.5 object-contain rounded drop-shadow-sm"
+                    draggable={false}
+                  />
+                )}
+                {!dragState.dragData.iconPath && dragState.dragData.icon && (
                   <dragState.dragData.icon className="w-4.5 h-4.5 text-white drop-shadow-sm" />
                 )}
                 {dragState.dragData.fileIcon && (
