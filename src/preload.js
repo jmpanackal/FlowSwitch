@@ -20,5 +20,9 @@ contextBridge.exposeInMainWorld('electron', {
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
 
   // Capture running app layout from main process
-  captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout')
+  captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout'),
+
+  // Profile persistence API
+  listProfiles: () => ipcRenderer.invoke('profiles:list'),
+  saveProfiles: (profiles) => ipcRenderer.invoke('profiles:save-all', profiles),
 });

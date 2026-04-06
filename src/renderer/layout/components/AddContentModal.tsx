@@ -63,7 +63,7 @@ const getDefaultApp = (type: 'link' | 'file', fileName?: string, url?: string): 
   }
 };
 
-// Function to extract page title from URL (mock implementation)
+// Best-effort page title inference from URL hostname.
 const extractTitleFromUrl = (url: string): string => {
   try {
     const urlObj = new URL(url);
@@ -162,7 +162,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
           const contentData = {
             type: 'file',
             name: selectedFiles.length === 1 && name ? name.trim() : file.name,
-            path: file.webkitRelativePath || file.name, // Mock path
+            path: file.webkitRelativePath || file.name,
             fileType: isFolder ? 'folder' : getFileType(file.name),
             isFolder: isFolder,
             defaultApp: getDefaultApp('file', file.name)

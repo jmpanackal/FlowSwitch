@@ -38,6 +38,8 @@ declare global {
         }>;
         error?: string;
       }>;
+      listProfiles: () => Promise<any[]>;
+      saveProfiles: (profiles: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
     };
   }
 }
