@@ -5,8 +5,23 @@ export {};
 declare global {
   interface Window {
     electron: {
-      launchProfile: (profileId: string) => void;
-      onProfileLoaded: (callback: (profile: Profile) => void) => void;
+      launchProfile: (profileId: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        profile?: Profile;
+        launchedAppCount?: number;
+        launchedTabCount?: number;
+        requestedAppCount?: number;
+        failedApps?: Array<{
+          name: string;
+          path: string;
+          error: string;
+        }>;
+        skippedApps?: Array<{
+          name: string;
+          reason: string;
+        }>;
+      }>;
       getInstalledApps: () => Promise<{ name: string; iconPath: string | null; executablePath?: string | null }[]>;
       captureRunningAppLayout: () => Promise<{
         capturedAt: number;

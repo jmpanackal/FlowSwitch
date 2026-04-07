@@ -1,6 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { spawn, execFile } = require('child_process');
 const ws = require('windows-shortcuts');
 const { scanForExeFiles } = require('./scanExeFiles');
 const { getRegistryInstalledApps } = require('./registryApps');
@@ -19,6 +20,21 @@ if (!gotSingleInstanceLock) {
   app.quit();
   process.exit(0);
 }
+
+// GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
+// which leads to renderer blackscreens. Force software rendering path.
+app.disableHardwareAcceleration();
+app.commandLine.appendSwitch('disable-gpu');
+app.commandLine.appendSwitch('disable-gpu-compositing');
+app.commandLine.appendSwitch('in-process-gpu');
+app.commandLine.appendSwitch('use-angle', 'swiftshader');
+app.commandLine.appendSwitch('use-gl', 'swiftshader');
+app.commandLine.appendSwitch('disable-direct-composition');
+app.commandLine.appendSwitch('disable-d3d11');
+app.commandLine.appendSwitch(
+  'disable-features',
+  'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas',
+);
 
 const iconDataUrlCache = new Map();
 
@@ -327,16 +343,30 @@ const createWindow = () => {
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    backgroundColor: '#0b1020',
     webPreferences: {
       preload: path.join(__dirname, '../preload.js'), // Preload script for secure IPC
     },
   });
 
+  win.webContents.on('render-process-gone', (_event, details) => {
+    console.error('[electron] renderer process gone:', details);
+  });
+  win.webContents.on('did-fail-load', (_event, code, description, validatedURL, isMainFrame) => {
+    if (!isMainFrame) return;
+    console.error('[electron] main frame failed to load:', {
+      code,
+      description,
+      validatedURL,
+    });
+  });
+  win.webContents.on('unresponsive', () => {
+    console.error('[electron] window became unresponsive');
+  });
+
   win.loadURL('http://localhost:5173'); // Load the frontend (usually a dev server)
 };
 
-
-app.disableHardwareAcceleration();
 
 app.whenReady().then(() => {
   createWindow();
@@ -406,6 +436,1154 @@ const buildSystemMonitorSnapshot = () => {
   }];
 };
 
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const sortMonitorsByLayout = (monitors) => (
+  [...(Array.isArray(monitors) ? monitors : [])].sort((a, b) => (
+    (a?.layoutPosition?.y ?? a?.bounds?.y ?? 0) - (b?.layoutPosition?.y ?? b?.bounds?.y ?? 0)
+    || (a?.layoutPosition?.x ?? a?.bounds?.x ?? 0) - (b?.layoutPosition?.x ?? b?.bounds?.x ?? 0)
+    || Number(Boolean(b?.primary)) - Number(Boolean(a?.primary))
+  ))
+);
+
+const normalizeLabel = (value) => String(value || '').trim().toLowerCase();
+
+const parseMonitorOrdinal = (value) => {
+  const input = String(value || '').trim();
+  if (!input) return null;
+
+  const match = input.match(/(?:^|\s|-)monitor\s*([0-9]+)$/i) || input.match(/^monitor-([0-9]+)$/i);
+  if (!match) return null;
+  const parsed = Number(match[1]);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return parsed;
+};
+
+const createProfileMonitorMap = (profileMonitors, systemMonitors) => {
+  const profileList = sortMonitorsByLayout(profileMonitors);
+  const systemList = sortMonitorsByLayout(systemMonitors);
+  const usedSystemIds = new Set();
+  const bySystemId = new Map(systemList.map((monitor) => [monitor.id, monitor]));
+  const bySystemName = new Map();
+  for (const monitor of systemList) {
+    const key = normalizeLabel(monitor?.systemName);
+    if (key && !bySystemName.has(key)) bySystemName.set(key, monitor);
+  }
+  const byMonitorOrdinal = new Map();
+  for (const monitor of systemList) {
+    const ordinal = parseMonitorOrdinal(monitor?.name);
+    if (ordinal && !byMonitorOrdinal.has(ordinal)) {
+      byMonitorOrdinal.set(ordinal, monitor);
+    }
+  }
+
+  const closestByLayout = (profileMonitor) => {
+    const px = Number(profileMonitor?.layoutPosition?.x ?? NaN);
+    const py = Number(profileMonitor?.layoutPosition?.y ?? NaN);
+    if (!Number.isFinite(px) || !Number.isFinite(py)) return null;
+    let best = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+    for (const monitor of systemList) {
+      if (usedSystemIds.has(monitor.id)) continue;
+      const mx = Number(monitor?.layoutPosition?.x ?? monitor?.bounds?.x ?? NaN);
+      const my = Number(monitor?.layoutPosition?.y ?? monitor?.bounds?.y ?? NaN);
+      if (!Number.isFinite(mx) || !Number.isFinite(my)) continue;
+      const dx = px - mx;
+      const dy = py - my;
+      const distance = (dx * dx) + (dy * dy);
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = monitor;
+      }
+    }
+    return best;
+  };
+
+  const pickFirstUnused = () => systemList.find((monitor) => !usedSystemIds.has(monitor.id)) || systemList[0] || null;
+
+  const mapping = new Map();
+  profileList.forEach((profileMonitor, index) => {
+    let target = null;
+    if (profileMonitor?.id && bySystemId.has(profileMonitor.id) && !usedSystemIds.has(profileMonitor.id)) {
+      target = bySystemId.get(profileMonitor.id);
+    }
+    if (!target) {
+      const nameMatch = bySystemName.get(normalizeLabel(profileMonitor?.systemName));
+      if (nameMatch && !usedSystemIds.has(nameMatch.id)) {
+        target = nameMatch;
+      }
+    }
+    if (!target) {
+      const ordinal = (
+        parseMonitorOrdinal(profileMonitor?.name)
+        || parseMonitorOrdinal(profileMonitor?.id)
+      );
+      const ordinalMatch = ordinal ? byMonitorOrdinal.get(ordinal) : null;
+      if (ordinalMatch && !usedSystemIds.has(ordinalMatch.id)) {
+        target = ordinalMatch;
+      }
+    }
+    if (!target) {
+      target = closestByLayout(profileMonitor);
+    }
+    if (!target) {
+      const indexCandidate = systemList[index];
+      if (indexCandidate && !usedSystemIds.has(indexCandidate.id)) {
+        target = indexCandidate;
+      }
+    }
+    if (!target) {
+      target = pickFirstUnused();
+    }
+
+    if (profileMonitor?.id && target) {
+      mapping.set(profileMonitor.id, target);
+      usedSystemIds.add(target.id);
+    }
+  });
+
+  return mapping;
+};
+
+const buildWindowBoundsForApp = (app, monitor, launchState) => {
+  const workArea = monitor?.workArea || monitor?.bounds;
+  if (!workArea) return null;
+
+  const hasExplicitSize = (
+    Number.isFinite(Number(app?.size?.width))
+    && Number.isFinite(Number(app?.size?.height))
+  );
+  const hasExplicitPosition = (
+    Number.isFinite(Number(app?.position?.x))
+    && Number.isFinite(Number(app?.position?.y))
+  );
+  const hasSourceGeometry = (
+    Number.isFinite(Number(app?.sourceSize?.width))
+    && Number.isFinite(Number(app?.sourceSize?.height))
+    && Number.isFinite(Number(app?.sourcePosition?.x))
+    && Number.isFinite(Number(app?.sourcePosition?.y))
+  );
+
+  const appSize = app?.size || {};
+  const appPosition = app?.position || app?.sourcePosition || {};
+  const widthPct = clamp(Number(appSize.width || 70), 5, 100);
+  const heightPct = clamp(Number(appSize.height || 70), 5, 100);
+  const centerXPct = clamp(Number(appPosition.x || 50), 0, 100);
+  const centerYPct = clamp(Number(appPosition.y || 50), 0, 100);
+  const width = Math.round(clamp((workArea.width * widthPct) / 100, 280, workArea.width));
+  const height = Math.round(clamp((workArea.height * heightPct) / 100, 220, workArea.height));
+  const left = Math.round(workArea.x + ((centerXPct / 100) * workArea.width) - (width / 2));
+  const top = Math.round(workArea.y + ((centerYPct / 100) * workArea.height) - (height / 2));
+
+  const boundedLeft = clamp(left, workArea.x, workArea.x + Math.max(0, workArea.width - width));
+  const boundedTop = clamp(top, workArea.y, workArea.y + Math.max(0, workArea.height - height));
+  const shouldForceFullscreen = launchState === 'maximized' || app?.launchBehavior === 'maximize';
+  const shouldMinimize = launchState === 'minimized' || app?.launchBehavior === 'minimize';
+  const looksFullscreenByGeometry = widthPct >= 95 && heightPct >= 95;
+  const minimizedWithoutSavedGeometry = (
+    shouldMinimize
+    && !hasSourceGeometry
+    && !(hasExplicitSize && hasExplicitPosition)
+  );
+
+  if (shouldForceFullscreen || looksFullscreenByGeometry || minimizedWithoutSavedGeometry) {
+    return {
+      left: workArea.x,
+      top: workArea.y,
+      width: workArea.width,
+      height: workArea.height,
+      state: shouldMinimize ? 'minimized' : 'maximized',
+    };
+  }
+
+  return {
+    left: boundedLeft,
+    top: boundedTop,
+    width,
+    height,
+    state: shouldMinimize ? 'minimized' : 'normal',
+  };
+};
+
+const moveWindowToBounds = ({
+  pid,
+  bounds,
+  processNameHint,
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+  preferNameEnumeration = false,
+  excludedWindowHandles = [],
+}) => (
+  new Promise((resolve) => {
+    const safePid = Number(pid || 0);
+    const safeProcessNameHint = String(processNameHint || '')
+      .trim()
+      .toLowerCase()
+      .replace(/\.exe$/i, '');
+    if (!bounds || (!Number.isFinite(safePid) && !safeProcessNameHint)) {
+      resolve({ applied: false, handle: null });
+      return;
+    }
+
+    const left = Number(bounds.left || 0);
+    const top = Number(bounds.top || 0);
+    const width = Math.max(120, Number(bounds.width || 800));
+    const height = Math.max(120, Number(bounds.height || 600));
+    const forceMaximize = bounds.state === 'maximized';
+    const setPosFlags = positionOnlyBeforeMaximize ? 0x0045 : 0x0044;
+    const windowState = bounds.state === 'maximized'
+      ? 3 // SW_MAXIMIZE
+      : bounds.state === 'minimized'
+        ? 2 // SW_MINIMIZE
+        : 9; // SW_RESTORE
+
+    const excludedCsv = (Array.isArray(excludedWindowHandles) ? excludedWindowHandles : [])
+      .map((h) => String(h || '').trim())
+      .filter(Boolean)
+      .join(',');
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWindowsProc cb, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+
+  public static List<IntPtr> FindVisibleWindowsForPids(HashSet<uint> pids, HashSet<string> excluded) {
+    var found = new List<IntPtr>();
+    EnumWindows((hWnd, lp) => {
+      if (!IsWindowVisible(hWnd)) return true;
+      uint wPid;
+      GetWindowThreadProcessId(hWnd, out wPid);
+      if (!pids.Contains(wPid)) return true;
+      string hs = ((long)hWnd).ToString();
+      if (excluded != null && excluded.Contains(hs)) return true;
+      found.Add(hWnd);
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
+"@
+$excludedSet = New-Object 'System.Collections.Generic.HashSet[string]'
+foreach ($tok in ("${excludedCsv.replace(/"/g, '`"')}" -split ',')) {
+  $t = $tok.Trim()
+  if ($t.Length -gt 0) { [void]$excludedSet.Add($t) }
+}
+
+function Apply-Placement {
+  param([IntPtr]$Handle)
+  if ($Handle -eq [IntPtr]::Zero) { return $false }
+  [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
+  [void][Win32]::ShowWindowAsync($Handle, ${windowState})
+  if (${(forceMaximize && aggressiveMaximize) ? '$true' : '$false'}) {
+    # Re-assert maximize a few times because Chromium can recreate/restore windows right after launch.
+    [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, 0x0044)
+    for ($mx = 0; $mx -lt 3; $mx++) {
+      Start-Sleep -Milliseconds 80
+      [void][Win32]::ShowWindowAsync($Handle, 9)
+      Start-Sleep -Milliseconds 80
+      [void][Win32]::ShowWindowAsync($Handle, 3)
+    }
+  }
+  return $true
+}
+
+$applied = $false
+$appliedHandle = ""
+$maxAttempts = ${preferNameEnumeration ? 28 : 16}
+$sleepMs = ${preferNameEnumeration ? 100 : 90}
+for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
+  $candidates = New-Object 'System.Collections.Generic.List[IntPtr]'
+
+  # Strategy 1: PID tree (MainWindowHandle only — fast path for non-Chromium)
+  if (${preferNameEnumeration ? '$false' : '$true'} -and ${safePid} -gt 0) {
+    $treePids = New-Object 'System.Collections.Generic.HashSet[int]'
+    [void]$treePids.Add(${Math.floor(safePid)})
+    for ($d = 0; $d -lt 3; $d++) {
+      $snap = @($treePids)
+      foreach ($pp in $snap) {
+        try {
+          $children = Get-CimInstance Win32_Process -Filter ("ParentProcessId = " + $pp) -ErrorAction SilentlyContinue
+          foreach ($c in $children) { try { [void]$treePids.Add([int]$c.ProcessId) } catch {} }
+        } catch {}
+      }
+    }
+    foreach ($tp in $treePids) {
+      try {
+        $p = Get-Process -Id $tp -ErrorAction SilentlyContinue
+        if ($p -and $p.MainWindowHandle -ne 0) {
+          $hs = [string]([int64]$p.MainWindowHandle)
+          if (-not $excludedSet.Contains($hs)) {
+            [void]$candidates.Add([IntPtr]::new([int64]$p.MainWindowHandle))
+          }
+        }
+      } catch {}
+    }
+  }
+
+  # Strategy 2: EnumWindows — compiled C# callback finds ALL visible windows, not just MainWindowHandle
+  if ($candidates.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace("${safeProcessNameHint.replace(/"/g, '`"')}")) {
+    $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
+    try {
+      $procs = Get-Process -Name "${safeProcessNameHint.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
+      foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
+    } catch {}
+    if ($pids.Count -gt 0) {
+      $enumResults = [Win32]::FindVisibleWindowsForPids($pids, $excludedSet)
+      foreach ($eh in $enumResults) { [void]$candidates.Add($eh) }
+    }
+  }
+
+  # Strategy 3: foreground window fallback
+  if ($candidates.Count -eq 0) {
+    try {
+      $fg = [Win32]::GetForegroundWindow()
+      if ($fg -ne [IntPtr]::Zero) {
+        $fgStr = [string]([int64]$fg)
+        if (-not $excludedSet.Contains($fgStr)) {
+          [void]$candidates.Add($fg)
+        }
+      }
+    } catch {}
+  }
+
+  foreach ($candidate in $candidates) {
+    if ($candidate -eq [IntPtr]::Zero) { continue }
+    if (Apply-Placement -Handle $candidate) {
+      $applied = $true
+      $appliedHandle = [string]([int64]$candidate)
+      break
+    }
+  }
+
+  if ($applied) { break }
+  Start-Sleep -Milliseconds $sleepMs
+}
+if (-not $applied) {
+  Write-Output "no-window|"
+  exit 0
+}
+Write-Output "ok|$appliedHandle"`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 12000, maxBuffer: 1024 * 256 },
+      (_error, stdout) => {
+        const output = String(stdout || '').trim();
+        const [status, handle] = output.split('|');
+        resolve({
+          applied: (status || '').toLowerCase() === 'ok',
+          handle: handle || null,
+        });
+      },
+    );
+  })
+);
+
+const moveSpecificWindowHandleToBounds = ({
+  handle,
+  bounds,
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+}) => (
+  new Promise((resolve) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle || !bounds) {
+      resolve({ applied: false, handle: null });
+      return;
+    }
+
+    const left = Number(bounds.left || 0);
+    const top = Number(bounds.top || 0);
+    const width = Math.max(120, Number(bounds.width || 800));
+    const height = Math.max(120, Number(bounds.height || 600));
+    const setPosFlags = positionOnlyBeforeMaximize ? 0x0045 : 0x0044;
+    const windowState = bounds.state === 'maximized'
+      ? 3 // SW_MAXIMIZE
+      : bounds.state === 'minimized'
+        ? 2 // SW_MINIMIZE
+        : 9; // SW_RESTORE
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+}
+"@
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "no-window|"; exit 0 }
+[void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
+[void][Win32]::ShowWindowAsync($h, ${windowState})
+if (${(bounds.state === 'maximized' && aggressiveMaximize) ? '$true' : '$false'}) {
+  [void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, 0x0044)
+  for ($mx = 0; $mx -lt 3; $mx++) {
+    Start-Sleep -Milliseconds 80
+    [void][Win32]::ShowWindowAsync($h, 9)
+    Start-Sleep -Milliseconds 80
+    [void][Win32]::ShowWindowAsync($h, 3)
+  }
+}
+Write-Output "ok|${safeHandle.replace(/"/g, '`"')}"`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 6000, maxBuffer: 1024 * 128 },
+      (_error, stdout) => {
+        const output = String(stdout || '').trim();
+        const [status, outHandle] = output.split('|');
+        resolve({
+          applied: (status || '').toLowerCase() === 'ok',
+          handle: outHandle || null,
+        });
+      },
+    );
+  })
+);
+
+const maximizeWindowHandle = (handle) => (
+  new Promise((resolve) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle) {
+      resolve(false);
+      return;
+    }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+}
+"@
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
+[void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
+Start-Sleep -Milliseconds 90
+[void][Win32]::ShowWindowAsync($h, 3) # SW_MAXIMIZE
+Write-Output "ok"`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 3000, maxBuffer: 1024 * 64 },
+      (_error, stdout) => {
+        resolve(String(stdout || '').toLowerCase().includes('ok'));
+      },
+    );
+  })
+);
+
+const getWindowRectByHandle = (handle) => (
+  new Promise((resolve) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle) {
+      resolve(null);
+      return;
+    }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32Rect {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+}
+"@
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "{}"; exit 0 }
+$r = New-Object Win32Rect+RECT
+$ok = [Win32Rect]::GetWindowRect($h, [ref]$r)
+if (-not $ok) { Write-Output "{}"; exit 0 }
+@{
+  left = [int]$r.Left
+  top = [int]$r.Top
+  width = [int]($r.Right - $r.Left)
+  height = [int]($r.Bottom - $r.Top)
+} | ConvertTo-Json -Depth 2`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 4000, maxBuffer: 1024 * 128 },
+      (_error, stdout) => {
+        try {
+          const parsed = JSON.parse(String(stdout || '').trim() || '{}');
+          if (
+            Number.isFinite(Number(parsed?.left))
+            && Number.isFinite(Number(parsed?.top))
+            && Number.isFinite(Number(parsed?.width))
+            && Number.isFinite(Number(parsed?.height))
+          ) {
+            resolve({
+              left: Number(parsed.left),
+              top: Number(parsed.top),
+              width: Number(parsed.width),
+              height: Number(parsed.height),
+            });
+            return;
+          }
+          resolve(null);
+        } catch {
+          resolve(null);
+        }
+      },
+    );
+  })
+);
+
+const isWindowOnTargetMonitor = ({ rect, monitor }) => {
+  if (!rect || !monitor) return false;
+  const target = monitor.workArea || monitor.bounds || null;
+  if (!target) return false;
+
+  const centerX = rect.left + (rect.width / 2);
+  const centerY = rect.top + (rect.height / 2);
+  const centerOnTarget = (
+    centerX >= target.x
+    && centerX <= (target.x + target.width)
+    && centerY >= target.y
+    && centerY <= (target.y + target.height)
+  );
+  if (!centerOnTarget) return false;
+  return true;
+};
+
+const verifyAndCorrectWindowPlacement = async ({
+  handle,
+  monitor,
+  bounds,
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+  maxCorrections = 2,
+  initialCheckDelayMs = 0,
+}) => {
+  const safeHandle = String(handle || '').trim();
+  if (!safeHandle || !monitor || !bounds) {
+    return { verified: false, corrected: false };
+  }
+
+  if (initialCheckDelayMs > 0) {
+    await sleep(initialCheckDelayMs);
+  }
+
+  for (let attempt = 0; attempt <= maxCorrections; attempt += 1) {
+    const rect = await getWindowRectByHandle(safeHandle);
+    if (isWindowOnTargetMonitor({ rect, monitor, bounds })) {
+      return { verified: true, corrected: attempt > 0 };
+    }
+    if (attempt >= maxCorrections) break;
+
+    await moveSpecificWindowHandleToBounds({
+      handle: safeHandle,
+      bounds,
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+    });
+    await sleep(90);
+  }
+
+  return { verified: false, corrected: true };
+};
+
+const getVisibleWindowInfos = (processName) => (
+  new Promise((resolve) => {
+    const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (!safeName) { resolve([]); return; }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class WinEnum {
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public delegate bool EnumWinProc(IntPtr hWnd, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWinProc cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids) {
+    var r = new List<Dictionary<string, object>>();
+    EnumWindows((h, l) => {
+      if (!IsWindowVisible(h)) return true;
+      uint p; GetWindowThreadProcessId(h, out p);
+      if (!pids.Contains(p)) return true;
+      RECT rect;
+      if (!GetWindowRect(h, out rect)) return true;
+      int width = rect.Right - rect.Left;
+      int height = rect.Bottom - rect.Top;
+      if (width <= 80 || height <= 80) return true;
+      long exStyle = GetWindowLongPtr(h, -20).ToInt64();
+      bool isToolWindow = (exStyle & 0x00000080L) != 0; // WS_EX_TOOLWINDOW
+      int cloaked = 0;
+      try { DwmGetWindowAttribute(h, 14, out cloaked, 4); } catch { cloaked = 0; } // DWMWA_CLOAKED
+      var cls = new StringBuilder(256);
+      GetClassName(h, cls, cls.Capacity);
+      int titleLen = GetWindowTextLength(h);
+      var row = new Dictionary<string, object>();
+      row["handle"] = ((long)h).ToString();
+      row["width"] = width;
+      row["height"] = height;
+      row["area"] = width * height;
+      row["enabled"] = IsWindowEnabled(h);
+      row["hung"] = IsHungAppWindow(h);
+      row["tool"] = isToolWindow;
+      row["cloaked"] = cloaked != 0;
+      row["className"] = cls.ToString();
+      row["titleLength"] = titleLen;
+      r.Add(row);
+      return true;
+    }, IntPtr.Zero);
+    return r;
+  }
+}
+"@
+$pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
+try {
+  $procs = Get-Process -Name "${safeName.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
+  foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
+} catch {}
+if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
+$rows = [WinEnum]::FindVisibleWindows($pids)
+$rows | ConvertTo-Json -Depth 5`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 8000, maxBuffer: 1024 * 256 },
+      (_error, stdout) => {
+        try {
+          const parsed = JSON.parse(String(stdout || '').trim() || '[]');
+          const rows = Array.isArray(parsed) ? parsed : [parsed];
+          resolve(rows.filter(Boolean).map((row) => ({
+            handle: String(row.handle || ''),
+            width: Number(row.width || 0),
+            height: Number(row.height || 0),
+            area: Number(row.area || 0),
+            enabled: Boolean(row.enabled),
+            hung: Boolean(row.hung),
+            tool: Boolean(row.tool),
+            cloaked: Boolean(row.cloaked),
+            className: String(row.className || ''),
+            titleLength: Number(row.titleLength || 0),
+          })).filter((row) => row.handle));
+        } catch {
+          resolve([]);
+        }
+      },
+    );
+  })
+);
+
+const scoreWindowCandidate = (row) => {
+  const className = String(row?.className || '').toLowerCase();
+  const titleLength = Number(row?.titleLength || 0);
+  const area = Number(row?.area || 0);
+  let score = 0;
+
+  if (row?.enabled) score += 1_000_000_000;
+  if (!row?.hung) score += 250_000_000;
+  if (!row?.tool) score += 100_000_000;
+  if (!row?.cloaked) score += 50_000_000;
+  if (titleLength > 0) score += 5_000_000;
+
+  // Penalize known non-primary Chromium surfaces that can appear blank/uninteractive.
+  if (className.includes('renderwidgethosthwnd')) score -= 150_000_000;
+  if (className.includes('intermediate d3d window')) score -= 120_000_000;
+
+  return score + area;
+};
+
+const waitForWindowResponsive = async (processName, handle, maxWaitMs = 1800) => {
+  const safeHandle = String(handle || '').trim();
+  if (!safeHandle) return false;
+
+  const deadline = Date.now() + Math.max(0, Number(maxWaitMs || 0));
+  while (Date.now() <= deadline) {
+    const rows = await getVisibleWindowInfos(processName);
+    const row = rows.find((candidate) => String(candidate.handle) === safeHandle);
+    if (row && row.enabled && !row.hung && !row.cloaked && row.area > 80_000) {
+      return true;
+    }
+    await sleep(120);
+  }
+
+  return false;
+};
+
+const launchExecutable = (executablePath, args = []) => (
+  new Promise((resolve, reject) => {
+    let child;
+    try {
+      child = spawn(executablePath, args, {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+
+    let completed = false;
+    const cleanup = () => {
+      child.removeListener('error', onError);
+      child.removeListener('spawn', onSpawn);
+    };
+    const onError = (error) => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      reject(error);
+    };
+    const onSpawn = () => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      child.unref();
+      resolve(child);
+    };
+
+    child.once('error', onError);
+    child.once('spawn', onSpawn);
+
+    setTimeout(() => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      child.unref();
+      resolve(child);
+    }, 200);
+  })
+);
+
+const gatherProfileAppLaunches = (profile, monitorMap) => {
+  const launches = [];
+  const skippedApps = [];
+  const primaryProfileMonitorId = (Array.isArray(profile?.monitors) ? profile.monitors : []).find((monitor) => monitor?.primary)?.id;
+  const defaultMonitor = sortMonitorsByLayout(buildSystemMonitorSnapshot())[0] || null;
+  const restrictedNames = new Set(
+    (Array.isArray(profile?.restrictedApps) ? profile.restrictedApps : [])
+      .map((name) => normalizeLabel(name))
+      .filter(Boolean),
+  );
+
+  const pushIfLaunchable = (app, profileMonitorId) => {
+    const appName = String(app?.name || '').trim();
+    if (!appName) {
+      skippedApps.push({
+        name: 'Unnamed App',
+        reason: 'missing-name',
+      });
+      return;
+    }
+    if (restrictedNames.has(normalizeLabel(appName))) {
+      skippedApps.push({
+        name: appName,
+        reason: 'restricted',
+      });
+      return;
+    }
+
+    const executablePath = extractExecutablePath(app?.executablePath || app?.path || '');
+    if (!executablePath) {
+      skippedApps.push({
+        name: appName,
+        reason: 'missing-executable-path',
+      });
+      return;
+    }
+
+    const monitor = (
+      (profileMonitorId && monitorMap.get(profileMonitorId))
+      || monitorMap.get(primaryProfileMonitorId)
+      || defaultMonitor
+    );
+    launches.push({
+      appName,
+      executablePath,
+      monitor,
+      app,
+    });
+  };
+
+  for (const monitor of (Array.isArray(profile?.monitors) ? profile.monitors : [])) {
+    for (const app of (Array.isArray(monitor?.apps) ? monitor.apps : [])) {
+      pushIfLaunchable(app, monitor?.id);
+    }
+  }
+
+  for (const app of (Array.isArray(profile?.minimizedApps) ? profile.minimizedApps : [])) {
+    pushIfLaunchable(app, app?.targetMonitor || primaryProfileMonitorId || null);
+  }
+
+  return { launches, skippedApps };
+};
+
+const gatherLegacyActionLaunches = (profile, monitorMap) => {
+  const actions = Array.isArray(profile?.actions) ? profile.actions : [];
+  const profileMonitors = sortMonitorsByLayout(profile?.monitors);
+  const defaultMonitor = sortMonitorsByLayout(buildSystemMonitorSnapshot())[0] || null;
+  const launches = [];
+  const browserUrls = [];
+  const skippedApps = [];
+  const restrictedNames = new Set(
+    (Array.isArray(profile?.restrictedApps) ? profile.restrictedApps : [])
+      .map((name) => normalizeLabel(name))
+      .filter(Boolean),
+  );
+
+  for (const action of actions) {
+    if (action?.type === 'browserTab') {
+      const url = String(action?.url || '').trim();
+      if (url) browserUrls.push(url);
+      continue;
+    }
+
+    if (action?.type !== 'app') continue;
+    const appName = String(action?.name || 'App').trim();
+    if (restrictedNames.has(normalizeLabel(appName))) {
+      skippedApps.push({
+        name: appName,
+        reason: 'restricted',
+      });
+      continue;
+    }
+
+    const executablePath = extractExecutablePath(action?.path || '');
+    if (!executablePath) {
+      skippedApps.push({
+        name: appName,
+        reason: 'invalid-legacy-action-path',
+      });
+      continue;
+    }
+
+    const monitorIndex = Math.max(0, Number(action?.monitor || 1) - 1);
+    const profileMonitorId = profileMonitors[monitorIndex]?.id;
+    const monitor = (profileMonitorId ? monitorMap.get(profileMonitorId) : null) || defaultMonitor;
+    launches.push({
+      appName,
+      executablePath,
+      monitor,
+      app: {
+        name: appName,
+        launchBehavior: 'new',
+      },
+    });
+  }
+
+  return {
+    launches,
+    browserUrls,
+    skippedApps,
+  };
+};
+
+const launchProfileById = async (profileId) => {
+  const profiles = readProfilesFromDisk();
+  const normalizedProfileId = String(profileId || '').trim();
+  const profile = profiles.find(
+    (candidate) => String(candidate?.id || '').trim() === normalizedProfileId,
+  );
+  if (!profile) {
+    return {
+      ok: false,
+      error: 'Profile not found. Save the profile and try again.',
+      requestedProfileId: normalizedProfileId,
+      availableProfileIds: profiles
+        .map((candidate) => String(candidate?.id || '').trim())
+        .filter(Boolean),
+    };
+  }
+
+  const launchState = profile?.launchMaximized
+    ? 'maximized'
+    : profile?.launchMinimized
+      ? 'minimized'
+      : 'normal';
+
+  const systemMonitors = buildSystemMonitorSnapshot();
+  const monitorMap = createProfileMonitorMap(profile?.monitors, systemMonitors);
+  const modernLaunchData = gatherProfileAppLaunches(profile, monitorMap);
+  const legacyLaunchData = gatherLegacyActionLaunches(profile, monitorMap);
+  const launchKey = (launch) => `${String(launch.executablePath || '').toLowerCase()}::${launch.monitor?.id || 'monitor'}`;
+  const seenLaunchKeys = new Set();
+  const appLaunches = [...modernLaunchData.launches, ...legacyLaunchData.launches]
+    .filter((launch) => {
+      const key = launchKey(launch);
+      if (seenLaunchKeys.has(key)) return false;
+      seenLaunchKeys.add(key);
+      return true;
+    });
+  const skippedApps = [...modernLaunchData.skippedApps, ...legacyLaunchData.skippedApps];
+  const failedApps = [];
+  let launchedAppCount = 0;
+  const launchOrder = profile?.launchOrder === 'sequential' ? 'sequential' : 'all-at-once';
+  const appLaunchDelays = (profile?.appLaunchDelays && typeof profile.appLaunchDelays === 'object')
+    ? profile.appLaunchDelays
+    : {};
+  const processHintCounts = new Map();
+  for (const launchItem of appLaunches) {
+    const processNameHint = path.basename(launchItem.executablePath, path.extname(launchItem.executablePath)).toLowerCase();
+    processHintCounts.set(processNameHint, (processHintCounts.get(processNameHint) || 0) + 1);
+  }
+
+  const runLaunch = async (launchItem) => {
+    try {
+      const processNameHint = path.basename(launchItem.executablePath, path.extname(launchItem.executablePath));
+      const processHintLc = processNameHint.toLowerCase();
+      const hintCount = processHintCounts.get(processHintLc) || 0;
+      const isDuplicateProcessLaunch = hintCount > 1;
+      const isChromiumFamily = processHintLc === 'msedge' || processHintLc === 'brave' || processHintLc === 'chrome';
+      const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch) ? ['--new-window'] : [];
+      const preLaunchWindowInfos = isDuplicateProcessLaunch
+        ? await getVisibleWindowInfos(processHintLc)
+        : [];
+      const preLaunchHandles = preLaunchWindowInfos.map((row) => row.handle);
+
+      const launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
+      launchedAppCount += 1;
+      const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
+      if (bounds) {
+        const aggressiveMaximize = bounds.state === 'maximized' && processHintLc === 'msedge';
+        const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
+        const shouldDelayChromiumMaximize = (
+          isChromiumFamily
+          && isDuplicateProcessLaunch
+          && bounds.state === 'maximized'
+        );
+        const placementBounds = shouldDelayChromiumMaximize
+          ? { ...bounds, state: 'normal' }
+          : bounds;
+        const excludedHandles = preLaunchHandles;
+
+        if (isDuplicateProcessLaunch) {
+          await sleep(240);
+        }
+
+        let result = { applied: false, handle: null };
+        let newHandles = [];
+
+        if (isDuplicateProcessLaunch) {
+          const postLaunchWindowInfos = await getVisibleWindowInfos(processHintLc);
+          const postLaunchHandles = postLaunchWindowInfos.map((row) => row.handle);
+          const preHandleSet = new Set(preLaunchHandles);
+          newHandles = postLaunchHandles.filter((h) => !preHandleSet.has(h));
+          const newHandleSet = new Set(newHandles);
+          const rankedNewWindows = postLaunchWindowInfos
+            .filter((row) => newHandleSet.has(row.handle))
+            .sort((a, b) => scoreWindowCandidate(b) - scoreWindowCandidate(a));
+
+          for (const candidateRow of rankedNewWindows) {
+            const newHandle = candidateRow.handle;
+            if (isChromiumFamily) {
+              await waitForWindowResponsive(processHintLc, newHandle, 2200);
+            }
+            result = await moveSpecificWindowHandleToBounds({
+              handle: newHandle,
+              bounds: placementBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+            });
+            if (result.applied) break;
+          }
+
+          // Trace duplicate-window routing for any multi-window app.
+          console.log('[launch-profile] duplicate-window-placement', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+            targetState: bounds.state,
+            preHandles: preLaunchHandles,
+            postHandles: postLaunchHandles,
+            newHandles,
+            rankedNewWindowCandidates: rankedNewWindows.map((row) => ({
+              handle: row.handle,
+              enabled: row.enabled,
+              hung: row.hung,
+              tool: row.tool,
+              cloaked: row.cloaked,
+              className: row.className,
+              titleLength: row.titleLength,
+              area: row.area,
+              score: scoreWindowCandidate(row),
+            })),
+            placedHandle: result.handle,
+            applied: result.applied,
+          });
+        }
+
+        if (!result.applied) {
+          result = await moveWindowToBounds({
+            pid: launchedChild?.pid || 0,
+            bounds: placementBounds,
+            processNameHint,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            preferNameEnumeration: isDuplicateProcessLaunch,
+            excludedWindowHandles: excludedHandles,
+          });
+        }
+
+        if (!result.applied && isDuplicateProcessLaunch) {
+          await sleep(260);
+          result = await moveWindowToBounds({
+            pid: launchedChild?.pid || 0,
+            bounds: placementBounds,
+            processNameHint,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            preferNameEnumeration: true,
+            excludedWindowHandles: excludedHandles,
+          });
+        }
+
+        if (!result.applied && isDuplicateProcessLaunch && newHandles.length > 0) {
+          for (const newHandle of newHandles) {
+            result = await moveSpecificWindowHandleToBounds({
+              handle: newHandle,
+              bounds: placementBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+            });
+            if (result.applied) break;
+          }
+        }
+
+        if (result.applied && result.handle && isDuplicateProcessLaunch && launchItem.monitor) {
+          const verification = await verifyAndCorrectWindowPlacement({
+            handle: result.handle,
+            monitor: launchItem.monitor,
+            bounds: placementBounds,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            maxCorrections: isDuplicateProcessLaunch ? 1 : 0,
+            initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 0,
+          });
+
+          console.log('[launch-profile] placement-verification', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+            targetState: bounds.state,
+            handle: result.handle,
+            verified: verification.verified,
+            corrected: verification.corrected,
+          });
+        }
+
+        if (result.applied && result.handle && shouldDelayChromiumMaximize) {
+          await waitForWindowResponsive(processHintLc, result.handle, 2200);
+          await maximizeWindowHandle(result.handle);
+        }
+      }
+    } catch (error) {
+      failedApps.push({
+        name: launchItem.appName,
+        path: launchItem.executablePath,
+        error: String(error?.message || error || 'Failed to launch app'),
+      });
+    }
+  };
+
+  const hasDuplicateProcessLaunches = Array.from(processHintCounts.values())
+    .some((count) => count > 1);
+
+  if (launchOrder === 'sequential' || hasDuplicateProcessLaunches) {
+    for (const launchItem of appLaunches) {
+      const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
+      const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
+      if (safeDelayMs > 0) {
+        await sleep(safeDelayMs);
+      }
+      await runLaunch(launchItem);
+    }
+  } else {
+    await Promise.all(appLaunches.map((launchItem) => runLaunch(launchItem)));
+  }
+
+  const { shell } = require('electron');
+  const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
+  const launchedUrls = new Set();
+  let launchedTabCount = 0;
+  for (const tab of browserTabs) {
+    const url = String(tab?.url || '').trim();
+    if (!url || launchedUrls.has(url)) continue;
+    launchedUrls.add(url);
+    try {
+      await shell.openExternal(url);
+      launchedTabCount += 1;
+    } catch {
+      // Keep profile launch resilient if one tab URL fails.
+    }
+  }
+
+  for (const url of legacyLaunchData.browserUrls) {
+    if (!url || launchedUrls.has(url)) continue;
+    launchedUrls.add(url);
+    try {
+      await shell.openExternal(url);
+      launchedTabCount += 1;
+    } catch {
+      // Keep profile launch resilient if one tab URL fails.
+    }
+  }
+
+  if (launchedAppCount === 0 && launchedTabCount === 0) {
+    return {
+      ok: false,
+      error: 'No launchable apps or tabs found in this profile. Add an executable path in app details or recreate from installed apps.',
+      profile,
+      launchedAppCount,
+      launchedTabCount,
+      failedApps,
+      skippedApps,
+      requestedAppCount: appLaunches.length,
+    };
+  }
+
+  return {
+    ok: failedApps.length === 0,
+    profile,
+    launchedAppCount,
+    launchedTabCount,
+    failedApps,
+    skippedApps,
+    requestedAppCount: appLaunches.length,
+  };
+};
+
 ipcMain.handle('get-system-monitors', async () => {
   try {
     const monitors = buildSystemMonitorSnapshot();
@@ -452,41 +1630,12 @@ ipcMain.handle('profiles:save-all', async (_event, profiles) => {
   }
 });
 
-// Listen for 'launch-profile' IPC events from the renderer process
-ipcMain.on('launch-profile', (event, profileId) => {
+ipcMain.handle('launch-profile', async (_event, profileId) => {
   try {
-    const profiles = readProfilesFromDisk();
-    const profile = profiles.find((candidate) => candidate?.id === profileId);
-
-    if (!profile) {
-      event.reply('profile-loaded', { error: 'Profile not found' });
-      return;
-    }
-
-    // Send profile back to React
-    event.reply('profile-loaded', profile);
-
-    const actions = Array.isArray(profile.actions) ? profile.actions : [];
-    if (actions.length === 0) return;
-
-    // Require node modules for launching things
-    const { spawn } = require('child_process');
-    const { shell } = require('electron');
-
-    // Loop through each action in the profile
-    for (const action of actions) {
-      if (action?.type === 'app' && action.path) {
-        spawn(action.path, {
-          detached: true,
-          stdio: 'ignore',
-        }).unref();
-      } else if (action?.type === 'browserTab' && action.url) {
-        shell.openExternal(action.url);
-      }
-    }
+    return await launchProfileById(profileId);
   } catch (err) {
     console.error('Failed to load or launch profile:', err);
-    event.reply('profile-loaded', { error: 'Failed to load profile' });
+    return { ok: false, error: 'Failed to load profile' };
   }
 });
 
