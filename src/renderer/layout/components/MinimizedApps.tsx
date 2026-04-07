@@ -9,6 +9,8 @@ interface MinimizedApp {
   icon?: LucideIcon;
   iconPath?: string | null;
   executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -299,6 +301,8 @@ export function MinimizedApps({
           icon: app.icon,
           iconPath: app.iconPath ?? null,
           executablePath: app.executablePath ?? null,
+          shortcutPath: app.shortcutPath ?? null,
+          launchUrl: app.launchUrl ?? null,
           color: app.color,
           volume: app.volume,
           targetMonitor: app.targetMonitor

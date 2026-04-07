@@ -13,6 +13,8 @@ interface App {
   icon?: LucideIcon;
   iconPath?: string | null;
   executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
   color: string;
   position: { x: number; y: number };
   size: { width: number; height: number };
@@ -38,6 +40,8 @@ interface MinimizedApp {
   icon?: LucideIcon;
   iconPath?: string | null;
   executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -1324,6 +1328,8 @@ export function MonitorLayout({
                               icon: app.icon,
                               iconPath: app.iconPath ?? null,
                               executablePath: app.executablePath ?? null,
+                              shortcutPath: app.shortcutPath ?? null,
+                              launchUrl: app.launchUrl ?? null,
                               color: app.color,
                               position: app.position,
                               size: app.size,
@@ -1353,6 +1359,8 @@ export function MonitorLayout({
                                   icon: app.icon,
                                   iconPath: app.iconPath ?? null,
                                   executablePath: app.executablePath ?? null,
+                                  shortcutPath: app.shortcutPath ?? null,
+                                  launchUrl: app.launchUrl ?? null,
                                   color: app.color,
                                   volume: app.volume,
                                   position: app.position,

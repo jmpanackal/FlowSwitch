@@ -22,7 +22,13 @@ declare global {
           reason: string;
         }>;
       }>;
-      getInstalledApps: () => Promise<{ name: string; iconPath: string | null; executablePath?: string | null }[]>;
+      getInstalledApps: () => Promise<{
+        name: string;
+        iconPath: string | null;
+        executablePath?: string | null;
+        shortcutPath?: string | null;
+        launchUrl?: string | null;
+      }[]>;
       captureRunningAppLayout: () => Promise<{
         capturedAt: number;
         appCount: number;

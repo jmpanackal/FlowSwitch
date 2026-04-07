@@ -12,6 +12,10 @@ const {
 } = require('./services/profile-store');
 const { sanitizeProfileIconPathsDeep } = require('./utils/profile-icon-paths');
 const {
+  isSafeAppLaunchUrl,
+  sanitizeProfileLaunchFieldsDeep,
+} = require('./utils/profile-launch-fields');
+const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
@@ -45,6 +49,7 @@ const MAX_PROFILE_ID_LENGTH = 128;
 const MAX_PROFILE_NAME_LENGTH = 256;
 const MAX_PROFILE_PAYLOAD_SIZE_BYTES = 5 * 1024 * 1024;
 const MAX_URL_LENGTH = 2048;
+const MAX_SHORTCUT_PATH_LENGTH = 4096;
 
 const getDistIndexPath = () => path.join(__dirname, '../../dist/index.html');
 
@@ -224,7 +229,7 @@ const sanitizeProfilesPayload = (profiles) => {
           })
           .filter(Boolean);
       }
-      return sanitizeProfileIconPathsDeep(normalized);
+      return sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(normalized));
     });
 };
 
@@ -293,6 +298,60 @@ const isDisallowedLaunchExecutablePath = (value = '') => {
   if (!normalized) return true;
   const base = path.basename(normalized);
   return SHELL_HOST_EXECUTABLES.has(base);
+};
+
+const resolveShortcutPathForLaunch = (raw) => {
+  const s = safeLimitedString(raw, MAX_SHORTCUT_PATH_LENGTH);
+  if (!s) return null;
+  const normalized = normalizePathForWindows(s);
+  if (!normalized.toLowerCase().endsWith('.lnk')) return null;
+  if (normalized.includes('..')) return null;
+  try {
+    if (!fs.existsSync(normalized) || !fs.statSync(normalized).isFile()) return null;
+  } catch {
+    return null;
+  }
+  return normalized;
+};
+
+/**
+ * When the profile only has a .lnk (no stored exe), Get-Process must still use the real image name
+ * (e.g. brave / chrome / msedge) or Chromium placement never runs and the wrong HWND gets moved (gray window).
+ */
+const inferBrowserProcessKeyFromHints = (launchItem) => {
+  const name = String(launchItem.appName || '').toLowerCase();
+  const sc = String(launchItem.shortcutPath || '').toLowerCase();
+  const base = path.basename(sc, '.lnk').toLowerCase();
+  const hay = `${name}\n${sc}\n${base}`;
+
+  if (/\bbrave\b/.test(hay) || hay.includes('brave-browser')) return 'brave';
+  if (hay.includes('msedge') || hay.includes('microsoft edge')) return 'msedge';
+  if (hay.includes('microsoft\\edge\\') || hay.includes('/edge/application/')) return 'msedge';
+  if (hay.includes('vivaldi')) return 'vivaldi';
+  if (hay.includes('chromium')) return 'chrome';
+  if (hay.includes('opera') || hay.includes('operagx')) return 'opera';
+  if (hay.includes('arc')) return 'arc';
+  if (hay.includes('chrome')) return 'chrome';
+
+  return null;
+};
+
+/**
+ * Basename for window placement / duplicate detection (steam URL groups as "steam").
+ * @param {{ executablePath?: string | null; launchUrl?: string | null; shortcutPath?: string | null; appName?: string }} launchItem
+ * @returns {string}
+ */
+const getPlacementProcessKey = (launchItem) => {
+  if (launchItem.executablePath) {
+    return path.basename(launchItem.executablePath, path.extname(launchItem.executablePath)).toLowerCase();
+  }
+  const url = String(launchItem.launchUrl || '').toLowerCase();
+  if (url.includes('steam://') || url.includes('rungameid')) return 'steam';
+
+  const inferred = inferBrowserProcessKeyFromHints(launchItem);
+  if (inferred) return inferred;
+
+  return 'app';
 };
 
 const extractIconSourcePath = (raw) => (
@@ -479,6 +538,9 @@ const resolveSteamGameIconPath = (appId) => {
     path.join('steam', 'games', `${appId}.ico`),
     path.join('appcache', 'librarycache', `${appId}_icon.jpg`),
     path.join('appcache', 'librarycache', `${appId}_icon.png`),
+    path.join('steamapps', 'librarycache', `${appId}_icon.jpg`),
+    path.join('steamapps', 'librarycache', `${appId}_icon.png`),
+    path.join('steamapps', 'librarycache', `${appId}.jpg`),
   ];
 
   for (const root of roots) {
@@ -631,8 +693,23 @@ const buildSystemMonitorSnapshot = () => {
   const displays = screen.getAllDisplays();
   const primaryDisplayId = screen.getPrimaryDisplay().id;
 
-  const monitors = displays.map((display, idx) => ({
+  const monitors = displays.map((display, idx) => {
+    let workAreaPhysical = null;
+    if (process.platform === 'win32') {
+      try {
+        workAreaPhysical = screen.dipToScreenRect(display, {
+          x: display.workArea.x,
+          y: display.workArea.y,
+          width: display.workArea.width,
+          height: display.workArea.height,
+        });
+      } catch {
+        workAreaPhysical = null;
+      }
+    }
+    return {
     id: `monitor-${display.id}`,
+    displayId: display.id,
     name: `Monitor ${idx + 1}`,
     systemName: (display.label && String(display.label).trim()) ? String(display.label).trim() : null,
     primary: display.id === primaryDisplayId,
@@ -646,6 +723,7 @@ const buildSystemMonitorSnapshot = () => {
     layoutPosition: { x: display.bounds.x, y: display.bounds.y },
     bounds: display.bounds,
     workArea: display.workArea,
+    workAreaPhysical,
     pixelBounds: {
       x: Math.round(display.bounds.x * display.scaleFactor),
       y: Math.round(display.bounds.y * display.scaleFactor),
@@ -659,10 +737,12 @@ const buildSystemMonitorSnapshot = () => {
       height: Math.round(display.workArea.height * display.scaleFactor),
     },
     apps: [],
-  }));
+  };
+  });
 
   return monitors.length > 0 ? monitors : [{
     id: 'monitor-1',
+    displayId: screen.getPrimaryDisplay().id,
     name: 'Monitor 1',
     systemName: null,
     primary: true,
@@ -672,6 +752,7 @@ const buildSystemMonitorSnapshot = () => {
     layoutPosition: { x: 0, y: 0 },
     bounds: { x: 0, y: 0, width: 1920, height: 1080 },
     workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+    workAreaPhysical: null,
     pixelBounds: { x: 0, y: 0, width: 1920, height: 1080 },
     pixelWorkArea: { x: 0, y: 0, width: 1920, height: 1080 },
     apps: [],
@@ -681,6 +762,50 @@ const buildSystemMonitorSnapshot = () => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+const getElectronDisplayForMonitor = (monitor) => {
+  try {
+    const { screen } = require('electron');
+    const rawId = monitor?.displayId;
+    if (rawId === undefined || rawId === null) return null;
+    const displays = screen.getAllDisplays();
+    return displays.find((d) => d.id === rawId) || null;
+  } catch {
+    return null;
+  }
+};
+
+/**
+ * Electron Display bounds/workArea are DIP; Win32 SetWindowPos expects physical pixels on Windows.
+ * Use the monitor's display for conversion so multi-monitor DPI scaling does not skew placement.
+ */
+const physicalBoundsFromDip = (dipBounds, monitor) => {
+  if (process.platform !== 'win32' || !dipBounds) return dipBounds;
+  try {
+    const { screen } = require('electron');
+    const rect = {
+      x: Math.round(Number(dipBounds.left)),
+      y: Math.round(Number(dipBounds.top)),
+      width: Math.round(Number(dipBounds.width)),
+      height: Math.round(Number(dipBounds.height)),
+    };
+    const display = getElectronDisplayForMonitor(monitor)
+      || screen.getDisplayNearestPoint({
+        x: Math.floor(rect.x + rect.width / 2),
+        y: Math.floor(rect.y + rect.height / 2),
+      });
+    const p = screen.dipToScreenRect(display, rect);
+    return {
+      left: p.x,
+      top: p.y,
+      width: p.width,
+      height: p.height,
+      state: dipBounds.state,
+    };
+  } catch {
+    return dipBounds;
+  }
+};
 
 const sortMonitorsByLayout = (monitors) => (
   [...(Array.isArray(monitors) ? monitors : [])].sort((a, b) => (
@@ -789,6 +914,95 @@ const createProfileMonitorMap = (profileMonitors, systemMonitors) => {
   return mapping;
 };
 
+/**
+ * Edge-aligned rectangles for half-screen "snap" layouts (matches side-by-side / top-bottom presets).
+ * Avoids center-percent rounding so each pane uses an exact partition of the work area.
+ */
+const trySnapLayoutPartitionBounds = ({
+  workArea,
+  widthPct,
+  heightPct,
+  centerXPct,
+  centerYPct,
+  shouldMinimize,
+}) => {
+  if (shouldMinimize) return null;
+  const wx = workArea.x;
+  const wy = workArea.y;
+  const ww = workArea.width;
+  const wh = workArea.height;
+
+  const isHalfWidth = widthPct >= 44 && widthPct <= 56;
+  const isFullHeight = heightPct >= 95;
+  if (isHalfWidth && isFullHeight && centerXPct !== 50) {
+    const leftW = Math.floor(ww / 2);
+    const rightW = ww - leftW;
+    if (centerXPct < 50) {
+      return {
+        left: wx,
+        top: wy,
+        width: leftW,
+        height: wh,
+        state: 'normal',
+      };
+    }
+    if (centerXPct > 50) {
+      return {
+        left: wx + leftW,
+        top: wy,
+        width: rightW,
+        height: wh,
+        state: 'normal',
+      };
+    }
+  }
+
+  // Three side-by-side columns (~33% width each): center-based math leaves gaps; partition exactly.
+  const isThirdWidth = widthPct >= 27 && widthPct <= 40;
+  if (isThirdWidth && isFullHeight) {
+    const w0 = Math.floor(ww / 3);
+    const w1 = Math.floor((ww - w0) / 2);
+    const w2 = ww - w0 - w1;
+    let col = 1;
+    if (centerXPct < 37) col = 0;
+    else if (centerXPct > 63) col = 2;
+    if (col === 0) {
+      return { left: wx, top: wy, width: w0, height: wh, state: 'normal' };
+    }
+    if (col === 1) {
+      return { left: wx + w0, top: wy, width: w1, height: wh, state: 'normal' };
+    }
+    return { left: wx + w0 + w1, top: wy, width: w2, height: wh, state: 'normal' };
+  }
+
+  const isHalfHeight = heightPct >= 44 && heightPct <= 56;
+  const isFullWidth = widthPct >= 95;
+  if (isHalfHeight && isFullWidth && centerYPct !== 50) {
+    const topH = Math.floor(wh / 2);
+    const bottomH = wh - topH;
+    if (centerYPct < 50) {
+      return {
+        left: wx,
+        top: wy,
+        width: ww,
+        height: topH,
+        state: 'normal',
+      };
+    }
+    if (centerYPct > 50) {
+      return {
+        left: wx,
+        top: wy + topH,
+        width: ww,
+        height: bottomH,
+        state: 'normal',
+      };
+    }
+  }
+
+  return null;
+};
+
 const buildWindowBoundsForApp = (app, monitor, launchState) => {
   const workArea = monitor?.workArea || monitor?.bounds;
   if (!workArea) return null;
@@ -814,13 +1028,6 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
   const heightPct = clamp(Number(appSize.height || 70), 5, 100);
   const centerXPct = clamp(Number(appPosition.x || 50), 0, 100);
   const centerYPct = clamp(Number(appPosition.y || 50), 0, 100);
-  const width = Math.round(clamp((workArea.width * widthPct) / 100, 280, workArea.width));
-  const height = Math.round(clamp((workArea.height * heightPct) / 100, 220, workArea.height));
-  const left = Math.round(workArea.x + ((centerXPct / 100) * workArea.width) - (width / 2));
-  const top = Math.round(workArea.y + ((centerYPct / 100) * workArea.height) - (height / 2));
-
-  const boundedLeft = clamp(left, workArea.x, workArea.x + Math.max(0, workArea.width - width));
-  const boundedTop = clamp(top, workArea.y, workArea.y + Math.max(0, workArea.height - height));
   const shouldForceFullscreen = launchState === 'maximized' || app?.launchBehavior === 'maximize';
   const shouldMinimize = launchState === 'minimized' || app?.launchBehavior === 'minimize';
   const looksFullscreenByGeometry = widthPct >= 95 && heightPct >= 95;
@@ -830,23 +1037,43 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
     && !(hasExplicitSize && hasExplicitPosition)
   );
 
+  const finalizeBounds = (b) => physicalBoundsFromDip(b, monitor);
+
   if (shouldForceFullscreen || looksFullscreenByGeometry || minimizedWithoutSavedGeometry) {
-    return {
+    return finalizeBounds({
       left: workArea.x,
       top: workArea.y,
       width: workArea.width,
       height: workArea.height,
       state: shouldMinimize ? 'minimized' : 'maximized',
-    };
+    });
   }
 
-  return {
+  const snapBounds = trySnapLayoutPartitionBounds({
+    workArea,
+    widthPct,
+    heightPct,
+    centerXPct,
+    centerYPct,
+    shouldMinimize,
+  });
+  if (snapBounds) return finalizeBounds(snapBounds);
+
+  const width = Math.round(clamp((workArea.width * widthPct) / 100, 280, workArea.width));
+  const height = Math.round(clamp((workArea.height * heightPct) / 100, 220, workArea.height));
+  const left = Math.round(workArea.x + ((centerXPct / 100) * workArea.width) - (width / 2));
+  const top = Math.round(workArea.y + ((centerYPct / 100) * workArea.height) - (height / 2));
+
+  const boundedLeft = clamp(left, workArea.x, workArea.x + Math.max(0, workArea.width - width));
+  const boundedTop = clamp(top, workArea.y, workArea.y + Math.max(0, workArea.height - height));
+
+  return finalizeBounds({
     left: boundedLeft,
     top: boundedTop,
     width,
     height,
     state: shouldMinimize ? 'minimized' : 'normal',
-  };
+  });
 };
 
 const moveWindowToBounds = ({
@@ -857,6 +1084,7 @@ const moveWindowToBounds = ({
   positionOnlyBeforeMaximize = false,
   preferNameEnumeration = false,
   excludedWindowHandles = [],
+  skipFrameChanged = false,
 }) => (
   new Promise((resolve) => {
     const safePid = Number(pid || 0);
@@ -874,7 +1102,11 @@ const moveWindowToBounds = ({
     const width = Math.max(120, Number(bounds.width || 800));
     const height = Math.max(120, Number(bounds.height || 600));
     const forceMaximize = bounds.state === 'maximized';
-    const setPosFlags = positionOnlyBeforeMaximize ? 0x0045 : 0x0044;
+    // SWP_FRAMECHANGED (0x0020) can confuse Chromium's compositor during early resize; optional skip.
+    const basePosFlags = 0x0044;
+    const setPosFlags = positionOnlyBeforeMaximize
+      ? 0x0045
+      : (skipFrameChanged ? basePosFlags : (basePosFlags | 0x0020));
     const windowState = bounds.state === 'maximized'
       ? 3 // SW_MAXIMIZE
       : bounds.state === 'minimized'
@@ -1042,6 +1274,7 @@ const moveSpecificWindowHandleToBounds = ({
   bounds,
   aggressiveMaximize = false,
   positionOnlyBeforeMaximize = false,
+  skipFrameChanged = false,
 }) => (
   new Promise((resolve) => {
     const safeHandle = String(handle || '').trim();
@@ -1054,7 +1287,10 @@ const moveSpecificWindowHandleToBounds = ({
     const top = Number(bounds.top || 0);
     const width = Math.max(120, Number(bounds.width || 800));
     const height = Math.max(120, Number(bounds.height || 600));
-    const setPosFlags = positionOnlyBeforeMaximize ? 0x0045 : 0x0044;
+    const basePosFlags = 0x0044;
+    const setPosFlags = positionOnlyBeforeMaximize
+      ? 0x0045
+      : (skipFrameChanged ? basePosFlags : (basePosFlags | 0x0020));
     const windowState = bounds.state === 'maximized'
       ? 3 // SW_MAXIMIZE
       : bounds.state === 'minimized'
@@ -1197,7 +1433,12 @@ if (-not $ok) { Write-Output "{}"; exit 0 }
 
 const isWindowOnTargetMonitor = ({ rect, monitor }) => {
   if (!rect || !monitor) return false;
-  const target = monitor.workArea || monitor.bounds || null;
+  // GetWindowRect is physical px; compare to workAreaPhysical on Windows (DIP workArea would mismatch).
+  const target = (
+    process.platform === 'win32' && monitor.workAreaPhysical
+      ? monitor.workAreaPhysical
+      : (monitor.workArea || monitor.bounds || null)
+  );
   if (!target) return false;
 
   const centerX = rect.left + (rect.width / 2);
@@ -1218,6 +1459,7 @@ const verifyAndCorrectWindowPlacement = async ({
   bounds,
   aggressiveMaximize = false,
   positionOnlyBeforeMaximize = false,
+  skipFrameChanged = false,
   maxCorrections = 2,
   initialCheckDelayMs = 0,
 }) => {
@@ -1242,6 +1484,7 @@ const verifyAndCorrectWindowPlacement = async ({
       bounds,
       aggressiveMaximize,
       positionOnlyBeforeMaximize,
+      skipFrameChanged,
     });
     await sleep(90);
   }
@@ -1347,10 +1590,27 @@ $rows | ConvertTo-Json -Depth 5`;
   })
 );
 
-const scoreWindowCandidate = (row) => {
+const CHROMIUM_TOPLEVEL_CLASSES = ['chrome_widgetwin_1'];
+
+const isChromiumTopLevelWindowRow = (row) => {
+  const cn = String(row?.className || '').toLowerCase();
+  return CHROMIUM_TOPLEVEL_CLASSES.some((c) => cn.includes(c));
+};
+
+const CHROMIUM_FAMILY_PLACEMENT_KEYS = new Set(['chrome', 'msedge', 'brave', 'vivaldi', 'opera', 'arc']);
+
+const isChromiumFamilyProcessKey = (key) => (
+  CHROMIUM_FAMILY_PLACEMENT_KEYS.has(String(key || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+);
+
+const scoreWindowCandidate = (row, options = {}) => {
+  const chromiumHint = String(options.chromiumProcessHint || '').toLowerCase();
+  const isChromiumFamily = isChromiumFamilyProcessKey(chromiumHint);
   const className = String(row?.className || '').toLowerCase();
   const titleLength = Number(row?.titleLength || 0);
   const area = Number(row?.area || 0);
+  const w = Number(row?.width || 0);
+  const h = Number(row?.height || 0);
   let score = 0;
 
   if (row?.enabled) score += 1_000_000_000;
@@ -1363,7 +1623,56 @@ const scoreWindowCandidate = (row) => {
   if (className.includes('renderwidgethosthwnd')) score -= 150_000_000;
   if (className.includes('intermediate d3d window')) score -= 120_000_000;
 
+  if (isChromiumFamily) {
+    if (CHROMIUM_TOPLEVEL_CLASSES.some((c) => className.includes(c))) {
+      score += 220_000_000;
+    }
+    // Brave/Chrome may expose a narrow vertical strip or helper; prefer the wide main frame.
+    if (w > 0 && h > 0 && w < 420 && h > 360) {
+      score -= 450_000_000;
+    }
+  }
+
   return score + area;
+};
+
+/**
+ * Prefer Chromium top-level HWNDs (Chrome_WidgetWin_1) with largest area; avoids narrow strips / blank surfaces.
+ */
+const placeChromiumByRankedWindows = async ({
+  processHintLc,
+  placementBounds,
+  aggressiveMaximize,
+  positionOnlyBeforeMaximize,
+  skipFrameChanged = false,
+}) => {
+  const maxRounds = 26;
+  for (let round = 0; round < maxRounds; round += 1) {
+    const rows = await getVisibleWindowInfos(processHintLc);
+    if (rows.length === 0) {
+      await sleep(120);
+      continue;
+    }
+    const pool = rows.some(isChromiumTopLevelWindowRow)
+      ? rows.filter(isChromiumTopLevelWindowRow)
+      : rows;
+    const ranked = [...pool].sort(
+      (a, b) => scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
+        - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc }),
+    );
+    for (const row of ranked.slice(0, 12)) {
+      const r = await moveSpecificWindowHandleToBounds({
+        handle: row.handle,
+        bounds: placementBounds,
+        aggressiveMaximize,
+        positionOnlyBeforeMaximize,
+        skipFrameChanged,
+      });
+      if (r.applied) return r;
+    }
+    await sleep(120);
+  }
+  return { applied: false, handle: null };
 };
 
 const waitForWindowResponsive = async (processName, handle, maxWaitMs = 1800) => {
@@ -1432,6 +1741,7 @@ const launchExecutable = (executablePath, args = []) => (
 const gatherProfileAppLaunches = (profile, monitorMap) => {
   const launches = [];
   const skippedApps = [];
+  let launchSequence = 0;
   const primaryProfileMonitorId = (Array.isArray(profile?.monitors) ? profile.monitors : []).find((monitor) => monitor?.primary)?.id;
   const defaultMonitor = sortMonitorsByLayout(buildSystemMonitorSnapshot())[0] || null;
   const restrictedNames = new Set(
@@ -1457,15 +1767,21 @@ const gatherProfileAppLaunches = (profile, monitorMap) => {
       return;
     }
 
-    const executablePath = extractExecutablePath(app?.executablePath || app?.path || '');
-    if (!executablePath) {
+    const rawExe = app?.executablePath || app?.path || '';
+    const executablePath = extractExecutablePath(rawExe) || null;
+    const shortcutPath = resolveShortcutPathForLaunch(app?.shortcutPath);
+    const launchUrl = (typeof app?.launchUrl === 'string' && isSafeAppLaunchUrl(app.launchUrl))
+      ? safeLimitedString(app.launchUrl, MAX_URL_LENGTH)
+      : '';
+
+    if (!executablePath && !shortcutPath && !launchUrl) {
       skippedApps.push({
         name: appName,
-        reason: 'missing-executable-path',
+        reason: 'missing-launch-target',
       });
       return;
     }
-    if (isDisallowedLaunchExecutablePath(executablePath)) {
+    if (executablePath && isDisallowedLaunchExecutablePath(executablePath)) {
       skippedApps.push({
         name: appName,
         reason: 'disallowed-executable-path',
@@ -1478,9 +1794,14 @@ const gatherProfileAppLaunches = (profile, monitorMap) => {
       || monitorMap.get(primaryProfileMonitorId)
       || defaultMonitor
     );
+    const seq = launchSequence;
+    launchSequence += 1;
     launches.push({
       appName,
       executablePath,
+      shortcutPath: shortcutPath || null,
+      launchUrl: launchUrl || null,
+      launchSequence: seq,
       monitor,
       app,
     });
@@ -1506,6 +1827,7 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
   const launches = [];
   const browserUrls = [];
   const skippedApps = [];
+  let legacyLaunchSequence = 0;
   const restrictedNames = new Set(
     (Array.isArray(profile?.restrictedApps) ? profile.restrictedApps : [])
       .map((name) => normalizeLabel(name))
@@ -1548,9 +1870,14 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
     const monitorIndex = Math.max(0, Number(action?.monitor || 1) - 1);
     const profileMonitorId = profileMonitors[monitorIndex]?.id;
     const monitor = (profileMonitorId ? monitorMap.get(profileMonitorId) : null) || defaultMonitor;
+    const seq = legacyLaunchSequence;
+    legacyLaunchSequence += 1;
     launches.push({
       appName,
       executablePath,
+      shortcutPath: null,
+      launchUrl: null,
+      launchSequence: seq,
       monitor,
       app: {
         name: appName,
@@ -1593,7 +1920,13 @@ const launchProfileById = async (profileId) => {
   const monitorMap = createProfileMonitorMap(profile?.monitors, systemMonitors);
   const modernLaunchData = gatherProfileAppLaunches(profile, monitorMap);
   const legacyLaunchData = gatherLegacyActionLaunches(profile, monitorMap);
-  const launchKey = (launch) => `${String(launch.executablePath || '').toLowerCase()}::${launch.monitor?.id || 'monitor'}`;
+  const launchKey = (launch) => {
+    const instanceId = String(launch.app?.instanceId || '').trim();
+    if (instanceId) {
+      return `${instanceId}::${launch.monitor?.id || 'monitor'}`;
+    }
+    return `${launch.launchSequence ?? 0}::${launch.monitor?.id || 'monitor'}::${String(launch.executablePath || '').toLowerCase()}::${String(launch.shortcutPath || '').toLowerCase()}::${String(launch.launchUrl || '').toLowerCase()}`;
+  };
   const seenLaunchKeys = new Set();
   const appLaunches = [...modernLaunchData.launches, ...legacyLaunchData.launches]
     .filter((launch) => {
@@ -1611,24 +1944,36 @@ const launchProfileById = async (profileId) => {
     : {};
   const processHintCounts = new Map();
   for (const launchItem of appLaunches) {
-    const processNameHint = path.basename(launchItem.executablePath, path.extname(launchItem.executablePath)).toLowerCase();
-    processHintCounts.set(processNameHint, (processHintCounts.get(processNameHint) || 0) + 1);
+    const processKey = getPlacementProcessKey(launchItem);
+    processHintCounts.set(processKey, (processHintCounts.get(processKey) || 0) + 1);
   }
+
+  const { shell } = require('electron');
 
   const runLaunch = async (launchItem) => {
     try {
-      const processNameHint = path.basename(launchItem.executablePath, path.extname(launchItem.executablePath));
-      const processHintLc = processNameHint.toLowerCase();
+      const processHintLc = getPlacementProcessKey(launchItem);
+      const processNameHint = processHintLc;
       const hintCount = processHintCounts.get(processHintLc) || 0;
       const isDuplicateProcessLaunch = hintCount > 1;
-      const isChromiumFamily = processHintLc === 'msedge' || processHintLc === 'brave' || processHintLc === 'chrome';
-      const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch) ? ['--new-window'] : [];
+      const isChromiumFamily = isChromiumFamilyProcessKey(processHintLc);
+      const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath)
+        ? ['--new-window']
+        : [];
       const preLaunchWindowInfos = isDuplicateProcessLaunch
         ? await getVisibleWindowInfos(processHintLc)
         : [];
       const preLaunchHandles = preLaunchWindowInfos.map((row) => row.handle);
 
-      const launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
+      let launchedChild = null;
+      if (launchItem.shortcutPath) {
+        const openErr = await shell.openPath(launchItem.shortcutPath);
+        if (openErr) throw new Error(openErr);
+      } else if (launchItem.launchUrl) {
+        await shell.openExternal(launchItem.launchUrl);
+      } else {
+        launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
+      }
       launchedAppCount += 1;
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
       if (bounds) {
@@ -1643,9 +1988,12 @@ const launchProfileById = async (profileId) => {
           ? { ...bounds, state: 'normal' }
           : bounds;
         const excludedHandles = preLaunchHandles;
+        const chromiumNormalSoftPos = isChromiumFamily && placementBounds.state === 'normal';
 
         if (isDuplicateProcessLaunch) {
           await sleep(240);
+        } else if (launchItem.shortcutPath || launchItem.launchUrl) {
+          await sleep(200);
         }
 
         let result = { applied: false, handle: null };
@@ -1657,9 +2005,13 @@ const launchProfileById = async (profileId) => {
           const preHandleSet = new Set(preLaunchHandles);
           newHandles = postLaunchHandles.filter((h) => !preHandleSet.has(h));
           const newHandleSet = new Set(newHandles);
-          const rankedNewWindows = postLaunchWindowInfos
+          let rankedNewWindows = postLaunchWindowInfos
             .filter((row) => newHandleSet.has(row.handle))
-            .sort((a, b) => scoreWindowCandidate(b) - scoreWindowCandidate(a));
+            .sort((a, b) => scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
+              - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc }));
+          if (isChromiumFamily && rankedNewWindows.some(isChromiumTopLevelWindowRow)) {
+            rankedNewWindows = rankedNewWindows.filter(isChromiumTopLevelWindowRow);
+          }
 
           for (const candidateRow of rankedNewWindows) {
             const newHandle = candidateRow.handle;
@@ -1671,6 +2023,7 @@ const launchProfileById = async (profileId) => {
               bounds: placementBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
             });
             if (result.applied) break;
           }
@@ -1693,10 +2046,20 @@ const launchProfileById = async (profileId) => {
               className: row.className,
               titleLength: row.titleLength,
               area: row.area,
-              score: scoreWindowCandidate(row),
+              score: scoreWindowCandidate(row, { chromiumProcessHint: processHintLc }),
             })),
             placedHandle: result.handle,
             applied: result.applied,
+          });
+        }
+
+        if (!result.applied && isChromiumFamily) {
+          result = await placeChromiumByRankedWindows({
+            processHintLc,
+            placementBounds,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
           });
         }
 
@@ -1709,6 +2072,7 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             preferNameEnumeration: isDuplicateProcessLaunch,
             excludedWindowHandles: excludedHandles,
+            skipFrameChanged: chromiumNormalSoftPos,
           });
         }
 
@@ -1722,6 +2086,7 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             preferNameEnumeration: true,
             excludedWindowHandles: excludedHandles,
+            skipFrameChanged: chromiumNormalSoftPos,
           });
         }
 
@@ -1732,6 +2097,7 @@ const launchProfileById = async (profileId) => {
               bounds: placementBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
             });
             if (result.applied) break;
           }
@@ -1744,6 +2110,7 @@ const launchProfileById = async (profileId) => {
             bounds: placementBounds,
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
             maxCorrections: isDuplicateProcessLaunch ? 1 : 0,
             initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 0,
           });
@@ -1759,6 +2126,18 @@ const launchProfileById = async (profileId) => {
           });
         }
 
+        // Chromium often restores a remembered window size after first SetWindowPos; re-assert bounds once.
+        if (result.applied && result.handle && isChromiumFamily && placementBounds.state === 'normal') {
+          await sleep(260);
+          await moveSpecificWindowHandleToBounds({
+            handle: result.handle,
+            bounds: placementBounds,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+          });
+        }
+
         if (result.applied && result.handle && shouldDelayChromiumMaximize) {
           await waitForWindowResponsive(processHintLc, result.handle, 2200);
           await maximizeWindowHandle(result.handle);
@@ -1767,7 +2146,7 @@ const launchProfileById = async (profileId) => {
     } catch (error) {
       failedApps.push({
         name: launchItem.appName,
-        path: launchItem.executablePath,
+        path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
         error: String(error?.message || error || 'Failed to launch app'),
       });
     }
@@ -1789,7 +2168,6 @@ const launchProfileById = async (profileId) => {
     await Promise.all(appLaunches.map((launchItem) => runLaunch(launchItem)));
   }
 
-  const { shell } = require('electron');
   const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
   const launchedUrls = new Set();
   let launchedTabCount = 0;
@@ -1929,6 +2307,8 @@ handleTrustedIpc('get-installed-apps', async () => {
           name: normalizedName,
           iconPath: iconPath || null,
           executablePath,
+          shortcutPath: context.shortcutPath || null,
+          launchUrl: context.launchUrl || null,
           priority: nextPriority,
         });
         return;
@@ -1937,13 +2317,19 @@ handleTrustedIpc('get-installed-apps', async () => {
       const currentPriority = existing.priority || 0;
       const preferredName = currentPriority >= nextPriority ? existing.name : normalizedName;
       const preferredPriority = Math.max(currentPriority, nextPriority);
-      const preferredIcon = existing.iconPath || iconPath || null;
+      const preferredIcon = (iconPath && (!existing.iconPath || nextPriority >= currentPriority))
+        ? iconPath
+        : (existing.iconPath || iconPath || null);
       const preferredExecutablePath = existing.executablePath || context.targetExe || extractExecutablePath(sourcePath) || null;
+      const preferredShortcutPath = existing.shortcutPath || context.shortcutPath || null;
+      const preferredLaunchUrl = existing.launchUrl || context.launchUrl || null;
 
       appMap.set(key, {
         name: preferredName,
         iconPath: preferredIcon,
         executablePath: preferredExecutablePath,
+        shortcutPath: preferredShortcutPath,
+        launchUrl: preferredLaunchUrl,
         priority: preferredPriority,
       });
     };
@@ -1998,10 +2384,12 @@ handleTrustedIpc('get-installed-apps', async () => {
       registry: 0,
     };
 
-    // 1. Start Menu Shortcuts (.lnk files pointing to .exe only)
+    // 1. Start Menu + Taskbar pinned shortcuts (.lnk / .url)
     const startMenuDirs = [
       path.join(process.env.ProgramData || 'C:/ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
-      path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs')
+      path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+      path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
+      path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'ImplicitAppShortcuts'),
     ];
     const shortcutTasks = [];
     for (const dir of startMenuDirs) {
@@ -2027,8 +2415,9 @@ handleTrustedIpc('get-installed-apps', async () => {
                         ? extractIconSourcePath(info.icon)
                         : normalizedTargetExe;
 
+                      const mapKey = getCanonicalAppKey(name) || name.toLowerCase();
                       // If we already discovered this app with an icon, skip expensive rework.
-                      const existing = appMap.get(name);
+                      const existing = appMap.get(mapKey);
                       if (existing?.iconPath) return resolve();
 
                       let iconPath = null;
@@ -2057,6 +2446,7 @@ handleTrustedIpc('get-installed-apps', async () => {
                           targetExe: normalizedTargetExe,
                           iconSource: normalizedIconSource,
                           hasShortcutIcon: !!iconPath,
+                          launchUrl: null,
                         },
                       );
                     } finally {
@@ -2088,6 +2478,10 @@ handleTrustedIpc('get-installed-apps', async () => {
                   const shortcutIcon = await getSafeIconDataUrl(fullPath);
                   if (shortcutIcon) iconPath = shortcutIcon;
                 }
+                const rawUrl = String(shortcut.url || '').trim();
+                const safeLaunchUrl = isSafeAppLaunchUrl(rawUrl)
+                  ? safeLimitedString(rawUrl, MAX_URL_LENGTH)
+                  : '';
                 upsertDiscoveredApp(
                   name,
                   iconPath,
@@ -2099,6 +2493,7 @@ handleTrustedIpc('get-installed-apps', async () => {
                     hasShortcutIcon: !!iconPath,
                     isAppProtocol: isProtocolApp,
                     steamAppId,
+                    launchUrl: safeLaunchUrl || null,
                   },
                 );
               });
@@ -2169,7 +2564,13 @@ handleTrustedIpc('get-installed-apps', async () => {
       );
     }
     return Array.from(appMap.values())
-      .map(({ name, iconPath, executablePath }) => ({ name, iconPath, executablePath: executablePath || null }))
+      .map((entry) => ({
+        name: entry.name,
+        iconPath: entry.iconPath,
+        executablePath: entry.executablePath || null,
+        shortcutPath: entry.shortcutPath || null,
+        launchUrl: entry.launchUrl || null,
+      }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   } catch (err) {
     console.error('Error in get-installed-apps handler:', err);

@@ -8,6 +8,8 @@ interface App {
   icon: any;
   iconPath?: string | null;
   executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
   color: string;
   position: { x: number; y: number };
   size: { width: number; height: number };
@@ -35,6 +37,13 @@ interface AddAppModalProps {
   }>;
   allowMonitorSelection?: boolean;
 }
+
+const appEntryKey = (app: {
+  name: string;
+  executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
+}) => `${app.name}\0${app.executablePath ?? ''}\0${app.shortcutPath ?? ''}\0${app.launchUrl ?? ''}`;
 
 const getStableColor = (name: string) => {
   let hash = 0;
@@ -68,6 +77,8 @@ export function AddAppModal({
         color: getStableColor(app.name),
         iconPath: app.iconPath,
         executablePath: app.executablePath ?? null,
+        shortcutPath: app.shortcutPath ?? null,
+        launchUrl: app.launchUrl ?? null,
       };
     })
   ), [installedApps]);
@@ -75,7 +86,12 @@ export function AddAppModal({
   const filteredApps = useMemo(() => (
     availableApps.filter((app) =>
       app.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-      !existingApps.some((existing) => existing.name === app.name),
+      !existingApps.some((existing) => appEntryKey({
+        name: existing.name,
+        executablePath: existing.executablePath ?? null,
+        shortcutPath: existing.shortcutPath ?? null,
+        launchUrl: existing.launchUrl ?? null,
+      }) === appEntryKey(app))
     )
   ), [availableApps, existingApps, searchTerm]);
 
@@ -91,6 +107,8 @@ export function AddAppModal({
       icon: selectedApp.icon,
       iconPath: selectedApp.iconPath ?? null,
       executablePath: selectedApp.executablePath ?? null,
+      shortcutPath: selectedApp.shortcutPath ?? null,
+      launchUrl: selectedApp.launchUrl ?? null,
       color: selectedApp.color,
       position: { x: 50, y: 50 },
       size: { 
@@ -185,12 +203,14 @@ export function AddAppModal({
               {filteredApps.map((app) => {
                 const IconComponent = app.icon;
                 const iconSrc = safeIconSrc(app.iconPath);
+                const rowKey = appEntryKey(app);
+                const isSelected = selectedApp && appEntryKey(selectedApp) === rowKey;
                 return (
                   <button
-                    key={app.name}
+                    key={rowKey}
                     onClick={() => setSelectedApp(app)}
                     className={`flex flex-col items-center gap-3 p-4 rounded-lg border transition-all hover:scale-105 ${
-                      selectedApp?.name === app.name
+                      isSelected
                         ? 'border-flow-accent-blue bg-flow-accent-blue/10 text-flow-accent-blue'
                         : 'border-flow-border bg-flow-surface hover:bg-flow-surface-elevated text-flow-text-secondary hover:text-flow-text-primary'
                     }`}
