@@ -1,5 +1,5 @@
-
 import { useState, useRef } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Settings, Trash2, Move, Shield, Minimize2, File, Folder, Link } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 
@@ -95,11 +95,12 @@ export function AppWindow({
 
   // Render the app icon: prefer real iconPath, fallback to LucideIcon, then emoji
   const renderIcon = () => {
-    if (isDiscoveredApp(app) && app.iconPath) {
+    const iconSrc = isDiscoveredApp(app) ? safeIconSrc(app.iconPath) : undefined;
+    if (iconSrc) {
       return (
         <>
           <img
-            src={app.iconPath}
+            src={iconSrc}
             alt={app.name}
             className="app-icon w-8 h-8 object-contain rounded"
             draggable={false}

@@ -31,6 +31,7 @@ import {
   Check,
 } from "lucide-react";
 import { DragState, DragSourceType } from "./types/dragTypes";
+import { safeIconSrc } from "../utils/safeIconSrc";
 
 type FlowProfile = {
   id: string;
@@ -3136,17 +3137,23 @@ export default function App() {
                   backgroundColor: `${dragState.dragData.color || dragState.dragData.fileColor || "#4A5568"}80`,
                 }}
               >
-                {dragState.dragData.iconPath && (
-                  <img
-                    src={dragState.dragData.iconPath}
-                    alt={dragState.dragData.name || "App"}
-                    className="w-4.5 h-4.5 object-contain rounded drop-shadow-sm"
-                    draggable={false}
-                  />
-                )}
-                {!dragState.dragData.iconPath && dragState.dragData.icon && (
-                  <dragState.dragData.icon className="w-4.5 h-4.5 text-white drop-shadow-sm" />
-                )}
+                {(() => {
+                  const dragIconSrc = safeIconSrc(dragState.dragData.iconPath);
+                  if (dragIconSrc) {
+                    return (
+                      <img
+                        src={dragIconSrc}
+                        alt={dragState.dragData.name || "App"}
+                        className="w-4.5 h-4.5 object-contain rounded drop-shadow-sm"
+                        draggable={false}
+                      />
+                    );
+                  }
+                  if (dragState.dragData.icon) {
+                    return <dragState.dragData.icon className="w-4.5 h-4.5 text-white drop-shadow-sm" />;
+                  }
+                  return null;
+                })()}
                 {dragState.dragData.fileIcon && (
                   <dragState.dragData.fileIcon className="w-4.5 h-4.5 text-white drop-shadow-sm" />
                 )}

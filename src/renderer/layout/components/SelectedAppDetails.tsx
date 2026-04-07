@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Settings, Trash2, Monitor, Clock, Zap, Shield, Globe, FileText, Plus, Edit, Save, X, Volume2, VolumeX, Minimize2, Maximize2, Copy, ExternalLink, FolderOpen, Replace, Play, RotateCcw, Eye, EyeOff, Hash, StickyNote, TestTube, FileOutput, Tag, User, Sliders, Package, MoreHorizontal, Clipboard, Link2, File } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
@@ -79,14 +80,15 @@ export function SelectedAppDetails({
 
   // Render app icon with proper fallback
   const renderAppIcon = (app: any, size: string = "w-12 h-12") => {
-    if (app.iconPath) {
+    const iconSrc = safeIconSrc(app.iconPath);
+    if (iconSrc) {
       return (
         <div
           className={`${size} rounded-xl flex items-center justify-center border border-white/20 shadow-sm overflow-hidden`}
           style={{ backgroundColor: `${app.color || '#666666'}40` }}
         >
           <img
-            src={app.iconPath}
+            src={iconSrc}
             alt={app.name || 'App'}
             className="w-3/4 h-3/4 object-contain"
             draggable={false}

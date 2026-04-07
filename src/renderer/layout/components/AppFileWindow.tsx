@@ -3,6 +3,7 @@ import { Settings, Trash2, Move, Shield, Minimize2, Maximize2, File, Folder, Fol
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AppSettings } from "./AppSettings";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 
 interface BaseItem {
   name: string;
@@ -233,6 +234,7 @@ export function AppFileWindow({
   };
 
   const { icon: mainIcon, iconPath: mainIconPath, color: mainColor, fileColor } = getIconAndColor();
+  const safeMainIconSrc = safeIconSrc(mainIconPath ?? undefined);
 
   // Get the file count for display
   const getFileCount = () => {
@@ -254,10 +256,10 @@ export function AppFileWindow({
 
   // FIXED: Bigger app icons with proper CSS classes
   const renderMainIcon = () => {
-    if (mainIconPath) {
+    if (safeMainIconSrc) {
       return (
         <img
-          src={mainIconPath}
+          src={safeMainIconSrc}
           alt={item.name}
           className="app-icon object-contain rounded"
           draggable={false}
