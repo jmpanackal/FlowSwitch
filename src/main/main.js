@@ -1,6 +1,7 @@
-const { app, BrowserWindow, ipcMain, nativeImage, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage, Menu, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
+const { pathToFileURL } = require('url');
 const { spawn, execFile } = require('child_process');
 const ws = require('windows-shortcuts');
 const { scanForExeFiles } = require('./scanExeFiles');
@@ -37,6 +38,179 @@ app.commandLine.appendSwitch(
 );
 
 const iconDataUrlCache = new Map();
+const DEV_SERVER_URL = 'http://localhost:5173';
+const MAX_PROFILE_COUNT = 200;
+const MAX_PROFILE_ID_LENGTH = 128;
+const MAX_PROFILE_NAME_LENGTH = 256;
+const MAX_PROFILE_PAYLOAD_SIZE_BYTES = 5 * 1024 * 1024;
+const MAX_URL_LENGTH = 2048;
+
+const getDistIndexPath = () => path.join(__dirname, '../../dist/index.html');
+
+const getAppEntryUrl = () => (
+  app.isPackaged
+    ? pathToFileURL(getDistIndexPath()).href
+    : DEV_SERVER_URL
+);
+
+/** CSP for the app shell: dev allows Vite HMR; prod is stricter (no eval). */
+const getContentSecurityPolicy = () => {
+  if (!app.isPackaged) {
+    return [
+      "default-src 'self'",
+      "base-uri 'self'",
+      "form-action 'self'",
+      "frame-ancestors 'none'",
+      "frame-src 'none'",
+      "object-src 'none'",
+      "img-src 'self' data: blob: https:",
+      "font-src 'self' data:",
+      "style-src 'self' 'unsafe-inline'",
+      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
+      "connect-src 'self' http://localhost:5173 http://127.0.0.1:5173 ws://localhost:5173 ws://127.0.0.1:5173",
+      "media-src 'self' data: blob:",
+      "worker-src 'self' blob:",
+    ].join('; ');
+  }
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "frame-src 'none'",
+    "object-src 'none'",
+    "img-src 'self' data: blob: https:",
+    "font-src 'self' data:",
+    "style-src 'self' 'unsafe-inline'",
+    "script-src 'self' 'unsafe-inline'",
+    "connect-src 'self'",
+    "media-src 'self' data: blob:",
+    "worker-src 'self' blob:",
+  ].join('; ');
+};
+
+const shouldInjectAppCsp = (requestUrl) => {
+  if (!requestUrl) return false;
+  try {
+    if (!app.isPackaged) {
+      const u = new URL(requestUrl);
+      return (u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.port === '5173';
+    }
+    const distHref = pathToFileURL(getDistIndexPath()).href;
+    const base = distHref.split('#')[0].split('?')[0];
+    const reqBase = String(requestUrl).split('#')[0].split('?')[0];
+    return reqBase === base || reqBase.startsWith(`${base}/`);
+  } catch {
+    return false;
+  }
+};
+
+const setupSessionSecurity = () => {
+  const defaultSession = session.defaultSession;
+
+  defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    console.warn('[session] blocked permission request:', permission);
+    callback(false);
+  });
+
+  defaultSession.setPermissionCheckHandler(() => false);
+
+  defaultSession.webRequest.onHeadersReceived((details, callback) => {
+    if (details.resourceType !== 'mainFrame' || !shouldInjectAppCsp(details.url)) {
+      callback({ responseHeaders: details.responseHeaders });
+      return;
+    }
+    const responseHeaders = { ...details.responseHeaders };
+    const csp = getContentSecurityPolicy();
+    responseHeaders['Content-Security-Policy'] = [csp];
+    callback({ responseHeaders });
+  });
+};
+
+const isTrustedRendererUrl = (value = '') => {
+  const raw = String(value || '').trim();
+  if (!raw) return false;
+  if (app.isPackaged) return raw.startsWith('file://');
+  return raw.startsWith(`${DEV_SERVER_URL}/`) || raw === DEV_SERVER_URL;
+};
+
+const isTrustedIpcSender = (event) => (
+  isTrustedRendererUrl(event?.senderFrame?.url || '')
+);
+
+const handleTrustedIpc = (channel, handler) => {
+  ipcMain.handle(channel, async (event, ...args) => {
+    if (!isTrustedIpcSender(event)) {
+      const senderUrl = String(event?.senderFrame?.url || '');
+      console.warn(`[ipc:${channel}] Blocked untrusted sender: ${senderUrl || '<empty>'}`);
+      throw new Error('Untrusted renderer origin');
+    }
+    return handler(event, ...args);
+  });
+};
+
+const safeLimitedString = (value, maxLength) => {
+  const str = String(value || '').trim();
+  if (!str) return '';
+  return str.slice(0, Math.max(1, Number(maxLength || 1)));
+};
+
+const isSafeExternalHttpUrl = (value) => {
+  const candidate = safeLimitedString(value, MAX_URL_LENGTH);
+  if (!candidate) return false;
+  try {
+    const parsed = new URL(candidate);
+    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
+  } catch {
+    return false;
+  }
+};
+
+const normalizeSafeUrl = (value) => (
+  isSafeExternalHttpUrl(value) ? safeLimitedString(value, MAX_URL_LENGTH) : ''
+);
+
+const sanitizeProfilesPayload = (profiles) => {
+  if (!Array.isArray(profiles)) {
+    throw new Error('Profiles payload must be an array');
+  }
+  if (profiles.length > MAX_PROFILE_COUNT) {
+    throw new Error('Profiles payload exceeds maximum profile count');
+  }
+
+  const serialized = JSON.stringify(profiles);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_PROFILE_PAYLOAD_SIZE_BYTES) {
+    throw new Error('Profiles payload exceeds size limit');
+  }
+
+  return profiles
+    .filter((profile) => profile && typeof profile === 'object' && !Array.isArray(profile))
+    .map((profile) => {
+      const normalized = { ...profile };
+      normalized.id = safeLimitedString(profile.id, MAX_PROFILE_ID_LENGTH);
+      normalized.name = safeLimitedString(profile.name, MAX_PROFILE_NAME_LENGTH);
+      if (Array.isArray(profile.browserTabs)) {
+        normalized.browserTabs = profile.browserTabs
+          .map((tab) => {
+            const url = normalizeSafeUrl(tab?.url);
+            if (!url) return null;
+            return { ...tab, url };
+          })
+          .filter(Boolean);
+      }
+      if (Array.isArray(profile.actions)) {
+        normalized.actions = profile.actions
+          .map((action) => {
+            if (action?.type !== 'browserTab') return action;
+            const url = normalizeSafeUrl(action?.url);
+            if (!url) return null;
+            return { ...action, url };
+          })
+          .filter(Boolean);
+      }
+      return normalized;
+    });
+};
 
 const normalizePathForWindows = (value) => (
   String(value || '')
@@ -96,6 +270,13 @@ const extractExecutablePath = (raw) => {
     return null;
   }
   return exePath;
+};
+
+const isDisallowedLaunchExecutablePath = (value = '') => {
+  const normalized = normalizePathForWindows(value).toLowerCase();
+  if (!normalized) return true;
+  const base = path.basename(normalized);
+  return SHELL_HOST_EXECUTABLES.has(base);
 };
 
 const extractIconSourcePath = (raw) => (
@@ -348,6 +529,7 @@ const isLikelyUserApp = (name, sourcePath = '', context = {}) => {
 const createWindow = () => {
   const isWindows = process.platform === 'win32';
   const icon = getWindowIconPath();
+  const appEntryUrl = getAppEntryUrl();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -366,6 +548,9 @@ const createWindow = () => {
     backgroundColor: '#0b1020',
     webPreferences: {
       preload: path.join(__dirname, '../preload.js'), // Preload script for secure IPC
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
     },
   });
 
@@ -383,12 +568,25 @@ const createWindow = () => {
   win.webContents.on('unresponsive', () => {
     console.error('[electron] window became unresponsive');
   });
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isTrustedRendererUrl(url)) return;
+    event.preventDefault();
+    console.warn('[electron] blocked renderer navigation to untrusted URL:', url);
+  });
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (isSafeExternalHttpUrl(url)) {
+      return { action: 'allow' };
+    }
+    console.warn('[electron] blocked window.open for untrusted URL:', url);
+    return { action: 'deny' };
+  });
   win.removeMenu();
-  win.loadURL('http://localhost:5173'); // Load the frontend (usually a dev server)
+  win.loadURL(appEntryUrl);
 };
 
 
 app.whenReady().then(() => {
+  setupSessionSecurity();
   Menu.setApplicationMenu(null);
   createWindow();
 
@@ -1244,6 +1442,13 @@ const gatherProfileAppLaunches = (profile, monitorMap) => {
       });
       return;
     }
+    if (isDisallowedLaunchExecutablePath(executablePath)) {
+      skippedApps.push({
+        name: appName,
+        reason: 'disallowed-executable-path',
+      });
+      return;
+    }
 
     const monitor = (
       (profileMonitorId && monitorMap.get(profileMonitorId))
@@ -1306,6 +1511,13 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
       skippedApps.push({
         name: appName,
         reason: 'invalid-legacy-action-path',
+      });
+      continue;
+    }
+    if (isDisallowedLaunchExecutablePath(executablePath)) {
+      skippedApps.push({
+        name: appName,
+        reason: 'disallowed-executable-path',
       });
       continue;
     }
@@ -1559,7 +1771,7 @@ const launchProfileById = async (profileId) => {
   const launchedUrls = new Set();
   let launchedTabCount = 0;
   for (const tab of browserTabs) {
-    const url = String(tab?.url || '').trim();
+    const url = normalizeSafeUrl(tab?.url);
     if (!url || launchedUrls.has(url)) continue;
     launchedUrls.add(url);
     try {
@@ -1571,10 +1783,11 @@ const launchProfileById = async (profileId) => {
   }
 
   for (const url of legacyLaunchData.browserUrls) {
-    if (!url || launchedUrls.has(url)) continue;
-    launchedUrls.add(url);
+    const safeUrl = normalizeSafeUrl(url);
+    if (!safeUrl || launchedUrls.has(safeUrl)) continue;
+    launchedUrls.add(safeUrl);
     try {
-      await shell.openExternal(url);
+      await shell.openExternal(safeUrl);
       launchedTabCount += 1;
     } catch {
       // Keep profile launch resilient if one tab URL fails.
@@ -1605,7 +1818,7 @@ const launchProfileById = async (profileId) => {
   };
 };
 
-ipcMain.handle('get-system-monitors', async () => {
+handleTrustedIpc('get-system-monitors', async () => {
   try {
     const monitors = buildSystemMonitorSnapshot();
     return monitors.map((monitor) => {
@@ -1632,7 +1845,7 @@ ipcMain.handle('get-system-monitors', async () => {
   }
 });
 
-ipcMain.handle('profiles:list', async () => {
+handleTrustedIpc('profiles:list', async () => {
   try {
     return readProfilesFromDisk();
   } catch (error) {
@@ -1641,9 +1854,10 @@ ipcMain.handle('profiles:list', async () => {
   }
 });
 
-ipcMain.handle('profiles:save-all', async (_event, profiles) => {
+handleTrustedIpc('profiles:save-all', async (_event, profiles) => {
   try {
-    const savedProfiles = writeProfilesToDisk(profiles);
+    const sanitizedProfiles = sanitizeProfilesPayload(profiles);
+    const savedProfiles = writeProfilesToDisk(sanitizedProfiles);
     return { ok: true, count: savedProfiles.length };
   } catch (error) {
     console.error('[profiles:save-all] Failed to save profiles:', error);
@@ -1651,16 +1865,18 @@ ipcMain.handle('profiles:save-all', async (_event, profiles) => {
   }
 });
 
-ipcMain.handle('launch-profile', async (_event, profileId) => {
+handleTrustedIpc('launch-profile', async (_event, profileId) => {
   try {
-    return await launchProfileById(profileId);
+    const safeProfileId = safeLimitedString(profileId, MAX_PROFILE_ID_LENGTH);
+    if (!safeProfileId) return { ok: false, error: 'Invalid profile id' };
+    return await launchProfileById(safeProfileId);
   } catch (err) {
     console.error('Failed to load or launch profile:', err);
     return { ok: false, error: 'Failed to load profile' };
   }
 });
 
-ipcMain.handle('get-installed-apps', async () => {
+handleTrustedIpc('get-installed-apps', async () => {
   // IPC handler: get-installed-apps (Start Menu, Registry, Program Files)
   try {
     const appMap = new Map();
@@ -1938,7 +2154,7 @@ ipcMain.handle('get-installed-apps', async () => {
   }
 });
 
-ipcMain.handle('capture-running-app-layout', async () => {
+handleTrustedIpc('capture-running-app-layout', async () => {
   try {
     const processes = await getRunningWindowProcesses();
     const targetMonitors = buildSystemMonitorSnapshot();
