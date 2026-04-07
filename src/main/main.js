@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Menu, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL } = require('url');
+const { pathToFileURL, fileURLToPath } = require('url');
 const { spawn, execFile } = require('child_process');
 const ws = require('windows-shortcuts');
 const { scanForExeFiles } = require('./scanExeFiles');
@@ -10,6 +10,7 @@ const {
   readProfilesFromDisk,
   writeProfilesToDisk,
 } = require('./services/profile-store');
+const { sanitizeProfileIconPathsDeep } = require('./utils/profile-icon-paths');
 const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
@@ -127,10 +128,25 @@ const setupSessionSecurity = () => {
   });
 };
 
+const getDistDirPath = () => path.join(__dirname, '../../dist');
+
+const isTrustedPackagedFileUrl = (raw = '') => {
+  if (!raw.startsWith('file://')) return false;
+  try {
+    const normalized = String(raw).split('#')[0].split('?')[0];
+    const filePath = path.normalize(fileURLToPath(normalized));
+    const distDir = path.normalize(getDistDirPath());
+    const indexPath = path.normalize(getDistIndexPath());
+    return filePath === indexPath || filePath.startsWith(`${distDir}${path.sep}`);
+  } catch {
+    return false;
+  }
+};
+
 const isTrustedRendererUrl = (value = '') => {
   const raw = String(value || '').trim();
   if (!raw) return false;
-  if (app.isPackaged) return raw.startsWith('file://');
+  if (app.isPackaged) return isTrustedPackagedFileUrl(raw);
   return raw.startsWith(`${DEV_SERVER_URL}/`) || raw === DEV_SERVER_URL;
 };
 
@@ -208,7 +224,7 @@ const sanitizeProfilesPayload = (profiles) => {
           })
           .filter(Boolean);
       }
-      return normalized;
+      return sanitizeProfileIconPathsDeep(normalized);
     });
 };
 

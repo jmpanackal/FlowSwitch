@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
@@ -94,10 +95,11 @@ export function MinimizedApps({
 
   // Safely handle the icon component
   const renderIcon = (app: MinimizedApp) => {
-    if (app.iconPath) {
+    const iconSrc = safeIconSrc(app.iconPath);
+    if (iconSrc) {
       return (
         <img
-          src={app.iconPath}
+          src={iconSrc}
           alt={app.name}
           className="w-5 h-5 object-contain rounded"
           draggable={false}
@@ -303,10 +305,11 @@ export function MinimizedApps({
         }
       };
       
+      const previewIconSrc = safeIconSrc(app.iconPath);
       const preview = (
         <div className="flex items-center gap-2">
-          {app.iconPath ? (
-            <img src={app.iconPath} alt={app.name} className="w-4 h-4 object-contain rounded" />
+          {previewIconSrc ? (
+            <img src={previewIconSrc} alt={app.name} className="w-4 h-4 object-contain rounded" />
           ) : app.icon ? (
             <app.icon className="w-4 h-4" style={{ color: app.color }} />
           ) : (

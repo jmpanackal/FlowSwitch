@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { X, Search, Plus, Monitor, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
@@ -183,6 +184,7 @@ export function AddAppModal({
             <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
               {filteredApps.map((app) => {
                 const IconComponent = app.icon;
+                const iconSrc = safeIconSrc(app.iconPath);
                 return (
                   <button
                     key={app.name}
@@ -197,8 +199,8 @@ export function AddAppModal({
                       className="w-10 h-10 rounded-lg flex items-center justify-center"
                       style={{ backgroundColor: `${app.color}20` }}
                     >
-                      {app.iconPath ? (
-                        <img src={app.iconPath} alt={app.name} className="w-5 h-5 object-contain rounded" />
+                      {iconSrc ? (
+                        <img src={iconSrc} alt={app.name} className="w-5 h-5 object-contain rounded" />
                       ) : (
                         <IconComponent className="w-5 h-5" style={{ color: app.color }} />
                       )}

@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
@@ -551,7 +552,9 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             <div>
               <h4 className="text-white mb-3">Select Applications ({selectedApps.length} selected)</h4>
               <div className="grid grid-cols-6 gap-3 max-h-64 overflow-y-auto scrollbar-elegant">
-                {filteredApps.map((app, index) => (
+                {filteredApps.map((app, index) => {
+                  const iconSrc = safeIconSrc(app.iconPath);
+                  return (
                   <button
                     key={index}
                     onClick={() => toggleApp(app)}
@@ -565,8 +568,8 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
                       className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
                       style={{ backgroundColor: `${app.color}20` }}
                     >
-                      {app.iconPath ? (
-                        <img src={app.iconPath} alt={app.name} className="w-5 h-5 object-contain rounded" />
+                      {iconSrc ? (
+                        <img src={iconSrc} alt={app.name} className="w-5 h-5 object-contain rounded" />
                       ) : (
                         <app.icon className="w-5 h-5 text-white" />
                       )}
@@ -574,7 +577,8 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
                     <div className="text-white text-xs text-center truncate">{app.name}</div>
                     <div className="text-white/50 text-xs text-center">{app.category}</div>
                   </button>
-                ))}
+                  );
+                })}
               </div>
             </div>
           </div>
@@ -612,14 +616,15 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
                     <h5 className="text-white/80 text-sm mb-2">{monitor.name}</h5>
                     <div className="space-y-2 max-h-40 overflow-y-auto scrollbar-elegant">
                       {monitor.apps.map((app, index) => {
+                        const iconSrc = safeIconSrc(app.iconPath);
                         return (
                           <div key={`${app.name}-${index}`} className="flex items-center gap-2 text-white/70 text-sm">
                             <div
                               className="w-4 h-4 rounded flex items-center justify-center"
                               style={{ backgroundColor: `${getStableColor(app.name)}40` }}
                             >
-                              {app.iconPath ? (
-                                <img src={app.iconPath} alt={app.name} className="w-3 h-3 object-contain rounded" />
+                              {iconSrc ? (
+                                <img src={iconSrc} alt={app.name} className="w-3 h-3 object-contain rounded" />
                               ) : (
                                 <Settings className="w-2.5 h-2.5 text-white" />
                               )}

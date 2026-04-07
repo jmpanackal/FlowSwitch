@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Search, Settings, Trash2, Power, Save, Move } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
@@ -191,11 +192,12 @@ export function AppManager({
       category: app.category,
       firstLetter: app.firstLetter
     };
-    
+    const previewIconSrc = safeIconSrc(app.iconPath);
+
     const preview = (
       <div className="flex items-center gap-2">
-        {app.iconPath ? (
-          <img src={app.iconPath} alt={app.name} className="w-4 h-4 rounded" />
+        {previewIconSrc ? (
+          <img src={previewIconSrc} alt={app.name} className="w-4 h-4 rounded" />
         ) : (
           <Settings className="w-4 h-4 text-white" />
         )}
@@ -293,6 +295,7 @@ export function AppManager({
           {filteredApps.map((app, index) => {
             const usage = getAppUsage(app.name);
             const isExpanded = expandedApp === app.name || expandedApp === 'toggle-all';
+            const iconSrc = safeIconSrc(app.iconPath);
             return (
               <div 
                 key={index} 
@@ -305,9 +308,9 @@ export function AppManager({
                     onMouseDown={(e) => handleMouseDown(e, app)}
                     title="Drag to add to monitor or minimized apps"
                   >
-                    {app.iconPath ? (
+                    {iconSrc ? (
                       <img
-                        src={app.iconPath}
+                        src={iconSrc}
                         alt={app.name}
                         className="w-6 h-6 object-contain rounded"
                         draggable={false}
@@ -327,7 +330,7 @@ export function AppManager({
                       </span>
                     ) : null}
                     {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
-                    {app.iconPath ? (
+                    {iconSrc ? (
                       <div
                         data-icon-fallback="true"
                         style={{ display: 'none' }}
