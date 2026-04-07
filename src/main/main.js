@@ -322,7 +322,14 @@ const toImageDataUrlFromFile = (filePath) => {
 };
 
 const getWindowIconPath = () => {
-  const logoPath = path.join(__dirname, '../../public/flowswitch-logo.png');
+  const publicDir = path.join(__dirname, '../../public');
+  // Windows scales the whole bitmap into a fixed taskbar slot; a trimmed asset
+  // makes the mark read larger than the full-canvas logo used in the renderer.
+  if (process.platform === 'win32') {
+    const taskbarPath = path.join(publicDir, 'flowswitch-taskbar.png');
+    if (fs.existsSync(taskbarPath)) return taskbarPath;
+  }
+  const logoPath = path.join(publicDir, 'flowswitch-logo.png');
   if (fs.existsSync(logoPath)) return logoPath;
   return undefined;
 };
