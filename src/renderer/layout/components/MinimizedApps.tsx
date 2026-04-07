@@ -393,7 +393,7 @@ export function MinimizedApps({
   const totalItems = apps.length + files.length;
 
   return (
-    <div className="w-full space-y-3">
+    <div className="w-full space-y-2">
       {/* Header Section */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -418,13 +418,13 @@ export function MinimizedApps({
       <div 
         className={`relative rounded-lg border transition-all duration-200 ${
           totalItems > 0 
-            ? 'border-flow-border bg-flow-surface/30 p-4' 
-            : 'border-dashed border-flow-border/50 bg-flow-surface/10 p-6'
+            ? 'border-flow-border bg-flow-surface/30 p-3' 
+            : 'border-dashed border-flow-border/50 bg-flow-surface/10 p-4'
         }`}
         data-drop-target="minimized"
       >
         {totalItems > 0 ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-4">
+          <div className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-3">
             {/* Render Apps */}
             {apps.map((app, index) => {
               const monitorInfo = getMonitorInfo(app.targetMonitor || 'monitor-1');
@@ -443,7 +443,7 @@ export function MinimizedApps({
                 >
                   {/* App Card */}
                   <div 
-                    className={`relative flex flex-col items-center gap-2 p-3 rounded-lg border transition-all duration-200 ${
+                    className={`relative flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all duration-200 ${
                       isSelected
                         ? 'border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30'
                         : 'border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent'
@@ -615,7 +615,7 @@ export function MinimizedApps({
                 >
                   {/* File Card */}
                   <div 
-                    className={`relative flex flex-col items-center gap-2 p-3 rounded-lg border transition-all duration-200 ${
+                    className={`relative flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all duration-200 ${
                       isSelected
                         ? 'border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30'
                         : 'border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent'
@@ -705,7 +705,7 @@ export function MinimizedApps({
           </div>
         ) : (
           /* Empty State */
-          <div className="flex flex-col items-center justify-center text-center py-8">
+          <div className="flex flex-col items-center justify-center text-center py-5">
             <div className="w-12 h-12 rounded-lg bg-flow-surface/50 border border-flow-border/50 flex items-center justify-center mb-3">
               <Package className="w-6 h-6 text-flow-text-muted" />
             </div>

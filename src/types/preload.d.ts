@@ -14,6 +14,7 @@ declare global {
         monitors: Array<{
           id: string;
           name: string;
+          systemName?: string | null;
           primary: boolean;
           resolution: string;
           orientation: 'landscape' | 'portrait';
@@ -38,6 +39,17 @@ declare global {
         }>;
         error?: string;
       }>;
+      getSystemMonitors: () => Promise<Array<{
+        id: string;
+        name: string;
+        systemName?: string | null;
+        primary: boolean;
+        scaleFactor: number;
+        resolution: string;
+        orientation: 'landscape' | 'portrait';
+        layoutPosition?: { x: number; y: number };
+        apps: Array<unknown>;
+      }>>;
       listProfiles: () => Promise<any[]>;
       saveProfiles: (profiles: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
     };

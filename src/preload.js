@@ -21,6 +21,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Capture running app layout from main process
   captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout'),
+  getSystemMonitors: () => ipcRenderer.invoke('get-system-monitors'),
 
   // Profile persistence API
   listProfiles: () => ipcRenderer.invoke('profiles:list'),

@@ -354,6 +354,85 @@ app.on('second-instance', () => {
   existingWindow.focus();
 });
 
+const buildSystemMonitorSnapshot = () => {
+  const { screen } = require('electron');
+  const displays = screen.getAllDisplays();
+  const primaryDisplayId = screen.getPrimaryDisplay().id;
+
+  const monitors = displays.map((display, idx) => ({
+    id: `monitor-${display.id}`,
+    name: `Monitor ${idx + 1}`,
+    systemName: (display.label && String(display.label).trim()) ? String(display.label).trim() : null,
+    primary: display.id === primaryDisplayId,
+    scaleFactor: display.scaleFactor,
+    resolution: `${Math.round(display.bounds.width * display.scaleFactor)}x${Math.round(display.bounds.height * display.scaleFactor)}`,
+    orientation: (
+      display.rotation === 90
+      || display.rotation === 270
+      || display.bounds.height > display.bounds.width
+    ) ? 'portrait' : 'landscape',
+    layoutPosition: { x: display.bounds.x, y: display.bounds.y },
+    bounds: display.bounds,
+    workArea: display.workArea,
+    pixelBounds: {
+      x: Math.round(display.bounds.x * display.scaleFactor),
+      y: Math.round(display.bounds.y * display.scaleFactor),
+      width: Math.round(display.bounds.width * display.scaleFactor),
+      height: Math.round(display.bounds.height * display.scaleFactor),
+    },
+    pixelWorkArea: {
+      x: Math.round(display.workArea.x * display.scaleFactor),
+      y: Math.round(display.workArea.y * display.scaleFactor),
+      width: Math.round(display.workArea.width * display.scaleFactor),
+      height: Math.round(display.workArea.height * display.scaleFactor),
+    },
+    apps: [],
+  }));
+
+  return monitors.length > 0 ? monitors : [{
+    id: 'monitor-1',
+    name: 'Monitor 1',
+    systemName: null,
+    primary: true,
+    scaleFactor: 1,
+    resolution: '1920x1080',
+    orientation: 'landscape',
+    layoutPosition: { x: 0, y: 0 },
+    bounds: { x: 0, y: 0, width: 1920, height: 1080 },
+    workArea: { x: 0, y: 0, width: 1920, height: 1080 },
+    pixelBounds: { x: 0, y: 0, width: 1920, height: 1080 },
+    pixelWorkArea: { x: 0, y: 0, width: 1920, height: 1080 },
+    apps: [],
+  }];
+};
+
+ipcMain.handle('get-system-monitors', async () => {
+  try {
+    const monitors = buildSystemMonitorSnapshot();
+    return monitors.map((monitor) => {
+      const cleanedMonitor = { ...monitor };
+      delete cleanedMonitor.bounds;
+      delete cleanedMonitor.workArea;
+      delete cleanedMonitor.pixelBounds;
+      delete cleanedMonitor.pixelWorkArea;
+      return cleanedMonitor;
+    });
+  } catch (error) {
+    console.error('Error in get-system-monitors handler:', error);
+    return [{
+      id: 'monitor-1',
+      name: 'Monitor 1',
+      systemName: null,
+      primary: true,
+      scaleFactor: 1,
+      resolution: '1920x1080',
+      orientation: 'landscape',
+      layoutPosition: { x: 0, y: 0 },
+      apps: [],
+    }];
+  }
+});
+
 ipcMain.handle('profiles:list', async () => {
   try {
     return readProfilesFromDisk();
@@ -691,65 +770,20 @@ ipcMain.handle('get-installed-apps', async () => {
 
 ipcMain.handle('capture-running-app-layout', async () => {
   try {
-    const { screen } = require('electron');
-    const displays = screen.getAllDisplays();
     const processes = await getRunningWindowProcesses();
-
-    const monitors = displays.map((display, idx) => ({
-      id: `monitor-${display.id}`,
-      name: `Monitor ${idx + 1}`,
-      primary: display.id === screen.getPrimaryDisplay().id,
-      scaleFactor: display.scaleFactor,
-      // Use physical pixel resolution so it matches our pixel-space normalization.
-      resolution: `${Math.round(display.bounds.width * display.scaleFactor)}x${Math.round(display.bounds.height * display.scaleFactor)}`,
-      orientation: (
-        display.rotation === 90
-        || display.rotation === 270
-        || display.bounds.height > display.bounds.width
-      ) ? 'portrait' : 'landscape',
-      layoutPosition: { x: display.bounds.x, y: display.bounds.y },
-      // Full display bounds (DIP) for monitor assignment.
-      bounds: display.bounds,
-      // Work area bounds (DIP) for optional dock-aware normalization.
-      workArea: display.workArea,
-      // Keep these fields for potential future heuristics/debug,
-      // but current geometry uses DIP to avoid scaling mismatches.
-      pixelBounds: {
-        x: Math.round(display.bounds.x * display.scaleFactor),
-        y: Math.round(display.bounds.y * display.scaleFactor),
-        width: Math.round(display.bounds.width * display.scaleFactor),
-        height: Math.round(display.bounds.height * display.scaleFactor),
-      },
-      pixelWorkArea: {
-        x: Math.round(display.workArea.x * display.scaleFactor),
-        y: Math.round(display.workArea.y * display.scaleFactor),
-        width: Math.round(display.workArea.width * display.scaleFactor),
-        height: Math.round(display.workArea.height * display.scaleFactor),
-      },
-      apps: [],
-    }));
-
-    const targetMonitors = monitors.length > 0 ? monitors : [{
-      id: 'monitor-1',
-      name: 'Monitor 1',
-      primary: true,
-      scaleFactor: 1,
-      resolution: '1920x1080',
-      orientation: 'landscape',
-      layoutPosition: { x: 0, y: 0 },
-      bounds: { x: 0, y: 0, width: 1920, height: 1080 },
-      workArea: { x: 0, y: 0, width: 1920, height: 1080 },
-      pixelBounds: { x: 0, y: 0, width: 1920, height: 1080 },
-      pixelWorkArea: { x: 0, y: 0, width: 1920, height: 1080 },
-      apps: [],
-    }];
+    const targetMonitors = buildSystemMonitorSnapshot();
     const minimizedApps = [];
+    const captureAllowList = new Set(['steamwebhelper', 'explorer']);
 
     const uniqueWindows = [];
     const seen = new Set();
     for (const p of processes) {
       if (!p?.name || !p?.bounds) continue;
-      if (hiddenProcessNamePatterns.some((pattern) => pattern.test(p.name))) continue;
+      const processNameLc = String(p.name).toLowerCase();
+      if (
+        hiddenProcessNamePatterns.some((pattern) => pattern.test(p.name))
+        && !captureAllowList.has(processNameLc)
+      ) continue;
       if (p?.title && hiddenWindowTitlePatterns.some((pattern) => pattern.test(p.title))) continue;
       const dedupeKey = `${p.id}::${p.title.toLowerCase()}::${p.bounds.x},${p.bounds.y},${p.bounds.width},${p.bounds.height}`;
       if (seen.has(dedupeKey)) continue;
@@ -1007,8 +1041,13 @@ ipcMain.handle('capture-running-app-layout', async () => {
       }
 
       const round1 = (n) => Math.round(n * 10) / 10;
+      const processName = String(windowInfo.name || '');
+      const normalizedAppName = (
+        processName.toLowerCase() === 'steamwebhelper'
+        || processName.toLowerCase() === 'steam'
+      ) ? 'Steam' : processName;
       const mappedWindow = {
-        name: windowInfo.name,
+        name: normalizedAppName,
         iconPath,
         executablePath: windowInfo.executablePath || null,
         position: {

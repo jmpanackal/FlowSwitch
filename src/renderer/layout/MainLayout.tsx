@@ -1951,6 +1951,33 @@ export default function App() {
     );
   };
 
+  const updateMonitorPositions = (
+    profileId: string,
+    positions: Array<{ id: string; layoutPosition: { x: number; y: number } }>,
+  ) => {
+    const positionMap = new Map(
+      positions.map((position) => [position.id, position.layoutPosition]),
+    );
+
+    setProfiles((prev) =>
+      prev.map((profile) => {
+        if (profile.id !== profileId) return profile;
+
+        return {
+          ...profile,
+          monitors: profile.monitors.map((monitor) => {
+            const nextPosition = positionMap.get(monitor.id);
+            if (!nextPosition) return monitor;
+            return {
+              ...monitor,
+              layoutPosition: nextPosition,
+            };
+          }),
+        };
+      }),
+    );
+  };
+
   const updateBrowserTabs = (
     profileId: string,
     tabs: any[],
@@ -2772,6 +2799,9 @@ export default function App() {
                       monitorId,
                       layout,
                     )
+                  }
+                  onUpdateMonitorPositions={(positions) =>
+                    updateMonitorPositions(currentProfile.id, positions)
                   }
                   onAddAppToMinimized={(newApp) =>
                     addAppToMinimized(currentProfile.id, newApp)
