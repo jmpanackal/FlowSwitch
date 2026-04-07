@@ -47,6 +47,7 @@ interface MinimizedAppsProps {
   onRemoveFile?: (fileIndex: number) => void;
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   isEditMode?: boolean;
+  compact?: boolean;
 }
 
 export function MinimizedApps({ 
@@ -63,7 +64,8 @@ export function MinimizedApps({
   onRemoveApp,
   onRemoveFile,
   onCustomDragStart,
-  isEditMode = false
+  isEditMode = false,
+  compact = false,
 }: MinimizedAppsProps) {
   const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
   
@@ -391,9 +393,12 @@ export function MinimizedApps({
   }, []);
 
   const totalItems = apps.length + files.length;
+  const maxVisibleApps = compact ? 6 : 8;
+  const visibleApps = apps.slice(0, maxVisibleApps);
+  const hiddenAppsCount = Math.max(0, apps.length - visibleApps.length);
 
   return (
-    <div className="w-full space-y-2">
+    <div className={`w-full ${compact ? 'space-y-1' : 'space-y-1.5'}`}>
       {/* Header Section */}
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
@@ -418,15 +423,15 @@ export function MinimizedApps({
       <div 
         className={`relative rounded-lg border transition-all duration-200 ${
           totalItems > 0 
-            ? 'border-flow-border bg-flow-surface/30 p-3' 
-            : 'border-dashed border-flow-border/50 bg-flow-surface/10 p-4'
+            ? `border-flow-border bg-flow-surface/30 ${compact ? 'p-2' : 'p-3'}` 
+            : `border-dashed border-flow-border/50 bg-flow-surface/10 ${compact ? 'p-2.5' : 'p-4'}`
         }`}
         data-drop-target="minimized"
       >
         {totalItems > 0 ? (
-          <div className="grid grid-cols-[repeat(auto-fill,minmax(80px,1fr))] gap-3">
+          <div className={`grid grid-cols-[repeat(auto-fill,minmax(${compact ? '68px' : '76px'},1fr))] ${compact ? 'gap-1.5' : 'gap-2'}`}>
             {/* Render Apps */}
-            {apps.map((app, index) => {
+            {visibleApps.map((app, index) => {
               const monitorInfo = getMonitorInfo(app.targetMonitor || 'monitor-1');
               const isBrowser = app.name.toLowerCase().includes('chrome') || app.name.toLowerCase().includes('browser');
               const isSelected = selectedApp && 
@@ -443,7 +448,7 @@ export function MinimizedApps({
                 >
                   {/* App Card */}
                   <div 
-                    className={`relative flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all duration-200 ${
+                    className={`relative flex flex-col items-center ${compact ? 'gap-1 p-1.5' : 'gap-1.5 p-2'} rounded-lg border transition-all duration-200 ${
                       isSelected
                         ? 'border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30'
                         : 'border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent'
@@ -456,7 +461,7 @@ export function MinimizedApps({
                   >
                     {/* App Icon Container */}
                     <div 
-                      className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
+                      className={`relative ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-lg flex items-center justify-center transition-all duration-200 ${
                         isSelected ? 'scale-105' : 'group-hover:scale-105'
                       }`}
                       style={{ 
@@ -514,10 +519,10 @@ export function MinimizedApps({
 
                     {/* App Name */}
                     <div className="text-center w-full">
-                      <span className="text-xs text-flow-text-primary font-medium truncate block" title={app.name}>
+                      <span className={`${compact ? 'text-[11px]' : 'text-xs'} text-flow-text-primary font-medium truncate block`} title={app.name}>
                         {app.name}
                       </span>
-                      <span className="text-xs text-flow-text-muted truncate block" title={monitorInfo.name}>
+                      <span className="text-[10px] text-flow-text-muted truncate block" title={monitorInfo.name}>
                         {monitorInfo.name}
                       </span>
                     </div>
@@ -596,6 +601,15 @@ export function MinimizedApps({
                 </div>
               );
             })}
+
+            {hiddenAppsCount > 0 && (
+              <div className="relative flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg border border-flow-border/60 bg-flow-surface/30">
+                <div className="w-8 h-8 rounded-lg border border-flow-border/60 bg-flow-surface/50 flex items-center justify-center">
+                  <MoreHorizontal className="w-4 h-4 text-flow-text-muted" />
+                </div>
+                <span className="text-[10px] text-flow-text-muted font-medium">+{hiddenAppsCount} more</span>
+              </div>
+            )}
 
             {/* Render Files */}
             {files.map((file, index) => {
@@ -705,12 +719,12 @@ export function MinimizedApps({
           </div>
         ) : (
           /* Empty State */
-          <div className="flex flex-col items-center justify-center text-center py-5">
-            <div className="w-12 h-12 rounded-lg bg-flow-surface/50 border border-flow-border/50 flex items-center justify-center mb-3">
-              <Package className="w-6 h-6 text-flow-text-muted" />
+          <div className={`flex flex-col items-center justify-center text-center ${compact ? 'py-2.5' : 'py-5'}`}>
+            <div className={`${compact ? 'w-9 h-9 mb-2' : 'w-12 h-12 mb-3'} rounded-lg bg-flow-surface/50 border border-flow-border/50 flex items-center justify-center`}>
+              <Package className={`${compact ? 'w-4 h-4' : 'w-6 h-6'} text-flow-text-muted`} />
             </div>
-            <div className="text-sm text-flow-text-muted mb-2">No minimized items</div>
-            <div className="text-xs text-flow-text-muted/70 max-w-48">
+            <div className={`${compact ? 'text-xs mb-1' : 'text-sm mb-2'} text-flow-text-muted`}>No minimized items</div>
+            <div className={`text-xs text-flow-text-muted/70 ${compact ? 'max-w-40' : 'max-w-48'}`}>
               {isEditMode 
                 ? "Drag apps or files here to minimize them"
                 : "Apps moved to background will appear here"
