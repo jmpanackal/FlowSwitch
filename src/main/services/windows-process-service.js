@@ -4,7 +4,6 @@ const hiddenProcessNamePatterns = [
   /^electron$/i,
   /helper$/i,
   /updater$/i,
-  /webhelper$/i,
   /crashpad/i,
   /^runtimebroker$/i,
   /^shellexperiencehost$/i,
@@ -42,21 +41,36 @@ public struct WINDOWPLACEMENT {
   public RECT rcNormalPosition;
 }
 public static class Win32 {
+  public delegate bool EnumWindowsProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")]
+  public static extern bool EnumWindows(EnumWindowsProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll")]
+  public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")]
+  public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll")]
+  public static extern IntPtr GetShellWindow();
   [DllImport("user32.dll")]
   public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll")]
   public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")]
   public static extern bool GetWindowPlacement(IntPtr hWnd, ref WINDOWPLACEMENT lpwndpl);
+  [DllImport("user32.dll")]
+  public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint lpdwProcessId);
 }
 "@
 $items = @()
+$seen = New-Object 'System.Collections.Generic.HashSet[string]'
 Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle.Trim().Length -gt 0 } | ForEach-Object {
   $rect = New-Object RECT
-  if ([Win32]::GetWindowRect($_.MainWindowHandle, [ref]$rect)) {
+  $hWnd = [System.IntPtr]::new([int64]$_.MainWindowHandle)
+  if ([Win32]::GetWindowRect($hWnd, [ref]$rect)) {
     $width = $rect.Right - $rect.Left
     $height = $rect.Bottom - $rect.Top
-    $isMinimized = [Win32]::IsIconic($_.MainWindowHandle)
+    $isMinimized = [Win32]::IsIconic($hWnd)
     $normalLeft = $null
     $normalTop = $null
     $normalRight = $null
@@ -71,7 +85,7 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -
           # If SizeOf fails, leave length as-is; GetWindowPlacement will just return false.
           $placement.length = 0
         }
-        if ([Win32]::GetWindowPlacement($_.MainWindowHandle, [ref]$placement)) {
+        if ([Win32]::GetWindowPlacement($hWnd, [ref]$placement)) {
           $normalLeft = $placement.rcNormalPosition.Left
           $normalTop = $placement.rcNormalPosition.Top
           $normalRight = $placement.rcNormalPosition.Right
@@ -82,26 +96,101 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -
       }
     }
     if ($width -gt 0 -and $height -gt 0) {
-      $items += [pscustomobject]@{
-        ProcessName = $_.ProcessName
-        Id = $_.Id
-        MainWindowTitle = $_.MainWindowTitle
-        Path = $_.Path
-        IsMinimized = $isMinimized
-        Left = $rect.Left
-        Top = $rect.Top
-        Right = $rect.Right
-        Bottom = $rect.Bottom
-        NormalLeft = $normalLeft
-        NormalTop = $normalTop
-        NormalRight = $normalRight
-        NormalBottom = $normalBottom
-        Width = $width
-        Height = $height
+      $dedupeKey = "$($_.Id)|$($_.MainWindowTitle)|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
+      if ($seen.Add($dedupeKey)) {
+        $items += [pscustomobject]@{
+          ProcessName = $_.ProcessName
+          Id = $_.Id
+          MainWindowTitle = $_.MainWindowTitle
+          Path = $_.Path
+          IsMinimized = $isMinimized
+          Left = $rect.Left
+          Top = $rect.Top
+          Right = $rect.Right
+          Bottom = $rect.Bottom
+          NormalLeft = $normalLeft
+          NormalTop = $normalTop
+          NormalRight = $normalRight
+          NormalBottom = $normalBottom
+          Width = $width
+          Height = $height
+        }
       }
     }
   }
 }
+# Fallback capture for Explorer windows that can be missed by MainWindowHandle scanning.
+try {
+  $shellWindow = [Win32]::GetShellWindow()
+  $enumProc = [Win32+EnumWindowsProc]{
+    param([System.IntPtr]$hWnd, [System.IntPtr]$lParam)
+    try {
+      if ($hWnd -eq [System.IntPtr]::Zero -or $hWnd -eq $shellWindow) { return $true }
+      if (-not [Win32]::IsWindowVisible($hWnd)) { return $true }
+      $titleLen = [Win32]::GetWindowTextLength($hWnd)
+      if ($titleLen -le 0) { return $true }
+      $titleBuilder = New-Object System.Text.StringBuilder ($titleLen + 1)
+      [void][Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+      $title = $titleBuilder.ToString()
+      if ([string]::IsNullOrWhiteSpace($title)) { return $true }
+
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      if ($width -le 0 -or $height -le 0) { return $true }
+
+      [uint32]$pid = 0
+      [void][Win32]::GetWindowThreadProcessId($hWnd, [ref]$pid)
+      if ($pid -le 0) { return $true }
+
+      $proc = [System.Diagnostics.Process]::GetProcessById([int]$pid)
+      if ($proc.ProcessName -ine 'explorer') { return $true }
+      $processPath = $null
+      try { $processPath = $proc.Path } catch { $processPath = $null }
+
+      $isMinimized = [Win32]::IsIconic($hWnd)
+      $normalLeft = $null
+      $normalTop = $null
+      $normalRight = $null
+      $normalBottom = $null
+
+      if ($isMinimized) {
+        $placement = New-Object WINDOWPLACEMENT
+        $placement.length = [System.Runtime.InteropServices.Marshal]::SizeOf([WINDOWPLACEMENT])
+        if ([Win32]::GetWindowPlacement($hWnd, [ref]$placement)) {
+          $normalLeft = $placement.rcNormalPosition.Left
+          $normalTop = $placement.rcNormalPosition.Top
+          $normalRight = $placement.rcNormalPosition.Right
+          $normalBottom = $placement.rcNormalPosition.Bottom
+        }
+      }
+
+      $dedupeKey = "$($proc.Id)|$title|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
+      if ($seen.Add($dedupeKey)) {
+        $items += [pscustomobject]@{
+          ProcessName = $proc.ProcessName
+          Id = $proc.Id
+          MainWindowTitle = $title
+          Path = $processPath
+          IsMinimized = $isMinimized
+          Left = $rect.Left
+          Top = $rect.Top
+          Right = $rect.Right
+          Bottom = $rect.Bottom
+          NormalLeft = $normalLeft
+          NormalTop = $normalTop
+          NormalRight = $normalRight
+          NormalBottom = $normalBottom
+          Width = $width
+          Height = $height
+        }
+      }
+    } catch {}
+    return $true
+  }
+  [void][Win32]::EnumWindows($enumProc, [System.IntPtr]::Zero)
+} catch {}
 $items | ConvertTo-Json -Depth 3`;
 
     execFile(

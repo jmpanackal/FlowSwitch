@@ -69,12 +69,35 @@ interface SelectedApp {
   data: any;
 }
 
+interface LaunchFeedbackState {
+  status: "idle" | "in-progress" | "success" | "error";
+  message: string;
+}
+
+const toSerializableProfiles = (inputProfiles: FlowProfile[]) => {
+  try {
+    return JSON.parse(JSON.stringify(inputProfiles));
+  } catch {
+    // Last-resort fallback to keep profile saves resilient.
+    return (Array.isArray(inputProfiles) ? inputProfiles : []).map(
+      (profile) => ({ ...profile }),
+    );
+  }
+};
+
 export default function App() {
   const [profiles, setProfiles] = useState<FlowProfile[]>([]);
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] =
     useState<string>("");
   const [isLaunching, setIsLaunching] = useState(false);
+  const [launchFeedback, setLaunchFeedback] =
+    useState<LaunchFeedbackState>({
+      status: "idle",
+      message: "",
+    });
+  const launchFeedbackTimeoutRef = useRef<number | null>(null);
+  const skipNextAutosaveRef = useRef(true);
   const [isEditMode, setIsEditMode] = useState(false);
   const [
     selectedProfileForSettings,
@@ -159,9 +182,21 @@ export default function App() {
     };
   }, []);
 
+  useEffect(() => (
+    () => {
+      if (launchFeedbackTimeoutRef.current) {
+        window.clearTimeout(launchFeedbackTimeoutRef.current);
+      }
+    }
+  ), []);
+
   useEffect(() => {
     if (!profilesLoaded) return;
     if (!window.electron?.saveProfiles) return;
+    if (skipNextAutosaveRef.current) {
+      skipNextAutosaveRef.current = false;
+      return;
+    }
 
     const timer = window.setTimeout(() => {
       void window.electron.saveProfiles(profiles).catch((error) => {
@@ -1211,10 +1246,99 @@ export default function App() {
   };
 
   const handleLaunch = async () => {
+    if (!currentProfile?.id || !window.electron?.launchProfile) return;
+
+    if (launchFeedbackTimeoutRef.current) {
+      window.clearTimeout(launchFeedbackTimeoutRef.current);
+      launchFeedbackTimeoutRef.current = null;
+    }
+
     setIsLaunching(true);
-    setTimeout(() => {
+    setLaunchFeedback({
+      status: "in-progress",
+      message: "Launching profile...",
+    });
+
+    try {
+      if (window.electron?.saveProfiles) {
+        const serializableProfiles = toSerializableProfiles(
+          profiles,
+        );
+        const saveResult = await window.electron.saveProfiles(
+          serializableProfiles,
+        );
+        if (!saveResult?.ok) {
+          setLaunchFeedback({
+            status: "error",
+            message: "Could not save profile changes before launch.",
+          });
+          setIsLaunching(false);
+          launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+            setLaunchFeedback({
+              status: "idle",
+              message: "",
+            });
+            launchFeedbackTimeoutRef.current = null;
+          }, 7000);
+          return;
+        }
+      }
+
+      const launchResult = await window.electron.launchProfile(
+        currentProfile.id,
+      );
+      const launchedApps = Number(launchResult?.launchedAppCount || 0);
+      const launchedTabs = Number(launchResult?.launchedTabCount || 0);
+      const failedCount = Array.isArray(launchResult?.failedApps)
+        ? launchResult.failedApps.length
+        : 0;
+      const skippedCount = Array.isArray(launchResult?.skippedApps)
+        ? launchResult.skippedApps.length
+        : 0;
+
+      if (launchResult?.ok) {
+        const summaryParts = [
+          `${launchedApps} app${launchedApps === 1 ? "" : "s"}`,
+          `${launchedTabs} tab${launchedTabs === 1 ? "" : "s"}`,
+        ];
+        if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
+        if (skippedCount > 0) summaryParts.push(`${skippedCount} skipped`);
+        setLaunchFeedback({
+          status: "success",
+          message: `Launch complete: ${summaryParts.join(", ")}.`,
+        });
+      } else {
+        const errorMessage = launchResult?.error
+          || "Could not launch this profile. Check app executable paths in app details.";
+        setLaunchFeedback({
+          status: "error",
+          message: errorMessage,
+        });
+        console.error(
+          "Profile launch completed with errors:",
+          launchResult?.error || launchResult?.failedApps || [],
+        );
+      }
+    } catch (error) {
+      console.error("Failed to launch profile:", error);
+      const errorMessage =
+        error instanceof Error && error.message
+          ? error.message
+          : "Launch failed unexpectedly. Please try again.";
+      setLaunchFeedback({
+        status: "error",
+        message: errorMessage,
+      });
+    } finally {
       setIsLaunching(false);
-    }, 2000);
+      launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+        setLaunchFeedback({
+          status: "idle",
+          message: "",
+        });
+        launchFeedbackTimeoutRef.current = null;
+      }, 7000);
+    }
   };
 
   const handleDragStart = () => {
@@ -1951,6 +2075,33 @@ export default function App() {
     );
   };
 
+  const updateMonitorPositions = (
+    profileId: string,
+    positions: Array<{ id: string; layoutPosition: { x: number; y: number } }>,
+  ) => {
+    const positionMap = new Map(
+      positions.map((position) => [position.id, position.layoutPosition]),
+    );
+
+    setProfiles((prev) =>
+      prev.map((profile) => {
+        if (profile.id !== profileId) return profile;
+
+        return {
+          ...profile,
+          monitors: profile.monitors.map((monitor) => {
+            const nextPosition = positionMap.get(monitor.id);
+            if (!nextPosition) return monitor;
+            return {
+              ...monitor,
+              layoutPosition: nextPosition,
+            };
+          }),
+        };
+      }),
+    );
+  };
+
   const updateBrowserTabs = (
     profileId: string,
     tabs: any[],
@@ -2616,53 +2767,75 @@ export default function App() {
                 </div>
 
                 {/* MOVED: Action buttons with edit/save button first */}
-                <div className="flex items-center gap-3">
-                  <button
-                    onClick={() => setIsEditMode(!isEditMode)}
-                    className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
-                      isEditMode
-                        ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue hover:bg-flow-accent-blue-hover shadow-md ring-2 ring-flow-accent-blue/30"
-                        : "bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
-                    }`}
-                  >
-                    {isEditMode ? (
-                      <Save className="w-4 h-4" />
-                    ) : (
-                      <Edit className="w-4 h-4" />
-                    )}
-                    {isEditMode
-                      ? "Save Profile"
-                      : "Edit Profile"}
-                  </button>
-                  <button
-                    onClick={() =>
-                      setSelectedProfileForSettings(
-                        currentProfile.id,
-                      )
-                    }
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
-                    title="Profile Settings"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Settings
-                  </button>
-                  <button
-                    onClick={handleLaunch}
-                    disabled={isLaunching || isEditMode}
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/80 disabled:opacity-50 shadow-sm"
-                  >
-                    {isLaunching ? (
-                      <>
-                        <div className="w-4 h-4 border-2 border-flow-text-primary/30 border-t-flow-text-primary rounded-full animate-spin" />
-                        Launching...
-                      </>
-                    ) : (
-                      <>
-                        <Play className="w-4 h-4" />
-                        Launch Profile
-                      </>
-                    )}
-                  </button>
+                <div className="flex flex-col items-end gap-2">
+                  <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => setIsEditMode(!isEditMode)}
+                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+                        isEditMode
+                          ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue hover:bg-flow-accent-blue-hover shadow-md ring-2 ring-flow-accent-blue/30"
+                          : "bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
+                      }`}
+                    >
+                      {isEditMode ? (
+                        <Save className="w-4 h-4" />
+                      ) : (
+                        <Edit className="w-4 h-4" />
+                      )}
+                      {isEditMode
+                        ? "Save Profile"
+                        : "Edit Profile"}
+                    </button>
+                    <button
+                      onClick={() =>
+                        setSelectedProfileForSettings(
+                          currentProfile.id,
+                        )
+                      }
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
+                      title="Profile Settings"
+                    >
+                      <Settings className="w-4 h-4" />
+                      Settings
+                    </button>
+                    <button
+                      onClick={handleLaunch}
+                      disabled={isLaunching || isEditMode}
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/80 disabled:opacity-50 shadow-sm"
+                    >
+                      {isLaunching ? (
+                        <>
+                          <div className="w-4 h-4 border-2 border-flow-text-primary/30 border-t-flow-text-primary rounded-full animate-spin" />
+                          Launching...
+                        </>
+                      ) : (
+                        <>
+                          <Play className="w-4 h-4" />
+                          Launch Profile
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  {launchFeedback.status !== "idle" && (
+                    <div
+                      className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
+                        launchFeedback.status === "success"
+                          ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+                          : launchFeedback.status === "error"
+                            ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
+                            : "border-flow-border-accent bg-flow-surface-elevated text-flow-text-secondary"
+                      }`}
+                    >
+                      {launchFeedback.status === "success" ? (
+                        <Check className="w-3.5 h-3.5" />
+                      ) : launchFeedback.status === "error" ? (
+                        <X className="w-3.5 h-3.5" />
+                      ) : (
+                        <div className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
+                      )}
+                      <span>{launchFeedback.message}</span>
+                    </div>
+                  )}
                 </div>
               </div>
             </header>
@@ -2772,6 +2945,9 @@ export default function App() {
                       monitorId,
                       layout,
                     )
+                  }
+                  onUpdateMonitorPositions={(positions) =>
+                    updateMonitorPositions(currentProfile.id, positions)
                   }
                   onAddAppToMinimized={(newApp) =>
                     addAppToMinimized(currentProfile.id, newApp)

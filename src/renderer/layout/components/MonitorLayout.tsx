@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef } from "react";
-import { Monitor, Grid3X3, Zap, ChevronDown } from "lucide-react";
+import { Monitor, Grid3X3, Zap, ChevronDown, GripVertical } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MinimizedApps } from "./MinimizedApps";
 import { AppSettings } from "./AppSettings";
@@ -67,9 +67,11 @@ interface MonitorLayoutProps {
   monitors: {
     id: string;
     name: string;
+    systemName?: string | null;
     primary: boolean;
     resolution: string;
     orientation?: 'landscape' | 'portrait';
+    layoutPosition?: { x: number; y: number };
     predefinedLayout?: string | null;
     apps: App[];
     files?: any[]; // Legacy support but won't be used
@@ -106,6 +108,7 @@ interface MonitorLayoutProps {
   onFileSelect?: (fileData: any, source: 'monitor' | 'minimized', monitorId?: string, fileIndex?: number) => void; // Legacy
   selectedApp?: any;
   onAutoSnapApps?: (monitorId: string, appUpdates: { appIndex: number; position: { x: number; y: number }; size: { width: number; height: number } }[]) => void;
+  onUpdateMonitorPositions?: (positions: Array<{ id: string; layoutPosition: { x: number; y: number } }>) => void;
 }
 
 // Layout definitions - Horizontal Monitor Layouts
@@ -354,7 +357,8 @@ export function MonitorLayout({
   onAppSelect,
   onFileSelect, // Legacy
   selectedApp,
-  onAutoSnapApps
+  onAutoSnapApps,
+  onUpdateMonitorPositions
 }: MonitorLayoutProps) {
   // Enhanced drag state with persistence
   const [localDragState, setLocalDragState] = useState<{
@@ -389,6 +393,173 @@ export function MonitorLayout({
   const [selectedItemIndex, setSelectedItemIndex] = useState<number>(-1);
   const [selectedMonitorId, setSelectedMonitorId] = useState<string>('');
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
+  const monitorPreviewRef = useRef<HTMLDivElement | null>(null);
+  const [previewBounds, setPreviewBounds] = useState({ width: 1, height: 1 });
+  const [monitorPreviewPositions, setMonitorPreviewPositions] = useState<Record<string, { x: number; y: number }>>({});
+  const [draggingMonitor, setDraggingMonitor] = useState<{
+    monitorId: string;
+    startX: number;
+    startY: number;
+    startPos: { x: number; y: number };
+  } | null>(null);
+
+  const getMonitorFootprint = (monitor: { orientation?: 'landscape' | 'portrait' }) => {
+    const isPortrait = monitor.orientation === 'portrait';
+    const widthPx = isPortrait ? (large ? 208 : 160) : (large ? 448 : 320);
+    const cardHeightPx = isPortrait ? (large ? 384 : 288) : (large ? 288 : 208);
+    const headerHeightPx = 64;
+    return { widthPx, heightPx: cardHeightPx + headerHeightPx };
+  };
+
+  const clampPreviewPosition = (
+    monitor: { orientation?: 'landscape' | 'portrait' },
+    position: { x: number; y: number },
+  ) => {
+    if (previewBounds.width <= 10 || previewBounds.height <= 10) {
+      return {
+        x: Math.max(0, Math.min(100, position.x)),
+        y: Math.max(0, Math.min(100, position.y)),
+      };
+    }
+
+    const footprint = getMonitorFootprint(monitor);
+    const halfWidthPct = ((footprint.widthPx / previewBounds.width) * 100) / 2;
+    const halfHeightPct = ((footprint.heightPx / previewBounds.height) * 100) / 2;
+    const sidePadPct = (10 / previewBounds.width) * 100;
+    const topPadPct = (22 / previewBounds.height) * 100;
+    const bottomPadPct = (10 / previewBounds.height) * 100;
+
+    const minX = Math.min(50, Math.max(0, halfWidthPct + sidePadPct));
+    const maxX = Math.max(minX, 100 - halfWidthPct - sidePadPct);
+    const minY = Math.min(50, Math.max(0, halfHeightPct + topPadPct));
+    const maxY = Math.max(minY, 100 - halfHeightPct - bottomPadPct);
+
+    return {
+      x: Math.max(minX, Math.min(maxX, position.x)),
+      y: Math.max(minY, Math.min(maxY, position.y)),
+    };
+  };
+
+  useEffect(() => {
+    const container = monitorPreviewRef.current;
+    if (!container) return;
+
+    const updateBounds = () => {
+      const rect = container.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        setPreviewBounds({ width: rect.width, height: rect.height });
+      }
+    };
+
+    updateBounds();
+    const observer = new ResizeObserver(updateBounds);
+    observer.observe(container);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (monitors.length === 0) {
+      setMonitorPreviewPositions({});
+      return;
+    }
+
+    if (monitors.length === 1) {
+      setMonitorPreviewPositions({ [monitors[0].id]: { x: 50, y: 50 } });
+      return;
+    }
+
+    const rawPositions = monitors.map((monitor, index) => ({
+      id: monitor.id,
+      x: monitor.layoutPosition?.x ?? ((index % 3) * 300),
+      y: monitor.layoutPosition?.y ?? (Math.floor(index / 3) * 220),
+    }));
+
+    const minX = Math.min(...rawPositions.map((p) => p.x));
+    const maxX = Math.max(...rawPositions.map((p) => p.x));
+    const minY = Math.min(...rawPositions.map((p) => p.y));
+    const maxY = Math.max(...rawPositions.map((p) => p.y));
+    const spanX = Math.max(1, maxX - minX);
+    const spanY = Math.max(1, maxY - minY);
+
+    const allPercentCoordinates = rawPositions.every(
+      (pos) => pos.x >= 0 && pos.x <= 100 && pos.y >= 0 && pos.y <= 100,
+    );
+
+    const normalized: Record<string, { x: number; y: number }> = {};
+    rawPositions.forEach((pos) => {
+      if (allPercentCoordinates) {
+        normalized[pos.id] = { x: pos.x, y: pos.y };
+        return;
+      }
+
+      const normalizedX = ((pos.x - minX) / spanX) * 100;
+      const normalizedY = ((pos.y - minY) / spanY) * 100;
+      normalized[pos.id] = {
+        // Keep relative pattern from Windows, compress spacing to fit preview.
+        x: 50 + ((normalizedX - 50) * 0.55),
+        y: 50 + ((normalizedY - 50) * 0.55),
+      };
+    });
+
+    setMonitorPreviewPositions(normalized);
+  }, [monitors]);
+
+  useEffect(() => {
+    if (!draggingMonitor) return;
+
+    const handleMouseMove = (event: MouseEvent) => {
+      const container = monitorPreviewRef.current;
+      if (!container) return;
+      const rect = container.getBoundingClientRect();
+      if (rect.width <= 0 || rect.height <= 0) return;
+
+      const deltaXPct = ((event.clientX - draggingMonitor.startX) / rect.width) * 100;
+      const deltaYPct = ((event.clientY - draggingMonitor.startY) / rect.height) * 100;
+
+      const monitor = monitors.find((item) => item.id === draggingMonitor.monitorId);
+      if (!monitor) return;
+
+      const nextPosition = {
+        x: draggingMonitor.startPos.x + deltaXPct,
+        y: draggingMonitor.startPos.y + deltaYPct,
+      };
+      const clamped = clampPreviewPosition(monitor, nextPosition);
+
+      setMonitorPreviewPositions((prev) => ({
+        ...prev,
+        [draggingMonitor.monitorId]: clamped,
+      }));
+    };
+
+    const handleMouseUp = () => {
+      setDraggingMonitor(null);
+      if (!onUpdateMonitorPositions) return;
+
+      const positions = monitors.map((monitor) => {
+        const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
+        const clamped = clampPreviewPosition(monitor, preview);
+        return {
+          id: monitor.id,
+          layoutPosition: {
+            x: Math.round(clamped.x),
+            y: Math.round(clamped.y),
+          },
+        };
+      });
+      onUpdateMonitorPositions(positions);
+    };
+
+    window.addEventListener('mousemove', handleMouseMove);
+    window.addEventListener('mouseup', handleMouseUp);
+
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove);
+      window.removeEventListener('mouseup', handleMouseUp);
+    };
+  }, [draggingMonitor, monitorPreviewPositions, monitors, onUpdateMonitorPositions, previewBounds]);
 
   // Handle updating associated files for an app
   const handleUpdateAssociatedFiles = (monitorId: string, appIndex: number, files: any[]) => {
@@ -890,50 +1061,99 @@ export function MonitorLayout({
           )}
         </div>
       </div>
-      
+
       {/* Monitor Layout Section - Flex-1 with overflow for scrolling if needed */}
-      <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden">
-        <div className="pb-6">
-          <div className={`flex gap-8 justify-center flex-wrap ${large ? 'gap-12' : ''} min-w-0`}>
+      <div className="flex-1 min-h-0 overflow-hidden">
+        <div className="h-full pb-2">
+          <div
+            ref={monitorPreviewRef}
+            className={`relative h-full min-h-[24rem] ${large ? 'min-h-[32rem]' : ''}`}
+          >
             {monitors.map((monitor) => {
               const isPortrait = monitor.orientation === 'portrait';
               // Enhanced sizing with proper flex handling to prevent wrapping
               const baseWidth = isPortrait ? (large ? 'w-52 min-w-52 flex-shrink-0' : 'w-40 min-w-40 flex-shrink-0') : (large ? 'w-[28rem] min-w-[28rem] flex-shrink' : 'w-80 min-w-72 flex-shrink');
               const baseHeight = isPortrait ? (large ? 'h-96' : 'h-72') : (large ? 'h-72' : 'h-52');
               const totalItems = monitor.apps.length; // Only count apps now
+              const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
+              const clampedPreview = clampPreviewPosition(monitor, preview);
               
               return (
-                <div key={monitor.id} className="space-y-4">
+                <div
+                  key={monitor.id}
+                  className="space-y-4 absolute"
+                  style={{
+                    left: `${clampedPreview.x}%`,
+                    top: `${clampedPreview.y}%`,
+                    transform: 'translate(-50%, -50%)',
+                    transformOrigin: 'center center',
+                  }}
+                >
                   {/* Monitor header - Improved */}
-                  <div className="text-center">
-                    <div className="flex items-center justify-center gap-2 mb-1">
-                      <span className="text-white text-sm font-medium">{monitor.name}</span>
-                      {isEditMode && onUpdateMonitorLayout && (
-                        <div className="relative">
-                          <MonitorLayoutConfig
-                            monitor={{
-                              id: monitor.id,
-                              name: monitor.name,
-                              orientation: monitor.orientation || 'landscape',
-                              predefinedLayout: monitor.predefinedLayout,
-                              apps: monitor.apps
-                            }}
-                            onLayoutChange={onUpdateMonitorLayout}
-                            isDropdown={true}
-                          />
+                  <div
+                    className={`text-center ${draggingMonitor?.monitorId === monitor.id ? 'opacity-90' : ''}`}
+                    onMouseDown={(event) => {
+                      if (!isEditMode) return;
+                      event.preventDefault();
+                      setDraggingMonitor({
+                        monitorId: monitor.id,
+                        startX: event.clientX,
+                        startY: event.clientY,
+                        startPos: clampedPreview,
+                      });
+                    }}
+                  >
+                    {isEditMode ? (
+                      <div className={`flex flex-wrap items-center justify-center gap-2 mb-1 mx-auto ${baseWidth}`}>
+                        <div className="inline-flex items-center gap-1 text-white text-sm font-medium rounded px-2 py-1 transition-colors cursor-grab active:cursor-grabbing bg-white/5 hover:bg-white/10 whitespace-nowrap">
+                          <GripVertical className="w-3.5 h-3.5 text-white/70" />
+                          <span className="whitespace-nowrap">{monitor.name}</span>
                         </div>
-                      )}
-                      {isEditMode && totalItems > 0 && onAutoSnapApps && (
-                        <button
-                          onClick={() => handleAutoSnap(monitor.id)}
-                          className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-flow-accent-purple text-white hover:bg-flow-accent-purple/80 rounded border border-flow-accent-purple/50 transition-colors shadow-sm"
-                          title="Auto-snap all windows to closest zones"
-                        >
-                          <Zap className="w-3 h-3" />
-                          Auto-Snap
-                        </button>
-                      )}
-                    </div>
+                        {monitor.systemName && (
+                          <span className="text-[11px] text-white/55 whitespace-nowrap">({monitor.systemName})</span>
+                        )}
+                        {onUpdateMonitorLayout && (
+                          <div className="relative shrink-0">
+                            <MonitorLayoutConfig
+                              monitor={{
+                                id: monitor.id,
+                                name: monitor.name,
+                                orientation: monitor.orientation || 'landscape',
+                                predefinedLayout: monitor.predefinedLayout,
+                                apps: monitor.apps
+                              }}
+                              onLayoutChange={onUpdateMonitorLayout}
+                              isDropdown={true}
+                            />
+                          </div>
+                        )}
+                        {totalItems > 0 && onAutoSnapApps && (
+                          <button
+                            onClick={() => handleAutoSnap(monitor.id)}
+                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-flow-accent-purple text-white hover:bg-flow-accent-purple/80 rounded border border-flow-accent-purple/50 transition-colors shadow-sm whitespace-nowrap shrink-0"
+                            title="Auto-snap all windows to closest zones"
+                          >
+                            <Zap className="w-3 h-3" />
+                            Auto-Snap
+                          </button>
+                        )}
+                      </div>
+                    ) : (
+                      <div className={`mb-1 mx-auto ${baseWidth}`}>
+                        <div className="flex flex-col items-center justify-center gap-1 text-center">
+                          <div className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-white/15 bg-white/10 backdrop-blur-md px-3 py-1.5 shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
+                            <span className="text-white text-sm font-semibold leading-none tracking-[0.01em] whitespace-nowrap">
+                              {monitor.name}
+                            </span>
+                          </div>
+                          {monitor.systemName && (
+                            <div className="text-[11px] leading-tight text-white/60 whitespace-nowrap truncate max-w-full">
+                              {monitor.systemName}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )}
                     <div className="flex items-center justify-center gap-2 text-xs text-white/50">
                       <span>{monitor.resolution}</span>
                       <span>•</span>
@@ -1079,7 +1299,7 @@ export function MonitorLayout({
       
       {/* Fixed Bottom Section: Minimized Apps - Always visible at bottom */}
       <div className="flex-shrink-0">
-        <div className="px-4 py-4">
+        <div className="px-3 py-2">
           <MinimizedApps 
             apps={minimizedApps}
             files={[]} // No more standalone files

@@ -47,6 +47,14 @@ interface ProfileCardProps {
 export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelete, onExport, onSetOnStartup, disabled = false }: ProfileCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showActions, setShowActions] = useState(false);
+
+  const renderPreviewAppIcon = (app: any) => {
+    const IconComponent = app?.icon;
+    if (typeof IconComponent === "function") {
+      return <IconComponent className="w-2 h-2 text-white" />;
+    }
+    return <Folder className="w-2 h-2 text-white" />;
+  };
   
   const getProfileIcon = () => {
     switch (profile.icon) {
@@ -220,30 +228,30 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
         <div className="absolute top-0 left-full ml-4 w-80 p-4 bg-flow-surface-elevated border border-flow-border rounded-xl shadow-lg z-50">
           <h4 className="text-flow-text-primary font-medium mb-3">Apps &amp; Layout Preview</h4>
           <div className="space-y-3 max-h-64 overflow-y-auto">
-            {profile.monitors.map((monitor, index) => (
-              <div key={index} className="space-y-2">
+            {(Array.isArray(profile.monitors) ? profile.monitors : []).map((monitor, index) => (
+              <div key={monitor?.id || index} className="space-y-2">
                 <div className="flex items-center gap-2 text-flow-text-secondary text-sm">
                   <Monitor className="w-3 h-3" />
-                  <span>{monitor.name}</span>
+                  <span>{monitor?.name || `Monitor ${index + 1}`}</span>
                   {monitor.primary && (
                     <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30">Primary</span>
                   )}
                 </div>
                 <div className="flex flex-wrap gap-1.5 ml-4">
-                  {monitor.apps.slice(0, 6).map((app, appIndex) => (
+                  {(Array.isArray(monitor?.apps) ? monitor.apps : []).slice(0, 6).map((app, appIndex) => (
                     <div key={appIndex} className="flex items-center gap-1.5 px-2 py-1 bg-flow-surface rounded text-xs text-flow-text-muted">
                       <div 
                         className="w-3 h-3 rounded flex items-center justify-center"
-                        style={{ backgroundColor: `${app.color}40` }}
+                        style={{ backgroundColor: `${app?.color || "#64748b"}40` }}
                       >
-                        <app.icon className="w-2 h-2 text-white" />
+                        {renderPreviewAppIcon(app)}
                       </div>
-                      <span>{app.name}</span>
+                      <span>{app?.name || "Unknown app"}</span>
                     </div>
                   ))}
-                  {monitor.apps.length > 6 && (
+                  {(Array.isArray(monitor?.apps) ? monitor.apps.length : 0) > 6 && (
                     <span className="text-xs text-flow-text-muted px-2 py-1">
-                      +{monitor.apps.length - 6} more
+                      +{(Array.isArray(monitor?.apps) ? monitor.apps.length : 0) - 6} more
                     </span>
                   )}
                 </div>
@@ -258,11 +266,11 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
                     <div key={appIndex} className="flex items-center gap-1.5 px-2 py-1 bg-flow-surface rounded text-xs text-flow-text-muted">
                       <div 
                         className="w-3 h-3 rounded flex items-center justify-center"
-                        style={{ backgroundColor: `${app.color}40` }}
+                        style={{ backgroundColor: `${app?.color || "#64748b"}40` }}
                       >
-                        <app.icon className="w-2 h-2 text-white" />
+                        {renderPreviewAppIcon(app)}
                       </div>
-                      <span>{app.name}</span>
+                      <span>{app?.name || "Unknown app"}</span>
                     </div>
                   ))}
                 </div>

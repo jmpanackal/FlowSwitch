@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
@@ -34,6 +34,7 @@ type MemoryCapture = {
   monitors: Array<{
     id: string;
     name: string;
+    systemName?: string | null;
     primary: boolean;
     resolution: string;
     orientation: 'landscape' | 'portrait';
@@ -59,6 +60,136 @@ type MemoryCapture = {
   error?: string;
 };
 
+type DetectedMonitor = {
+  id: string;
+  name: string;
+  systemName?: string | null;
+  primary: boolean;
+  resolution: string;
+  orientation: 'landscape' | 'portrait';
+  layoutPosition?: { x: number; y: number };
+};
+
+const LAYOUT_ALIGN_THRESHOLD = 14;
+
+const getMonitorFootprint = (orientation: 'landscape' | 'portrait') => (
+  orientation === 'portrait'
+    ? { width: 22, height: 34 }
+    : { width: 40, height: 24 }
+);
+
+const groupAlignedAxis = (values: number[]) => {
+  if (values.length <= 1) return values;
+  const indexed = values.map((value, index) => ({ index, value })).sort((a, b) => a.value - b.value);
+  const grouped: Array<{ members: Array<{ index: number; value: number }> }> = [];
+
+  indexed.forEach((entry) => {
+    const lastGroup = grouped[grouped.length - 1];
+    if (!lastGroup) {
+      grouped.push({ members: [entry] });
+      return;
+    }
+
+    const lastValue = lastGroup.members[lastGroup.members.length - 1].value;
+    if (Math.abs(entry.value - lastValue) <= LAYOUT_ALIGN_THRESHOLD) {
+      lastGroup.members.push(entry);
+      return;
+    }
+
+    grouped.push({ members: [entry] });
+  });
+
+  const aligned = [...values];
+  grouped.forEach((group) => {
+    const avg = group.members.reduce((sum, item) => sum + item.value, 0) / group.members.length;
+    group.members.forEach((item) => {
+      aligned[item.index] = Math.round(avg * 10) / 10;
+    });
+  });
+  return aligned;
+};
+
+const normalizeMonitorLayout = <
+  T extends { id: string; orientation: 'landscape' | 'portrait'; layoutPosition?: { x: number; y: number } }
+>(inputMonitors: T[]) => {
+  if (inputMonitors.length === 0) return inputMonitors;
+  if (inputMonitors.length === 1) {
+    return inputMonitors.map((monitor) => ({ ...monitor, layoutPosition: { x: 50, y: 50 } }));
+  }
+
+  const raw = inputMonitors.map((monitor, index) => ({
+    id: monitor.id,
+    orientation: monitor.orientation,
+    x: monitor.layoutPosition?.x ?? ((index % 3) * 300),
+    y: monitor.layoutPosition?.y ?? (Math.floor(index / 3) * 220),
+  }));
+  const allPercent = raw.every((item) => item.x >= 0 && item.x <= 100 && item.y >= 0 && item.y <= 100);
+
+  let positions = raw.map((item) => ({ ...item }));
+  if (!allPercent) {
+    const minX = Math.min(...raw.map((item) => item.x));
+    const maxX = Math.max(...raw.map((item) => item.x));
+    const minY = Math.min(...raw.map((item) => item.y));
+    const maxY = Math.max(...raw.map((item) => item.y));
+    const spanX = Math.max(1, maxX - minX);
+    const spanY = Math.max(1, maxY - minY);
+
+    positions = raw.map((item) => ({
+      ...item,
+      x: 50 + ((((item.x - minX) / spanX) * 100 - 50) * 0.65),
+      y: 50 + ((((item.y - minY) / spanY) * 100 - 50) * 0.65),
+    }));
+  }
+
+  const alignedX = groupAlignedAxis(positions.map((item) => item.x));
+  const alignedY = groupAlignedAxis(positions.map((item) => item.y));
+  positions = positions.map((item, index) => ({
+    ...item,
+    x: alignedX[index],
+    y: alignedY[index],
+  }));
+
+  // Keep monitors from overlapping by nudging conflicting cards.
+  const placed: Array<{ id: string; x: number; y: number; width: number; height: number }> = [];
+  positions
+    .sort((a, b) => a.y - b.y || a.x - b.x)
+    .forEach((pos) => {
+      const footprint = getMonitorFootprint(pos.orientation);
+      let x = pos.x;
+      let y = pos.y;
+
+      for (let attempt = 0; attempt < 40; attempt += 1) {
+        const conflicting = placed.find((existing) => (
+          Math.abs(existing.x - x) < ((existing.width + footprint.width) / 2) + 2
+          && Math.abs(existing.y - y) < ((existing.height + footprint.height) / 2) + 2
+        ));
+        if (!conflicting) break;
+
+        x += 8;
+        if (x > 90) {
+          x = 18 + (attempt % 3) * 10;
+          y += 10;
+        }
+      }
+
+      const clampedX = Math.max(10, Math.min(90, x));
+      const clampedY = Math.max(10, Math.min(90, y));
+      placed.push({
+        id: pos.id,
+        x: clampedX,
+        y: clampedY,
+        width: footprint.width,
+        height: footprint.height,
+      });
+    });
+
+  const positionsById = new Map(placed.map((item) => [item.id, { x: item.x, y: item.y }]));
+  return inputMonitors.map((monitor) => ({
+    ...monitor,
+    layoutPosition: positionsById.get(monitor.id) || monitor.layoutPosition || { x: 50, y: 50 },
+  }));
+};
+
 export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateProfileModalProps) {
   const [creationMode, setCreationMode] = useState<'manual' | 'memory'>('manual');
   const [profileName, setProfileName] = useState('');
@@ -70,6 +201,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   const [memoryCapture, setMemoryCapture] = useState<MemoryCapture | null>(null);
   const [isCapturingMemory, setIsCapturingMemory] = useState(false);
   const [memoryCaptureError, setMemoryCaptureError] = useState<string | null>(null);
+  const [detectedMonitors, setDetectedMonitors] = useState<DetectedMonitor[]>([]);
   const installedApps = useInstalledApps();
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
@@ -100,6 +232,37 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
     const minimizedCount = memoryCapture.minimizedApps?.length || 0;
     return visibleCount + minimizedCount;
   }, [memoryCapture]);
+
+  useEffect(() => {
+    if (!isOpen) return;
+    if (!window.electron?.getSystemMonitors) return;
+
+    let cancelled = false;
+    const loadMonitors = async () => {
+      try {
+        const monitors = await window.electron.getSystemMonitors();
+        if (cancelled) return;
+        if (Array.isArray(monitors) && monitors.length > 0) {
+          setDetectedMonitors(monitors.map((monitor) => ({
+            id: monitor.id,
+            name: monitor.name,
+            systemName: monitor.systemName ?? null,
+            primary: monitor.primary,
+            resolution: monitor.resolution,
+            orientation: monitor.orientation,
+            layoutPosition: monitor.layoutPosition,
+          })));
+        }
+      } catch {
+        // Keep manual profile creation resilient with fallback monitor defaults.
+      }
+    };
+
+    void loadMonitors();
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen]);
 
   const captureMemoryLayout = async () => {
     if (!window.electron || typeof window.electron.captureRunningAppLayout !== 'function') {
@@ -132,7 +295,31 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
 
   const createManualProfile = () => {
     if (!profileName.trim()) return;
-    
+
+    const fallbackMonitors: DetectedMonitor[] = [{
+      id: 'monitor-1',
+      name: 'Monitor 1',
+      primary: true,
+      resolution: '1920x1080',
+      orientation: 'landscape',
+      layoutPosition: { x: 0, y: 0 },
+    }];
+    const sourceMonitors = normalizeMonitorLayout((detectedMonitors.length > 0 ? detectedMonitors : fallbackMonitors)
+      .slice()
+      .sort((a, b) => {
+        const ay = a.layoutPosition?.y ?? 0;
+        const by = b.layoutPosition?.y ?? 0;
+        const ax = a.layoutPosition?.x ?? 0;
+        const bx = b.layoutPosition?.x ?? 0;
+        return ay - by || ax - bx || Number(b.primary) - Number(a.primary);
+      }));
+
+    const appsPerMonitor: Array<typeof selectedApps> = sourceMonitors.map(() => []);
+    selectedApps.forEach((app, index) => {
+      const targetMonitorIndex = index % sourceMonitors.length;
+      appsPerMonitor[targetMonitorIndex].push(app);
+    });
+
     const newProfile = {
       id: `profile-${Date.now()}`,
       name: profileName,
@@ -145,14 +332,15 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
       restrictedApps: [],
       estimatedStartupTime: Math.max(3, selectedApps.length * 0.8),
       autoLaunch: false,
-      monitors: [
-        {
-          id: 'monitor-1',
-          name: 'Monitor 1',
-          primary: true,
-          resolution: '2560x1440',
-          orientation: 'landscape' as const,
-          apps: selectedApps.slice(0, Math.ceil(selectedApps.length / 2)).map((app, index) => ({
+      monitors: sourceMonitors.map((monitor, monitorIndex) => ({
+          id: monitor.id,
+          name: monitor.name,
+          systemName: monitor.systemName ?? null,
+          primary: monitor.primary,
+          resolution: monitor.resolution,
+          orientation: monitor.orientation,
+          layoutPosition: monitor.layoutPosition ?? { x: monitorIndex * 100, y: 0 },
+          apps: appsPerMonitor[monitorIndex].map((app, index) => ({
             name: app.name,
             icon: app.icon,
             iconPath: app.iconPath ?? null,
@@ -163,26 +351,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             volume: app.volume,
             launchBehavior: app.launchBehavior
           }))
-        },
-        {
-          id: 'monitor-2',
-          name: 'Monitor 2',
-          primary: false,
-          resolution: '1920x1080',
-          orientation: 'landscape' as const,
-          apps: selectedApps.slice(Math.ceil(selectedApps.length / 2)).map((app, index) => ({
-            name: app.name,
-            icon: app.icon,
-            iconPath: app.iconPath ?? null,
-            executablePath: app.executablePath ?? null,
-            color: app.color,
-            position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
-            size: { width: 35, height: 30 },
-            volume: app.volume,
-            launchBehavior: app.launchBehavior
-          }))
-        }
-      ],
+        })),
       minimizedApps: [],
       browserTabs: []
     };
@@ -192,13 +361,13 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
 
   const createMemoryProfile = () => {
     if (!profileName.trim() || !memoryCapture) return;
-    const orderedMonitors = [...memoryCapture.monitors].sort((a, b) => {
+    const orderedMonitors = normalizeMonitorLayout([...memoryCapture.monitors].sort((a, b) => {
       const ay = a.layoutPosition?.y ?? 0;
       const by = b.layoutPosition?.y ?? 0;
       const ax = a.layoutPosition?.x ?? 0;
       const bx = b.layoutPosition?.x ?? 0;
       return ay - by || ax - bx;
-    });
+    }));
 
     const newProfile = {
       id: `memory-${Date.now()}`,
@@ -215,9 +384,11 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
       monitors: orderedMonitors.map((monitor) => ({
         id: monitor.id,
         name: monitor.name,
+        systemName: monitor.systemName ?? null,
         primary: monitor.primary,
         resolution: monitor.resolution,
         orientation: monitor.orientation,
+        layoutPosition: monitor.layoutPosition,
         apps: monitor.apps.map((app) => ({
           name: app.name,
           icon: Settings,

@@ -5,8 +5,23 @@ export {};
 declare global {
   interface Window {
     electron: {
-      launchProfile: (profileId: string) => void;
-      onProfileLoaded: (callback: (profile: Profile) => void) => void;
+      launchProfile: (profileId: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        profile?: Profile;
+        launchedAppCount?: number;
+        launchedTabCount?: number;
+        requestedAppCount?: number;
+        failedApps?: Array<{
+          name: string;
+          path: string;
+          error: string;
+        }>;
+        skippedApps?: Array<{
+          name: string;
+          reason: string;
+        }>;
+      }>;
       getInstalledApps: () => Promise<{ name: string; iconPath: string | null; executablePath?: string | null }[]>;
       captureRunningAppLayout: () => Promise<{
         capturedAt: number;
@@ -14,6 +29,7 @@ declare global {
         monitors: Array<{
           id: string;
           name: string;
+          systemName?: string | null;
           primary: boolean;
           resolution: string;
           orientation: 'landscape' | 'portrait';
@@ -38,6 +54,17 @@ declare global {
         }>;
         error?: string;
       }>;
+      getSystemMonitors: () => Promise<Array<{
+        id: string;
+        name: string;
+        systemName?: string | null;
+        primary: boolean;
+        scaleFactor: number;
+        resolution: string;
+        orientation: 'landscape' | 'portrait';
+        layoutPosition?: { x: number; y: number };
+        apps: Array<unknown>;
+      }>>;
       listProfiles: () => Promise<any[]>;
       saveProfiles: (profiles: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
     };
