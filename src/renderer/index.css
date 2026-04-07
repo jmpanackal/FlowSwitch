@@ -134,6 +134,10 @@
   * {
     @apply border-border outline-ring/50;
   }
+
+  .app-drag-region {
+    -webkit-app-region: drag;
+  }
   
   body {
     @apply bg-flow-bg-primary text-flow-text-primary;

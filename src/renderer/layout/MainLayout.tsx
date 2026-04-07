@@ -2393,7 +2393,19 @@ export default function App() {
 
   return (
     <div className="min-h-screen bg-flow-bg-primary">
-      <div className="flex h-screen">
+      <div className="app-drag-region h-9 px-3 border-b border-flow-border bg-flow-bg-secondary/95 flex items-center justify-between select-none">
+        <div className="flex items-center gap-2">
+          <img
+            src="/flowswitch-logo.png"
+            alt="FlowSwitch logo"
+            className="w-5 h-5 rounded-sm"
+          />
+        </div>
+        <span className="text-[11px] text-flow-text-muted">
+          Workspace Automation
+        </span>
+      </div>
+      <div className="flex h-[calc(100vh-2.25rem)]">
         {/* Left Sidebar - FIXED: Better height management */}
         <div className="w-96 bg-flow-bg-secondary border-r border-flow-border flex flex-col">
           {/* Header - Fixed height */}
@@ -2407,7 +2419,7 @@ export default function App() {
                   Workspace Automation
                 </p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <input
                   type="file"
                   accept=".json"
@@ -2419,6 +2431,7 @@ export default function App() {
                   htmlFor="import-profile"
                   className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors cursor-pointer"
                   title="Import Profile"
+                  aria-label="Import profile"
                 >
                   <Upload className="w-3.5 h-3.5" />
                 </label>
@@ -2429,10 +2442,16 @@ export default function App() {
                   }
                   className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
                   title="Export Current Profile"
+                  aria-label="Export current profile"
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
-                <button className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors">
+                <span className="h-4 w-px bg-flow-border/70 mx-0.5" aria-hidden="true" />
+                <button
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+                  title="Open settings"
+                  aria-label="Open settings"
+                >
                   <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -2444,7 +2463,7 @@ export default function App() {
                 onClick={() => setCurrentView("profiles")}
                 className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "profiles"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
@@ -2454,7 +2473,7 @@ export default function App() {
                 onClick={() => setCurrentView("apps")}
                 className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "apps"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
@@ -2465,7 +2484,7 @@ export default function App() {
                 onClick={() => setCurrentView("content")}
                 className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "content"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
