@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Monitor, Grid3X3, Zap, ChevronDown, GripVertical } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MinimizedApps } from "./MinimizedApps";
@@ -402,6 +402,8 @@ export function MonitorLayout({
     startY: number;
     startPos: { x: number; y: number };
   } | null>(null);
+  const layoutRootRef = useRef<HTMLDivElement | null>(null);
+  const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
 
   const getMonitorFootprint = (monitor: { orientation?: 'landscape' | 'portrait' }) => {
     const isPortrait = monitor.orientation === 'portrait';
@@ -414,6 +416,7 @@ export function MonitorLayout({
   const clampPreviewPosition = (
     monitor: { orientation?: 'landscape' | 'portrait' },
     position: { x: number; y: number },
+    previewScale: number,
   ) => {
     if (previewBounds.width <= 10 || previewBounds.height <= 10) {
       return {
@@ -422,22 +425,98 @@ export function MonitorLayout({
       };
     }
 
+    const scale = Number.isFinite(previewScale) && previewScale > 0 ? previewScale : 1;
     const footprint = getMonitorFootprint(monitor);
-    const halfWidthPct = ((footprint.widthPx / previewBounds.width) * 100) / 2;
-    const halfHeightPct = ((footprint.heightPx / previewBounds.height) * 100) / 2;
-    const sidePadPct = (10 / previewBounds.width) * 100;
-    const topPadPct = (22 / previewBounds.height) * 100;
-    const bottomPadPct = (10 / previewBounds.height) * 100;
+    const effW = footprint.widthPx * scale;
+    const effH = footprint.heightPx * scale;
+    const halfWidthPct = ((effW / previewBounds.width) * 100) / 2;
+    const halfHeightPct = ((effH / previewBounds.height) * 100) / 2;
+    const sidePadPct = (8 / previewBounds.width) * 100;
+    const topPadPct = (10 / previewBounds.height) * 100;
+    const bottomPadPct = (8 / previewBounds.height) * 100;
 
-    const minX = Math.min(50, Math.max(0, halfWidthPct + sidePadPct));
-    const maxX = Math.max(minX, 100 - halfWidthPct - sidePadPct);
-    const minY = Math.min(50, Math.max(0, halfHeightPct + topPadPct));
-    const maxY = Math.max(minY, 100 - halfHeightPct - bottomPadPct);
+    const minX = halfWidthPct + sidePadPct;
+    const maxX = 100 - halfWidthPct - sidePadPct;
+    const minY = halfHeightPct + topPadPct;
+    const maxY = 100 - halfHeightPct - bottomPadPct;
+
+    if (minX > maxX || minY > maxY) {
+      return {
+        x: Math.max(0, Math.min(100, position.x)),
+        y: Math.max(0, Math.min(100, position.y)),
+      };
+    }
 
     return {
       x: Math.max(minX, Math.min(maxX, position.x)),
       y: Math.max(minY, Math.min(maxY, position.y)),
     };
+  };
+
+  const monitorPreviewScale = useMemo(() => {
+    if (monitors.length <= 1) return 1;
+    if (previewBounds.width <= 10 || previewBounds.height <= 10) return 1;
+
+    let scale = 1;
+    for (let iter = 0; iter < 8; iter += 1) {
+      let minLeft = Number.POSITIVE_INFINITY;
+      let minTop = Number.POSITIVE_INFINITY;
+      let maxRight = Number.NEGATIVE_INFINITY;
+      let maxBottom = Number.NEGATIVE_INFINITY;
+
+      for (const monitor of monitors) {
+        const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
+        const clamped = clampPreviewPosition(monitor, preview, scale);
+        const footprint = getMonitorFootprint(monitor);
+        const w = footprint.widthPx * scale;
+        const h = footprint.heightPx * scale;
+
+        const centerX = (clamped.x / 100) * previewBounds.width;
+        const centerY = (clamped.y / 100) * previewBounds.height;
+
+        minLeft = Math.min(minLeft, centerX - w / 2);
+        minTop = Math.min(minTop, centerY - h / 2);
+        maxRight = Math.max(maxRight, centerX + w / 2);
+        maxBottom = Math.max(maxBottom, centerY + h / 2);
+      }
+
+      if (!Number.isFinite(minLeft) || !Number.isFinite(minTop) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
+        return 1;
+      }
+
+      const requiredWidth = Math.max(1, maxRight - minLeft);
+      const requiredHeight = Math.max(1, maxBottom - minTop);
+      const availableWidth = Math.max(1, previewBounds.width - 20);
+      const availableHeight = Math.max(1, previewBounds.height - 20);
+
+      const fitScale = Math.min(1, availableWidth / requiredWidth, availableHeight / requiredHeight);
+      const nextScale = Math.max(0.5, fitScale);
+      if (Math.abs(nextScale - scale) < 0.001) {
+        return nextScale;
+      }
+      scale = nextScale;
+    }
+
+    return scale;
+  }, [monitors, monitorPreviewPositions, previewBounds, large]);
+
+  const compactPreviewMode = monitorPreviewScale < 0.82;
+  const densePreviewMode = monitorPreviewScale < 0.62 || previewBounds.height < 620;
+  const minimizedSectionHeightPx = useMemo(() => {
+    if (layoutColumnHeight <= 0) return 110;
+    return Math.round(Math.min(132, Math.max(96, layoutColumnHeight * 0.12)));
+  }, [layoutColumnHeight]);
+  const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+
+  const setPreviewPositions = (
+    updater: Record<string, { x: number; y: number }>
+    | ((prev: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>),
+  ) => {
+    setMonitorPreviewPositions((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      previewPositionsRef.current = next;
+      return next;
+    });
   };
 
   useEffect(() => {
@@ -461,13 +540,34 @@ export function MonitorLayout({
   }, []);
 
   useEffect(() => {
+    const root = layoutRootRef.current;
+    if (!root) return;
+
+    const updateHeight = () => {
+      const h = root.getBoundingClientRect().height;
+      if (h > 0) {
+        setLayoutColumnHeight(h);
+      }
+    };
+
+    updateHeight();
+    const observer = new ResizeObserver(updateHeight);
+    observer.observe(root);
+
+    return () => {
+      observer.disconnect();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (draggingMonitor) return;
     if (monitors.length === 0) {
-      setMonitorPreviewPositions({});
+      setPreviewPositions({});
       return;
     }
 
     if (monitors.length === 1) {
-      setMonitorPreviewPositions({ [monitors[0].id]: { x: 50, y: 50 } });
+      setPreviewPositions({ [monitors[0].id]: { x: 50, y: 50 } });
       return;
     }
 
@@ -491,6 +591,7 @@ export function MonitorLayout({
     const normalized: Record<string, { x: number; y: number }> = {};
     rawPositions.forEach((pos) => {
       if (allPercentCoordinates) {
+        // Keep user-defined monitor placement stable across viewport resize.
         normalized[pos.id] = { x: pos.x, y: pos.y };
         return;
       }
@@ -498,14 +599,19 @@ export function MonitorLayout({
       const normalizedX = ((pos.x - minX) / spanX) * 100;
       const normalizedY = ((pos.y - minY) / spanY) * 100;
       normalized[pos.id] = {
-        // Keep relative pattern from Windows, compress spacing to fit preview.
-        x: 50 + ((normalizedX - 50) * 0.55),
-        y: 50 + ((normalizedY - 50) * 0.55),
+        // Preserve relative monitor arrangement while still fitting preview bounds.
+        x: 50 + ((normalizedX - 50) * 0.82),
+        y: 50 + ((normalizedY - 50) * 0.78),
       };
     });
 
-    setMonitorPreviewPositions(normalized);
-  }, [monitors]);
+    const clampedPositions: Record<string, { x: number; y: number }> = {};
+    for (const monitor of monitors) {
+      const nextPosition = normalized[monitor.id] || { x: 50, y: 50 };
+      clampedPositions[monitor.id] = clampPreviewPosition(monitor, nextPosition, monitorPreviewScale);
+    }
+    setPreviewPositions(clampedPositions);
+  }, [monitors, previewBounds.width, previewBounds.height, draggingMonitor, monitorPreviewScale]);
 
   useEffect(() => {
     if (!draggingMonitor) return;
@@ -526,9 +632,9 @@ export function MonitorLayout({
         x: draggingMonitor.startPos.x + deltaXPct,
         y: draggingMonitor.startPos.y + deltaYPct,
       };
-      const clamped = clampPreviewPosition(monitor, nextPosition);
+      const clamped = clampPreviewPosition(monitor, nextPosition, monitorPreviewScale);
 
-      setMonitorPreviewPositions((prev) => ({
+      setPreviewPositions((prev) => ({
         ...prev,
         [draggingMonitor.monitorId]: clamped,
       }));
@@ -539,8 +645,8 @@ export function MonitorLayout({
       if (!onUpdateMonitorPositions) return;
 
       const positions = monitors.map((monitor) => {
-        const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
-        const clamped = clampPreviewPosition(monitor, preview);
+        const preview = previewPositionsRef.current[monitor.id] || { x: 50, y: 50 };
+        const clamped = clampPreviewPosition(monitor, preview, monitorPreviewScale);
         return {
           id: monitor.id,
           layoutPosition: {
@@ -559,7 +665,7 @@ export function MonitorLayout({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingMonitor, monitorPreviewPositions, monitors, onUpdateMonitorPositions, previewBounds]);
+  }, [draggingMonitor, monitors, onUpdateMonitorPositions, previewBounds, monitorPreviewScale]);
 
   // Handle updating associated files for an app
   const handleUpdateAssociatedFiles = (monitorId: string, appIndex: number, files: any[]) => {
@@ -1035,12 +1141,12 @@ export function MonitorLayout({
   };
 
   return (
-    <div className="h-full flex flex-col relative">
+    <div ref={layoutRootRef} className="h-full flex flex-col relative min-h-0">
       {/* Header Section */}
-      <div className="flex items-center justify-between mb-6 flex-shrink-0">
+      <div className={`flex items-center justify-between ${densePreviewMode ? 'mb-2' : compactPreviewMode ? 'mb-3' : 'mb-4'} flex-shrink-0`}>
         <div className="flex items-center gap-3">
-          <Monitor className="w-5 h-5 text-white/70" />
-          <h3 className="text-white text-lg">Monitor Layout Preview</h3>
+          <Monitor className={`${densePreviewMode ? 'w-4 h-4' : 'w-5 h-5'} text-white/70`} />
+          <h3 className={`text-white ${densePreviewMode ? 'text-base' : 'text-lg'}`}>Monitor Layout Preview</h3>
           {isEditMode ? (
             <div className="flex items-center gap-2">
               <div className="flex items-center gap-2 px-3 py-1.5 bg-flow-accent-blue/20 border border-flow-accent-blue/30 rounded-lg backdrop-blur-sm">
@@ -1064,28 +1170,39 @@ export function MonitorLayout({
 
       {/* Monitor Layout Section - Flex-1 with overflow for scrolling if needed */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <div className="h-full pb-2">
+        <div className={`h-full ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative h-full min-h-[24rem] ${large ? 'min-h-[32rem]' : ''}`}
+            className={`relative h-full min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
           >
             {monitors.map((monitor) => {
               const isPortrait = monitor.orientation === 'portrait';
-              // Enhanced sizing with proper flex handling to prevent wrapping
-              const baseWidth = isPortrait ? (large ? 'w-52 min-w-52 flex-shrink-0' : 'w-40 min-w-40 flex-shrink-0') : (large ? 'w-[28rem] min-w-[28rem] flex-shrink' : 'w-80 min-w-72 flex-shrink');
-              const baseHeight = isPortrait ? (large ? 'h-96' : 'h-72') : (large ? 'h-72' : 'h-52');
+              const baseWidth = isPortrait
+                ? (densePreviewMode
+                  ? 'w-28 min-w-28'
+                  : compactPreviewMode
+                    ? 'w-32 min-w-32'
+                    : (large ? 'w-52 min-w-52 flex-shrink-0' : 'w-40 min-w-40 flex-shrink-0'))
+                : (densePreviewMode
+                  ? 'w-56 min-w-56'
+                  : compactPreviewMode
+                    ? 'w-64 min-w-64'
+                    : (large ? 'w-[28rem] min-w-[28rem] flex-shrink' : 'w-80 min-w-72 flex-shrink'));
+              const baseHeight = isPortrait
+                ? (densePreviewMode ? 'h-48' : compactPreviewMode ? 'h-56' : (large ? 'h-96' : 'h-72'))
+                : (densePreviewMode ? 'h-36' : compactPreviewMode ? 'h-44' : (large ? 'h-72' : 'h-52'));
               const totalItems = monitor.apps.length; // Only count apps now
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
-              const clampedPreview = clampPreviewPosition(monitor, preview);
+              const clampedPreview = clampPreviewPosition(monitor, preview, monitorPreviewScale);
               
               return (
                 <div
                   key={monitor.id}
-                  className="space-y-4 absolute"
+                  className={`${densePreviewMode ? 'space-y-2' : compactPreviewMode ? 'space-y-3' : 'space-y-4'} absolute`}
                   style={{
                     left: `${clampedPreview.x}%`,
                     top: `${clampedPreview.y}%`,
-                    transform: 'translate(-50%, -50%)',
+                    transform: `translate(-50%, -50%) scale(${monitorPreviewScale})`,
                     transformOrigin: 'center center',
                   }}
                 >
@@ -1141,12 +1258,12 @@ export function MonitorLayout({
                     ) : (
                       <div className={`mb-1 mx-auto ${baseWidth}`}>
                         <div className="flex flex-col items-center justify-center gap-1 text-center">
-                          <div className="inline-flex items-center justify-center whitespace-nowrap rounded-full border border-white/15 bg-white/10 backdrop-blur-md px-3 py-1.5 shadow-[0_6px_20px_rgba(0,0,0,0.35)]">
-                            <span className="text-white text-sm font-semibold leading-none tracking-[0.01em] whitespace-nowrap">
+                          <div className={`inline-flex items-center justify-center whitespace-nowrap rounded-full border border-white/15 bg-white/10 backdrop-blur-md ${densePreviewMode ? 'px-2 py-1' : 'px-3 py-1.5'} shadow-[0_6px_20px_rgba(0,0,0,0.35)]`}>
+                            <span className={`text-white ${densePreviewMode ? 'text-xs' : 'text-sm'} font-semibold leading-none tracking-[0.01em] whitespace-nowrap`}>
                               {monitor.name}
                             </span>
                           </div>
-                          {monitor.systemName && (
+                          {monitor.systemName && !compactPreviewMode && (
                             <div className="text-[11px] leading-tight text-white/60 whitespace-nowrap truncate max-w-full">
                               {monitor.systemName}
                             </div>
@@ -1154,22 +1271,29 @@ export function MonitorLayout({
                         </div>
                       </div>
                     )}
-                    <div className="flex items-center justify-center gap-2 text-xs text-white/50">
-                      <span>{monitor.resolution}</span>
-                      <span>•</span>
-                      <span>{monitor.apps.length} app{monitor.apps.length !== 1 ? 's' : ''}</span>
-                      {monitor.primary && (
-                        <>
-                          <span>•</span>
-                          <span className="text-blue-300">Primary</span>
-                        </>
-                      )}
-                    </div>
+                    {!compactPreviewMode ? (
+                      <div className={`flex items-center justify-center gap-2 ${densePreviewMode ? 'text-[10px]' : 'text-xs'} text-white/50`}>
+                        <span>{monitor.resolution}</span>
+                        <span>•</span>
+                        <span>{monitor.apps.length} app{monitor.apps.length !== 1 ? 's' : ''}</span>
+                        {monitor.primary && (
+                          <>
+                            <span>•</span>
+                            <span className="text-blue-300">Primary</span>
+                          </>
+                        )}
+                      </div>
+                    ) : (
+                      <div className={`flex items-center justify-center gap-2 ${densePreviewMode ? 'text-[10px]' : 'text-[11px]'} text-white/50`}>
+                        <span>{monitor.apps.length} app{monitor.apps.length !== 1 ? 's' : ''}</span>
+                        {monitor.primary && <span className="text-blue-300">Primary</span>}
+                      </div>
+                    )}
                   </div>
                   
                   {/* Monitor display - Enhanced sizing */}
                   <div 
-                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-3 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 border-white/20`}
+                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl ${densePreviewMode ? 'p-1.5' : compactPreviewMode ? 'p-2' : 'p-3'} ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 border-white/20`}
                     data-drop-target="monitor"
                     data-target-id={monitor.id}
                     data-monitor-id={monitor.id}
@@ -1298,8 +1422,11 @@ export function MonitorLayout({
       </div>
       
       {/* Fixed Bottom Section: Minimized Apps - Always visible at bottom */}
-      <div className="flex-shrink-0">
-        <div className="px-3 py-2">
+      <div
+        className="flex-shrink-0 overflow-hidden border-t border-flow-border/30"
+        style={{ minHeight: `${minimizedSectionHeightPx}px` }}
+      >
+        <div className={`h-full overflow-hidden ${densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
           <MinimizedApps 
             apps={minimizedApps}
             files={[]} // No more standalone files
@@ -1314,6 +1441,7 @@ export function MonitorLayout({
             onRemoveApp={onRemoveMinimizedApp}
             onRemoveFile={() => {}} // No more file removal
             monitors={monitors}
+            compact={previewBounds.height < 780 || monitorPreviewScale < 0.86 || layoutColumnHeight < 760}
           />
         </div>
       </div>

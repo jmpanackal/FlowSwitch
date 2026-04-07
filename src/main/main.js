@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, nativeImage } = require('electron');
+const { app, BrowserWindow, ipcMain, nativeImage, Menu } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { spawn, execFile } = require('child_process');
@@ -122,6 +122,12 @@ const toImageDataUrlFromFile = (filePath) => {
   } catch {
     return null;
   }
+};
+
+const getWindowIconPath = () => {
+  const logoPath = path.join(__dirname, '../../public/flowswitch-logo.png');
+  if (fs.existsSync(logoPath)) return logoPath;
+  return undefined;
 };
 
 const getSafeIconDataUrl = async (iconSourcePath) => {
@@ -340,9 +346,23 @@ const isLikelyUserApp = (name, sourcePath = '', context = {}) => {
 
 // Function to create the main application window
 const createWindow = () => {
+  const isWindows = process.platform === 'win32';
+  const icon = getWindowIconPath();
   const win = new BrowserWindow({
     width: 1200,
     height: 800,
+    minWidth: 1080,
+    minHeight: 700,
+    icon,
+    autoHideMenuBar: true,
+    titleBarStyle: isWindows ? 'hidden' : 'default',
+    titleBarOverlay: isWindows
+      ? {
+          color: '#0f172a',
+          symbolColor: '#e2e8f0',
+          height: 36,
+        }
+      : false,
     backgroundColor: '#0b1020',
     webPreferences: {
       preload: path.join(__dirname, '../preload.js'), // Preload script for secure IPC
@@ -363,12 +383,13 @@ const createWindow = () => {
   win.webContents.on('unresponsive', () => {
     console.error('[electron] window became unresponsive');
   });
-
+  win.removeMenu();
   win.loadURL('http://localhost:5173'); // Load the frontend (usually a dev server)
 };
 
 
 app.whenReady().then(() => {
+  Menu.setApplicationMenu(null);
   createWindow();
 
   // On macOS, re-create a window when the dock icon is clicked and no windows are open

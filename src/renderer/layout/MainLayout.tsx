@@ -2392,10 +2392,22 @@ export default function App() {
   };
 
   return (
-    <div className="min-h-screen bg-flow-bg-primary">
-      <div className="flex h-screen">
+    <div className="h-screen overflow-hidden bg-flow-bg-primary">
+      <div className="app-drag-region h-9 px-3 border-b border-flow-border bg-flow-bg-secondary/95 flex items-center justify-between select-none">
+        <div className="flex items-center gap-2">
+          <img
+            src="/flowswitch-logo.png"
+            alt="FlowSwitch logo"
+            className="w-5 h-5 rounded-sm"
+          />
+        </div>
+        <span className="text-[11px] text-flow-text-muted">
+          Workspace Automation
+        </span>
+      </div>
+      <div className="flex h-[calc(100vh-2.25rem)]">
         {/* Left Sidebar - FIXED: Better height management */}
-        <div className="w-96 bg-flow-bg-secondary border-r border-flow-border flex flex-col">
+        <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] bg-flow-bg-secondary border-r border-flow-border flex flex-col">
           {/* Header - Fixed height */}
           <div className="flex-shrink-0 p-4 border-b border-flow-border">
             <div className="flex items-center justify-between mb-3">
@@ -2407,7 +2419,7 @@ export default function App() {
                   Workspace Automation
                 </p>
               </div>
-              <div className="flex items-center gap-1">
+              <div className="flex items-center gap-1.5">
                 <input
                   type="file"
                   accept=".json"
@@ -2419,6 +2431,7 @@ export default function App() {
                   htmlFor="import-profile"
                   className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors cursor-pointer"
                   title="Import Profile"
+                  aria-label="Import profile"
                 >
                   <Upload className="w-3.5 h-3.5" />
                 </label>
@@ -2429,10 +2442,16 @@ export default function App() {
                   }
                   className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
                   title="Export Current Profile"
+                  aria-label="Export current profile"
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
-                <button className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors">
+                <span className="h-4 w-px bg-flow-border/70 mx-0.5" aria-hidden="true" />
+                <button
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+                  title="Open settings"
+                  aria-label="Open settings"
+                >
                   <Settings className="w-3.5 h-3.5" />
                 </button>
               </div>
@@ -2444,7 +2463,7 @@ export default function App() {
                 onClick={() => setCurrentView("profiles")}
                 className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "profiles"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
@@ -2454,7 +2473,7 @@ export default function App() {
                 onClick={() => setCurrentView("apps")}
                 className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "apps"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
@@ -2465,7 +2484,7 @@ export default function App() {
                 onClick={() => setCurrentView("content")}
                 className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
                   currentView === "content"
-                    ? "bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30"
+                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
                     : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
                 }`}
               >
@@ -2605,12 +2624,12 @@ export default function App() {
         {/* Main Content Area with Header and Right Sidebar */}
         <div
           className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
-            rightSidebarOpen ? "mr-96" : "mr-0"
+            rightSidebarOpen ? "mr-[clamp(18rem,24vw,24rem)]" : "mr-0"
           }`}
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="px-8 py-6 border-b border-flow-border bg-flow-bg-secondary relative z-10">
+            <header className="px-4 md:px-6 xl:px-8 py-2 md:py-3 border-b border-flow-border bg-flow-bg-secondary relative z-10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   {/* Profile Switcher - Now without settings button */}
@@ -2618,15 +2637,15 @@ export default function App() {
                     <button
                       onClick={handleDropdownToggle}
                       disabled={isEditMode}
-                      className={`flex items-center gap-3 p-3 rounded-lg border transition-all duration-200 ${
+                      className={`flex items-center gap-2 md:gap-3 p-2 md:p-2.5 rounded-lg border transition-all duration-200 max-w-[52vw] ${
                         isEditMode
                           ? "bg-flow-surface border-flow-border text-flow-text-muted cursor-not-allowed opacity-50"
                           : "bg-flow-surface border-flow-border hover:bg-flow-surface-elevated hover:border-flow-border-accent text-flow-text-primary cursor-pointer"
                       }`}
                     >
                       <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-2">
-                          <h2 className="text-xl text-flow-text-primary font-semibold">
+                        <div className="flex items-center gap-3 mb-1">
+                          <h2 className="text-lg md:text-xl text-flow-text-primary font-semibold truncate max-w-[22rem]">
                             {currentProfile.name}
                           </h2>
                           {currentProfile.autoLaunchOnBoot && (
@@ -2647,10 +2666,10 @@ export default function App() {
                             </span>
                           )}
                         </div>
-                        <p className="text-flow-text-secondary text-sm">
+                        <p className="text-flow-text-secondary text-xs md:text-sm truncate">
                           {currentProfile.description}
                         </p>
-                        <div className="flex items-center gap-4 mt-2">
+                        <div className="flex items-center gap-2 md:gap-4 mt-1.5 flex-wrap">
                           <div className="flex items-center gap-1 text-flow-text-muted text-xs">
                             <Clock className="w-3 h-3" />
                             <span>
@@ -2689,7 +2708,7 @@ export default function App() {
                     {/* Profile Dropdown */}
                     {showProfileDropdown && !isEditMode && (
                       <div
-                        className="absolute top-full left-0 mt-2 w-full min-w-96 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-[60]"
+                        className="absolute top-full left-0 mt-2 w-full min-w-[20rem] bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-[60]"
                         style={{ pointerEvents: "auto" }}
                       >
                         <div className="max-h-80 overflow-y-auto scrollbar-elegant">
@@ -2768,10 +2787,10 @@ export default function App() {
 
                 {/* MOVED: Action buttons with edit/save button first */}
                 <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-2 md:gap-3 flex-wrap justify-end">
                     <button
                       onClick={() => setIsEditMode(!isEditMode)}
-                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 ${
+                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 ${
                         isEditMode
                           ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue hover:bg-flow-accent-blue-hover shadow-md ring-2 ring-flow-accent-blue/30"
                           : "bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
@@ -2792,7 +2811,7 @@ export default function App() {
                           currentProfile.id,
                         )
                       }
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
                       title="Profile Settings"
                     >
                       <Settings className="w-4 h-4" />
@@ -2801,7 +2820,7 @@ export default function App() {
                     <button
                       onClick={handleLaunch}
                       disabled={isLaunching || isEditMode}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/80 disabled:opacity-50 shadow-sm"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/80 disabled:opacity-50 shadow-sm"
                     >
                       {isLaunching ? (
                         <>
@@ -2840,10 +2859,10 @@ export default function App() {
               </div>
             </header>
           ) : (
-            <header className="px-8 py-6 border-b border-flow-border bg-flow-bg-secondary relative z-10">
+            <header className="px-4 md:px-6 xl:px-8 py-2 md:py-3 border-b border-flow-border bg-flow-bg-secondary relative z-10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-3 p-3 rounded-lg border bg-flow-surface border-flow-border text-flow-text-muted">
+                  <div className="flex items-center gap-3 p-2.5 rounded-lg border bg-flow-surface border-flow-border text-flow-text-muted">
                     <h2 className="text-xl font-semibold text-flow-text-secondary">
                       No profile selected
                     </h2>
@@ -2881,7 +2900,7 @@ export default function App() {
           {/* Main Content Area */}
           {currentProfile && (
             <main className="flex-1 overflow-hidden relative">
-              <div className="h-full px-8 py-6">
+              <div className="h-full px-4 md:px-6 xl:px-8 py-3 md:py-5">
                 <MonitorLayout
                   monitors={currentProfile.monitors}
                   minimizedApps={currentProfile.minimizedApps}
@@ -3039,7 +3058,7 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-0 w-96 h-full bg-flow-bg-secondary border-l border-flow-border flex flex-col z-30 transform transition-transform duration-300 ease-in-out ${
+            className={`fixed right-0 top-0 w-[clamp(18rem,24vw,24rem)] h-full bg-flow-bg-secondary border-l border-flow-border flex flex-col z-30 transform transition-transform duration-300 ease-in-out ${
               rightSidebarOpen
                 ? "translate-x-0"
                 : "translate-x-full"

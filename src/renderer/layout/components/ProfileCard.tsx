@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Monitor, Folder, Globe, MoreVertical, Copy, Edit, Trash2, Settings, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 
@@ -47,6 +47,16 @@ interface ProfileCardProps {
 export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelete, onExport, onSetOnStartup, disabled = false }: ProfileCardProps) {
   const [showDetails, setShowDetails] = useState(false);
   const [showActions, setShowActions] = useState(false);
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const clearHoverTimer = () => {
+    if (hoverTimerRef.current) {
+      clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+  };
+
+  useEffect(() => () => clearHoverTimer(), []);
 
   const renderPreviewAppIcon = (app: any) => {
     const IconComponent = app?.icon;
@@ -79,8 +89,17 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
     <div className="relative">
       <div
         onClick={disabled ? undefined : onClick}
-        onMouseEnter={() => !disabled && setShowDetails(true)}
-        onMouseLeave={() => !disabled && setShowDetails(false)}
+        onMouseEnter={() => {
+          if (disabled) return;
+          clearHoverTimer();
+          hoverTimerRef.current = setTimeout(() => {
+            setShowDetails(true);
+          }, 150);
+        }}
+        onMouseLeave={() => {
+          clearHoverTimer();
+          if (!disabled) setShowDetails(false);
+        }}
         className={`relative p-4 rounded-lg transition-all duration-200 group border ${
           disabled
             ? 'bg-flow-surface border-flow-border opacity-60 cursor-not-allowed'
