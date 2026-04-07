@@ -1059,6 +1059,8 @@ export default function App() {
             icon: dragData.icon,
             iconPath: dragData.iconPath ?? null,
             executablePath: dragData.executablePath ?? null,
+            shortcutPath: dragData.shortcutPath ?? null,
+            launchUrl: dragData.launchUrl ?? null,
             color: dragData.color,
             position,
             size: { width: 60, height: 60 },
@@ -1188,6 +1190,8 @@ export default function App() {
             icon: dragData.icon,
             iconPath: dragData.iconPath ?? null,
             executablePath: dragData.executablePath ?? null,
+            shortcutPath: dragData.shortcutPath ?? null,
+            launchUrl: dragData.launchUrl ?? null,
             color: dragData.color,
             volume: 50,
             launchBehavior: "minimize" as const,
@@ -1728,6 +1732,8 @@ export default function App() {
           icon: appToMove.icon,
           iconPath: (appToMove as any).iconPath ?? null,
           executablePath: (appToMove as any).executablePath ?? null,
+          shortcutPath: (appToMove as any).shortcutPath ?? null,
+          launchUrl: (appToMove as any).launchUrl ?? null,
           color: appToMove.color,
           volume: appToMove.volume || 0,
           launchBehavior: "minimize" as const,
@@ -1974,6 +1980,8 @@ export default function App() {
           icon: minimizedApp.icon,
           iconPath: (minimizedApp as any).iconPath ?? null,
           executablePath: (minimizedApp as any).executablePath ?? null,
+          shortcutPath: (minimizedApp as any).shortcutPath ?? null,
+          launchUrl: (minimizedApp as any).launchUrl ?? null,
           color: minimizedApp.color,
           position: newPosition ||
             minimizedApp.sourcePosition || { x: 50, y: 50 },
@@ -2399,7 +2407,7 @@ export default function App() {
           <img
             src="/flowswitch-logo.png"
             alt="FlowSwitch logo"
-            className="w-5 h-5 rounded-sm"
+            className="h-8 w-8 rounded-md object-contain"
           />
         </div>
         <span className="text-[11px] text-flow-text-muted">
