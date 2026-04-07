@@ -213,6 +213,8 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
         category: inferCategory(app.name),
         iconPath: app.iconPath,
         executablePath: app.executablePath ?? null,
+        shortcutPath: app.shortcutPath ?? null,
+        launchUrl: app.launchUrl ?? null,
       };
     })
   ), [installedApps]);
@@ -346,6 +348,8 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
             icon: app.icon,
             iconPath: app.iconPath ?? null,
             executablePath: app.executablePath ?? null,
+            shortcutPath: app.shortcutPath ?? null,
+            launchUrl: app.launchUrl ?? null,
             color: app.color,
             position: { x: 30 + (index % 2) * 40, y: 30 + Math.floor(index / 2) * 40 },
             size: { width: 35, height: 30 },

@@ -187,6 +187,28 @@ export function SelectedAppDetails({
             placeholder="C:\\Program Files\\App\\app.exe"
           />
         </div>
+
+        <div>
+          <label className="block text-xs font-medium text-flow-text-muted mb-2">Shortcut path (.lnk)</label>
+          <input
+            type="text"
+            value={currentData.shortcutPath || ''}
+            onChange={(e) => handleFieldUpdate('shortcutPath', e.target.value)}
+            className="w-full px-3 py-2 text-xs bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+            placeholder="C:\\Users\\…\\App.lnk (optional; launch uses shortcut when set)"
+          />
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-flow-text-muted mb-2">Launch URL (steam://, etc.)</label>
+          <input
+            type="text"
+            value={currentData.launchUrl || ''}
+            onChange={(e) => handleFieldUpdate('launchUrl', e.target.value)}
+            className="w-full px-3 py-2 text-xs bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+            placeholder="steam://rungameid/… (optional)"
+          />
+        </div>
       </div>
     </div>
   );

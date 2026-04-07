@@ -17,6 +17,8 @@ interface AppItem extends BaseItem {
   icon?: LucideIcon;
   iconPath?: string | null;
   executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
   color: string;
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
@@ -556,6 +558,8 @@ export function AppFileWindow({
         icon: (item as AppItem).icon,
         iconPath: (item as AppItem).iconPath ?? null,
         executablePath: (item as AppItem).executablePath ?? null,
+        shortcutPath: (item as AppItem).shortcutPath ?? null,
+        launchUrl: (item as AppItem).launchUrl ?? null,
         color: (item as AppItem).color,
         volume: (item as AppItem).volume,
         runAsAdmin: (item as AppItem).runAsAdmin,

@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
 const { sanitizeProfileIconPathsDeep } = require('../utils/profile-icon-paths');
+const { sanitizeProfileLaunchFieldsDeep } = require('../utils/profile-launch-fields');
 
 const PROFILE_STORE_FILENAME = 'profiles.v1.json';
 
@@ -35,13 +36,13 @@ const readProfilesFromDisk = () => {
       const decrypted = safeStorage.decryptString(encrypted);
       const parsed = JSON.parse(decrypted);
       const profiles = parseProfilesPayload(parsed);
-      return profiles.map((p) => sanitizeProfileIconPathsDeep(p));
+      return profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
     }
 
     const content = buf.toString('utf8');
     const parsed = JSON.parse(content);
     const profiles = parseProfilesPayload(parsed);
-    return profiles.map((p) => sanitizeProfileIconPathsDeep(p));
+    return profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
   } catch (error) {
     console.error('[profile-store] Failed to read profiles:', error);
     return [];
@@ -49,7 +50,7 @@ const readProfilesFromDisk = () => {
 };
 
 const writeProfilesToDisk = (profiles) => {
-  const safeProfiles = normalizeProfiles(profiles).map((p) => sanitizeProfileIconPathsDeep(p));
+  const safeProfiles = normalizeProfiles(profiles).map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
   const storePath = getProfileStorePath();
   const dirPath = path.dirname(storePath);
   const tempPath = `${storePath}.tmp`;

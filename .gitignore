@@ -22,6 +22,6 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 
-# Cursor AI local rules (do not commit)
+# Cursor AI local workspace (do not commit)
 .cursorrules
-.cursor/rules/
+.cursor/
