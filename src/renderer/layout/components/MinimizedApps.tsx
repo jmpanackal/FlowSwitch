@@ -436,8 +436,10 @@ export function MinimizedApps({
         data-drop-target="minimized"
       >
         {totalItems > 0 ? (
-          <div className={`grid grid-cols-[repeat(auto-fill,minmax(${compact ? '68px' : '76px'},1fr))] ${compact ? 'gap-1.5' : 'gap-2'}`}>
-            {/* Render Apps */}
+          <div
+            className={`flex flex-wrap content-start items-start ${compact ? 'gap-1.5' : 'gap-2'}`}
+          >
+            {/* Render Apps — fixed-width tiles so a single app never stretches to full row width */}
             {visibleApps.map((app, index) => {
               const monitorInfo = getMonitorInfo(app.targetMonitor || 'monitor-1');
               const isBrowser = app.name.toLowerCase().includes('chrome') || app.name.toLowerCase().includes('browser');
@@ -449,7 +451,7 @@ export function MinimizedApps({
               return (
                 <div
                   key={`app-${index}`}
-                  className="relative group"
+                  className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
                   onMouseEnter={() => setHoveredApp(index)}
                   onMouseLeave={() => setHoveredApp(null)}
                 >
@@ -610,7 +612,11 @@ export function MinimizedApps({
             })}
 
             {hiddenAppsCount > 0 && (
-              <div className="relative flex flex-col items-center justify-center gap-1 p-1.5 rounded-lg border border-flow-border/60 bg-flow-surface/30">
+              <div
+                className={`relative flex shrink-0 flex-col items-center justify-center gap-1 p-1.5 rounded-lg border border-flow-border/60 bg-flow-surface/30 ${
+                  compact ? 'w-[4.25rem]' : 'w-[5rem]'
+                }`}
+              >
                 <div className="w-8 h-8 rounded-lg border border-flow-border/60 bg-flow-surface/50 flex items-center justify-center">
                   <MoreHorizontal className="w-4 h-4 text-flow-text-muted" />
                 </div>
@@ -630,7 +636,7 @@ export function MinimizedApps({
               return (
                 <div
                   key={`file-${index}`}
-                  className="relative group"
+                  className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
                   onMouseEnter={() => setHoveredApp(`file-${index}`)}
                   onMouseLeave={() => setHoveredApp(null)}
                 >

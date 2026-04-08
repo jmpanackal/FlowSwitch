@@ -506,10 +506,6 @@ export function MonitorLayout({
 
   const compactPreviewMode = monitorPreviewScale < 0.82;
   const densePreviewMode = monitorPreviewScale < 0.62 || previewBounds.height < 620;
-  const minimizedSectionHeightPx = useMemo(() => {
-    if (layoutColumnHeight <= 0) return 110;
-    return Math.round(Math.min(132, Math.max(96, layoutColumnHeight * 0.12)));
-  }, [layoutColumnHeight]);
   const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
 
   const setPreviewPositions = (
@@ -549,13 +545,17 @@ export function MonitorLayout({
 
     const updateHeight = () => {
       const h = root.getBoundingClientRect().height;
-      if (h > 0) {
-        setLayoutColumnHeight(h);
-      }
+      if (h <= 0) return;
+      setLayoutColumnHeight((prev) => {
+        if (Math.abs(prev - h) < 0.75) return prev;
+        return h;
+      });
     };
 
     updateHeight();
-    const observer = new ResizeObserver(updateHeight);
+    const observer = new ResizeObserver(() => {
+      requestAnimationFrame(updateHeight);
+    });
     observer.observe(root);
 
     return () => {
@@ -1429,11 +1429,8 @@ export function MonitorLayout({
         </div>
       </div>
       
-      {/* Fixed Bottom Section: Minimized Apps - Always visible at bottom */}
-      <div
-        className="flex-shrink-0 overflow-hidden border-t border-flow-border/30"
-        style={{ minHeight: `${minimizedSectionHeightPx}px` }}
-      >
+      {/* Fixed Bottom Section: Minimized Apps — min-height is CSS-only so it does not feedback into ResizeObserver */}
+      <div className="flex-shrink-0 overflow-hidden border-t border-flow-border/30 min-h-[clamp(6rem,10vh,8.25rem)]">
         <div className={`h-full overflow-hidden ${densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
           <MinimizedApps 
             apps={minimizedApps}
