@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
@@ -71,6 +72,8 @@ export function MinimizedApps({
   compact = false,
 }: MinimizedAppsProps) {
   const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
+  /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
+  const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
   
   // Timer and state for click vs drag detection
   const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -404,7 +407,100 @@ export function MinimizedApps({
   const visibleApps = apps.slice(0, maxVisibleApps);
   const hiddenAppsCount = Math.max(0, apps.length - visibleApps.length);
 
+  const clearHover = () => {
+    setHoveredApp(null);
+    setTooltipAnchor(null);
+  };
+
+  const hoveredAppData =
+    typeof hoveredApp === "number" ? visibleApps[hoveredApp] : null;
+  const hoveredFileData =
+    typeof hoveredApp === "string" && hoveredApp.startsWith("file-")
+      ? files[parseInt(hoveredApp.replace("file-", ""), 10)]
+      : null;
+
+  const renderHoverPortal = () => {
+    if (!tooltipAnchor || hoveredApp === null) return null;
+
+    if (hoveredAppData) {
+      const app = hoveredAppData;
+      const monitorInfo = getMonitorInfo(app.targetMonitor || "monitor-1");
+      const isBrowser =
+        app.name.toLowerCase().includes("chrome") ||
+        app.name.toLowerCase().includes("browser");
+
+      return (
+        <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48 max-w-xs">
+          <div className="text-sm font-medium text-flow-text-primary mb-1">{app.name}</div>
+          <div className="text-xs text-flow-text-muted mb-2">
+            Target: {monitorInfo.name}
+            {monitorInfo.primary && (
+              <span className="ml-1 text-flow-accent-blue">(Primary)</span>
+            )}
+          </div>
+          {isBrowser && app.browserTabs && app.browserTabs.length > 0 && (
+            <div className="border-t border-flow-border pt-2">
+              <div className="text-xs text-flow-text-muted mb-1 font-medium">
+                Browser Tabs ({app.browserTabs.length})
+              </div>
+              <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-elegant">
+                {app.browserTabs.slice(0, 3).map((tab, tabIndex) => (
+                  <div
+                    key={tabIndex}
+                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
+                      tab.isActive
+                        ? "bg-flow-accent-blue/20 text-flow-accent-blue"
+                        : "text-flow-text-muted"
+                    }`}
+                  >
+                    <Globe className="w-3 h-3 flex-shrink-0" />
+                    <span className="truncate flex-1">{tab.name}</span>
+                    {tab.isActive && (
+                      <div className="w-1.5 h-1.5 bg-flow-accent-blue rounded-full flex-shrink-0" />
+                    )}
+                  </div>
+                ))}
+                {app.browserTabs.length > 3 && (
+                  <div className="text-xs text-flow-text-muted text-center py-1">
+                    +{app.browserTabs.length - 3} more tabs
+                  </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
+      );
+    }
+
+    if (hoveredFileData) {
+      const file = hoveredFileData;
+      const monitorInfo = getMonitorInfo(file.targetMonitor || "monitor-1");
+      return (
+        <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48 max-w-xs">
+          <div className="text-sm font-medium text-flow-text-primary mb-1">{file.name}</div>
+          <div className="text-xs text-flow-text-muted mb-1">
+            Type: {file.type.toUpperCase()}
+          </div>
+          <div className="text-xs text-flow-text-muted mb-1">
+            Opens with: {file.associatedApp}
+          </div>
+          <div className="text-xs text-flow-text-muted">
+            Target: {monitorInfo.name}
+            {monitorInfo.primary && (
+              <span className="ml-1 text-flow-accent-blue">(Primary)</span>
+            )}
+          </div>
+        </div>
+      );
+    }
+
+    return null;
+  };
+
+  const hoverTipEl = tooltipAnchor ? renderHoverPortal() : null;
+
   return (
+    <>
     <div className={`w-full ${compact ? 'space-y-1' : 'space-y-1.5'}`}>
       {/* Header Section */}
       <div className="flex items-center justify-between">
@@ -442,7 +538,6 @@ export function MinimizedApps({
             {/* Render Apps — fixed-width tiles so a single app never stretches to full row width */}
             {visibleApps.map((app, index) => {
               const monitorInfo = getMonitorInfo(app.targetMonitor || 'monitor-1');
-              const isBrowser = app.name.toLowerCase().includes('chrome') || app.name.toLowerCase().includes('browser');
               const isSelected = selectedApp && 
                 selectedApp.source === 'minimized' &&
                 selectedApp.appIndex === index &&
@@ -452,8 +547,15 @@ export function MinimizedApps({
                 <div
                   key={`app-${index}`}
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
-                  onMouseEnter={() => setHoveredApp(index)}
-                  onMouseLeave={() => setHoveredApp(null)}
+                  onMouseEnter={(e) => {
+                    setHoveredApp(index);
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setTooltipAnchor({
+                      x: r.left + r.width / 2,
+                      y: r.top,
+                    });
+                  }}
+                  onMouseLeave={clearHover}
                 >
                   {/* App Card */}
                   <div 
@@ -466,7 +568,6 @@ export function MinimizedApps({
                       cursor: isEditMode ? 'grab' : 'pointer',
                     }}
                     onMouseDown={(e) => handleMouseDown(e, app, index)}
-                    title={isEditMode ? "Drag to move to monitor" : "Click to view details"}
                   >
                     {/* App Icon Container */}
                     <div 
@@ -560,53 +661,6 @@ export function MinimizedApps({
                       </div>
                     )}
                   </div>
-
-                  {/* Enhanced Tooltip */}
-                  {hoveredApp === index && (
-                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
-                      <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48">
-                        <div className="text-sm font-medium text-flow-text-primary mb-1">{app.name}</div>
-                        <div className="text-xs text-flow-text-muted mb-2">
-                          Target: {monitorInfo.name}
-                          {monitorInfo.primary && (
-                            <span className="ml-1 text-flow-accent-blue">(Primary)</span>
-                          )}
-                        </div>
-                        
-                        {/* Browser Tabs */}
-                        {isBrowser && app.browserTabs && app.browserTabs.length > 0 && (
-                          <div className="border-t border-flow-border pt-2">
-                            <div className="text-xs text-flow-text-muted mb-1 font-medium">
-                              Browser Tabs ({app.browserTabs.length})
-                            </div>
-                            <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-elegant">
-                              {app.browserTabs.slice(0, 3).map((tab, tabIndex) => (
-                                <div
-                                  key={tabIndex}
-                                  className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
-                                    tab.isActive 
-                                      ? 'bg-flow-accent-blue/20 text-flow-accent-blue' 
-                                      : 'text-flow-text-muted'
-                                  }`}
-                                >
-                                  <Globe className="w-3 h-3 flex-shrink-0" />
-                                  <span className="truncate flex-1">{tab.name}</span>
-                                  {tab.isActive && (
-                                    <div className="w-1.5 h-1.5 bg-flow-accent-blue rounded-full flex-shrink-0" />
-                                  )}
-                                </div>
-                              ))}
-                              {app.browserTabs.length > 3 && (
-                                <div className="text-xs text-flow-text-muted text-center py-1">
-                                  +{app.browserTabs.length - 3} more tabs
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        )}
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -637,8 +691,15 @@ export function MinimizedApps({
                 <div
                   key={`file-${index}`}
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
-                  onMouseEnter={() => setHoveredApp(`file-${index}`)}
-                  onMouseLeave={() => setHoveredApp(null)}
+                  onMouseEnter={(e) => {
+                    setHoveredApp(`file-${index}`);
+                    const r = e.currentTarget.getBoundingClientRect();
+                    setTooltipAnchor({
+                      x: r.left + r.width / 2,
+                      y: r.top,
+                    });
+                  }}
+                  onMouseLeave={clearHover}
                 >
                   {/* File Card */}
                   <div 
@@ -651,7 +712,6 @@ export function MinimizedApps({
                       cursor: isEditMode ? 'grab' : 'pointer',
                     }}
                     onMouseDown={(e) => handleFileMouseDown(e, file, index)}
-                    title={isEditMode ? "Drag to move to monitor" : "Click to view details"}
                   >
                     {/* File Icon Container */}
                     <div 
@@ -705,27 +765,6 @@ export function MinimizedApps({
                       </div>
                     )}
                   </div>
-
-                  {/* File Tooltip */}
-                  {hoveredApp === `file-${index}` && (
-                    <div className="absolute bottom-full left-1/2 transform -translate-x-1/2 mb-2 z-50">
-                      <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48">
-                        <div className="text-sm font-medium text-flow-text-primary mb-1">{file.name}</div>
-                        <div className="text-xs text-flow-text-muted mb-1">
-                          Type: {file.type.toUpperCase()}
-                        </div>
-                        <div className="text-xs text-flow-text-muted mb-1">
-                          Opens with: {file.associatedApp}
-                        </div>
-                        <div className="text-xs text-flow-text-muted">
-                          Target: {monitorInfo.name}
-                          {monitorInfo.primary && (
-                            <span className="ml-1 text-flow-accent-blue">(Primary)</span>
-                          )}
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </div>
               );
             })}
@@ -747,5 +786,19 @@ export function MinimizedApps({
         )}
       </div>
     </div>
+    {tooltipAnchor && hoverTipEl && createPortal(
+      <div
+        className="pointer-events-none fixed z-[9999] w-max max-w-[min(20rem,calc(100vw-1.5rem))]"
+        style={{
+          left: tooltipAnchor.x,
+          top: tooltipAnchor.y,
+          transform: 'translate(-50%, calc(-100% - 8px))',
+        }}
+      >
+        <div className="pointer-events-auto">{hoverTipEl}</div>
+      </div>,
+      document.body,
+    )}
+  </>
   );
 }

@@ -523,18 +523,34 @@ export function MonitorLayout({
     const container = monitorPreviewRef.current;
     if (!container) return;
 
+    let raf = 0;
     const updateBounds = () => {
       const rect = container.getBoundingClientRect();
-      if (rect.width > 0 && rect.height > 0) {
-        setPreviewBounds({ width: rect.width, height: rect.height });
-      }
+      if (rect.width <= 0 || rect.height <= 0) return;
+      const w = Math.round(rect.width);
+      const h = Math.round(rect.height);
+      setPreviewBounds((prev) => {
+        if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
+          return prev;
+        }
+        return { width: w, height: h };
+      });
+    };
+
+    const schedule = () => {
+      if (raf) cancelAnimationFrame(raf);
+      raf = requestAnimationFrame(() => {
+        raf = 0;
+        updateBounds();
+      });
     };
 
     updateBounds();
-    const observer = new ResizeObserver(updateBounds);
+    const observer = new ResizeObserver(schedule);
     observer.observe(container);
 
     return () => {
+      if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
     };
   }, []);
@@ -544,10 +560,10 @@ export function MonitorLayout({
     if (!root) return;
 
     const updateHeight = () => {
-      const h = root.getBoundingClientRect().height;
+      const h = Math.round(root.getBoundingClientRect().height);
       if (h <= 0) return;
       setLayoutColumnHeight((prev) => {
-        if (Math.abs(prev - h) < 0.75) return prev;
+        if (Math.abs(prev - h) < 2) return prev;
         return h;
       });
     };
@@ -1429,9 +1445,13 @@ export function MonitorLayout({
         </div>
       </div>
       
-      {/* Fixed Bottom Section: Minimized Apps — min-height is CSS-only so it does not feedback into ResizeObserver */}
-      <div className="flex-shrink-0 overflow-hidden border-t border-flow-border/30 min-h-[clamp(6rem,10vh,8.25rem)]">
-        <div className={`h-full overflow-hidden ${densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'}`}>
+      {/* Minimized Apps: overflow visible so hover popovers are not clipped; min-height fits one full tile row */}
+      <div className="flex-shrink-0 border-t border-flow-border/30 min-h-[clamp(7.5rem,12vh,11rem)] overflow-x-hidden overflow-y-visible">
+        <div
+          className={`min-h-0 max-h-[min(40vh,18rem)] overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] ${
+            densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'
+          }`}
+        >
           <MinimizedApps 
             apps={minimizedApps}
             files={[]} // No more standalone files
@@ -1446,7 +1466,7 @@ export function MonitorLayout({
             onRemoveApp={onRemoveMinimizedApp}
             onRemoveFile={() => {}} // No more file removal
             monitors={monitors}
-            compact={previewBounds.height < 780 || monitorPreviewScale < 0.86 || layoutColumnHeight < 760}
+            compact={layoutColumnHeight > 0 && layoutColumnHeight < 760}
           />
         </div>
       </div>
