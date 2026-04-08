@@ -242,7 +242,7 @@ export function AppManager({
               placeholder="Search apps..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-flow-surface/90 border border-flow-border/60 rounded-lg text-sm text-flow-text-primary placeholder-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/40 focus:border-flow-border-accent/40 transition-all duration-150 ease-out"
+              className="w-full pl-9 pr-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary placeholder-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
             />
           </div>
 
@@ -251,7 +251,7 @@ export function AppManager({
             <select
               value={selectedCategory || ''}
               onChange={(e) => setSelectedCategory(e.target.value || null)}
-              className="flex-1 px-2 py-1.5 bg-flow-surface/90 border border-flow-border/60 rounded-md text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/40 focus:border-flow-border-accent/40 transition-all duration-150 ease-out"
+              className="flex-1 px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
               title="Filter by category"
             >
               <option value="">All</option>
@@ -262,7 +262,7 @@ export function AppManager({
             <select
               value={sortOption}
               onChange={e => setSortOption(e.target.value as 'name' | 'lastAccessed' | 'size')}
-              className="px-2 py-1.5 bg-flow-surface/90 border border-flow-border/60 rounded-md text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/40 focus:border-flow-border-accent/40 transition-all duration-150 ease-out"
+              className="px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
               title="Sort apps"
             >
               <option value="name">A-Z</option>
@@ -271,8 +271,10 @@ export function AppManager({
             </select>
             <button
               onClick={() => setExpandedApp(expandedApp ? null : 'toggle-all')}
-              className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md transition-all duration-150 ease-out ${
-                expandedApp ? 'bg-flow-surface-elevated text-flow-accent-blue ring-1 ring-flow-accent-blue/25 border border-flow-border/50' : 'bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/40'
+              className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded transition-colors ${
+                expandedApp
+                  ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30'
+                  : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
               }`}
               title="Show app details"
             >
