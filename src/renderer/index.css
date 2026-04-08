@@ -141,6 +141,7 @@
   
   body {
     @apply bg-flow-bg-primary text-flow-text-primary;
+    color-scheme: dark;
     font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
     font-feature-settings: 'cv11', 'ss01';
     font-variation-settings: 'opsz' 32;
@@ -153,6 +154,78 @@
   h4 { @apply text-base tracking-tight; font-weight: 600; }
   h5 { @apply text-sm tracking-tight; font-weight: 600; }
   h6 { @apply text-xs tracking-tight; font-weight: 600; }
+}
+
+/* Eagle-inspired: region shells, softer chrome, shared rhythm.
+   Avoid opacity modifiers inside @apply with custom theme colors (PostCSS/Tailwind limitation). */
+@layer components {
+  .flow-shell-titlebar {
+    @apply border-b bg-flow-bg-secondary backdrop-blur-md;
+    border-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-bg-secondary) 92%, transparent);
+  }
+
+  .flow-shell-nav {
+    @apply bg-flow-bg-secondary border-r;
+    border-right-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
+  }
+
+  .flow-shell-canvas {
+    @apply bg-flow-bg-primary;
+  }
+
+  .flow-shell-inspector {
+    @apply bg-flow-bg-secondary border-l;
+    border-left-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
+    box-shadow: -12px 0 40px -16px oklch(0.05 0.02 240 / 0.55);
+  }
+
+  .flow-section-label {
+    @apply text-[11px] font-medium text-flow-text-secondary uppercase tracking-wider;
+  }
+
+  .flow-card-quiet {
+    @apply rounded-xl transition-all duration-150 ease-out;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 62%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 92%, transparent);
+  }
+
+  .flow-card-quiet:hover {
+    @apply bg-flow-surface-elevated;
+    border-color: color-mix(in oklch, var(--flow-border-accent) 42%, transparent);
+  }
+
+  .flow-segment-track {
+    @apply flex rounded-lg p-0.5 gap-0.5;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 72%, transparent);
+  }
+
+  .flow-segment-tab {
+    @apply flex-1 rounded-md text-xs font-medium transition-all duration-150 ease-out;
+  }
+
+  .flow-segment-tab-active {
+    @apply bg-flow-surface-elevated text-flow-text-primary shadow-sm;
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.06),
+      0 0 0 1px color-mix(in oklch, var(--flow-border-accent) 22%, transparent);
+  }
+
+  .flow-segment-tab-idle {
+    @apply text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary;
+  }
+
+  .flow-header-well {
+    @apply rounded-xl shadow-flow-shadow-sm transition-all duration-150 ease-out;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 62%, transparent);
+  }
+
+  .flow-header-well-interactive:hover {
+    @apply bg-flow-surface-elevated;
+    border-color: color-mix(in oklch, var(--flow-border-accent) 38%, transparent);
+  }
 }
 
 @layer utilities {

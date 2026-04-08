@@ -251,9 +251,6 @@ export default function App() {
         dropdownRef.current &&
         !dropdownRef.current.contains(event.target as Node)
       ) {
-        console.log(
-          "📱 DOCUMENT CLICK OUTSIDE DROPDOWN - Closing",
-        );
         setShowProfileDropdown(false);
       }
     };
@@ -274,6 +271,11 @@ export default function App() {
   }, [showProfileDropdown]);
 
   // SELECTED APP HANDLERS
+  const handleClearAppSelection = useCallback(() => {
+    setSelectedApp(null);
+    setRightSidebarOpen(false);
+  }, []);
+
   const handleAppSelect = useCallback(
     (
       appData: any,
@@ -2401,8 +2403,8 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden bg-flow-bg-primary">
-      <div className="app-drag-region h-9 px-3 border-b border-flow-border bg-flow-bg-secondary/95 flex items-center justify-between select-none">
+    <div className="h-screen overflow-hidden flow-shell-canvas">
+      <div className="app-drag-region h-9 px-3 flow-shell-titlebar flex items-center justify-between select-none">
         <div className="flex items-center gap-2">
           <img
             src="/flowswitch-logo.png"
@@ -2410,22 +2412,22 @@ export default function App() {
             className="h-8 w-8 rounded-md object-contain"
           />
         </div>
-        <span className="text-[11px] text-flow-text-muted">
-          Workspace Automation
+        <span className="text-[11px] text-flow-text-muted tracking-wide">
+          Workspace automation
         </span>
       </div>
       <div className="flex h-[calc(100vh-2.25rem)]">
         {/* Left Sidebar - FIXED: Better height management */}
-        <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] bg-flow-bg-secondary border-r border-flow-border flex flex-col">
+        <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] flow-shell-nav flex flex-col">
           {/* Header - Fixed height */}
-          <div className="flex-shrink-0 p-4 border-b border-flow-border">
+          <div className="flex-shrink-0 p-4 border-b border-flow-border/50">
             <div className="flex items-center justify-between mb-3">
               <div>
-                <h1 className="text-lg text-flow-text-primary font-semibold">
+                <h1 className="text-base text-flow-text-primary font-semibold tracking-tight">
                   FlowSwitch
                 </h1>
-                <p className="text-xs text-flow-text-muted">
-                  Workspace Automation
+                <p className="text-[11px] text-flow-text-muted mt-0.5">
+                  Profiles, apps, layouts
                 </p>
               </div>
               <div className="flex items-center gap-1.5">
@@ -2438,7 +2440,7 @@ export default function App() {
                 />
                 <label
                   htmlFor="import-profile"
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors cursor-pointer"
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out cursor-pointer"
                   title="Import Profile"
                   aria-label="Import profile"
                 >
@@ -2449,15 +2451,15 @@ export default function App() {
                     currentProfile &&
                     exportProfile(currentProfile.id)
                   }
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
                   title="Export Current Profile"
                   aria-label="Export current profile"
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
-                <span className="h-4 w-px bg-flow-border/70 mx-0.5" aria-hidden="true" />
+                <span className="h-4 w-px bg-flow-border/40 mx-0.5" aria-hidden="true" />
                 <button
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
                   title="Open settings"
                   aria-label="Open settings"
                 >
@@ -2467,37 +2469,46 @@ export default function App() {
             </div>
 
             {/* View Toggle - Compact */}
-            <div className="flex bg-flow-surface border border-flow-border rounded-lg p-0.5">
+            <div className="flow-segment-track" role="tablist" aria-label="Sidebar view">
               <button
+                type="button"
+                role="tab"
+                aria-selected={currentView === "profiles"}
                 onClick={() => setCurrentView("profiles")}
-                className={`flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
+                className={`flow-segment-tab px-2 py-1.5 ${
                   currentView === "profiles"
-                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
-                    : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
+                    ? "flow-segment-tab-active"
+                    : "flow-segment-tab-idle"
                 }`}
               >
                 Profiles
               </button>
               <button
+                type="button"
+                role="tab"
+                aria-selected={currentView === "apps"}
                 onClick={() => setCurrentView("apps")}
-                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
+                className={`flow-segment-tab flex items-center justify-center gap-1 px-2 py-1.5 ${
                   currentView === "apps"
-                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
-                    : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
+                    ? "flow-segment-tab-active"
+                    : "flow-segment-tab-idle"
                 }`}
               >
-                <LayoutGrid className="w-3 h-3" />
+                <LayoutGrid className="w-3 h-3 shrink-0" />
                 Apps
               </button>
               <button
+                type="button"
+                role="tab"
+                aria-selected={currentView === "content"}
                 onClick={() => setCurrentView("content")}
-                className={`flex-1 flex items-center justify-center gap-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all duration-200 ${
+                className={`flow-segment-tab flex items-center justify-center gap-1 px-2 py-1.5 ${
                   currentView === "content"
-                    ? "bg-flow-accent-blue/25 text-flow-accent-blue border border-flow-accent-blue/40 shadow-sm"
-                    : "text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
+                    ? "flow-segment-tab-active"
+                    : "flow-segment-tab-idle"
                 }`}
               >
-                <Link className="w-3 h-3" />
+                <Link className="w-3 h-3 shrink-0" />
                 Content
               </button>
             </div>
@@ -2507,15 +2518,15 @@ export default function App() {
           <div className="flex-1 min-h-0 flex flex-col">
             {currentView === "profiles" && (
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-shrink-0 p-3 border-b border-flow-border">
+                <div className="flex-shrink-0 p-3 border-b border-flow-border/50">
                   <div className="flex items-center justify-between">
-                    <h2 className="text-xs font-medium text-flow-text-secondary uppercase tracking-wide">
+                    <h2 className="flow-section-label">
                       Profiles
                     </h2>
                     <button
                       onClick={() => setShowCreateProfile(true)}
                       disabled={isEditMode}
-                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-colors ${
+                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-all duration-150 ease-out ${
                         isEditMode
                           ? "text-flow-text-muted cursor-not-allowed opacity-50"
                           : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
@@ -2532,9 +2543,9 @@ export default function App() {
                   </div>
 
                   {isEditMode && (
-                    <div className="mt-3 p-2 bg-flow-accent-blue/10 border border-flow-accent-blue/30 rounded-lg">
-                      <div className="flex items-center gap-2 text-xs text-flow-accent-blue">
-                        <Edit className="w-3 h-3" />
+                    <div className="mt-3 p-2.5 rounded-lg border border-flow-border/60 bg-flow-surface/80">
+                      <div className="flex items-center gap-2 text-xs text-flow-text-secondary">
+                        <Edit className="w-3 h-3 text-flow-accent-blue shrink-0" />
                         <span>
                           Profile switching disabled while
                           editing
@@ -2545,7 +2556,7 @@ export default function App() {
                 </div>
 
                 <div className="flex-1 overflow-y-auto scrollbar-elegant p-3">
-                  <div className="space-y-2">
+                  <div className="space-y-2.5">
                     {profiles.map((profile) => (
                       <ProfileCard
                         key={profile.id}
@@ -2632,13 +2643,13 @@ export default function App() {
 
         {/* Main Content Area with Header and Right Sidebar */}
         <div
-          className={`flex-1 flex flex-col transition-all duration-300 ease-in-out ${
+          className={`flex-1 flex flex-col transition-[margin] duration-200 ease-out ${
             rightSidebarOpen ? "mr-[clamp(18rem,24vw,24rem)]" : "mr-0"
           }`}
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="px-4 md:px-6 xl:px-8 py-2 md:py-3 border-b border-flow-border bg-flow-bg-secondary relative z-10">
+            <header className="px-4 md:px-6 xl:px-8 py-2.5 md:py-3 border-b border-flow-border/50 bg-flow-bg-secondary/80 backdrop-blur-sm relative z-10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
                   {/* Profile Switcher - Now without settings button */}
@@ -2646,15 +2657,15 @@ export default function App() {
                     <button
                       onClick={handleDropdownToggle}
                       disabled={isEditMode}
-                      className={`flex items-center gap-2 md:gap-3 p-2 md:p-2.5 rounded-lg border transition-all duration-200 max-w-[52vw] ${
+                      className={`flow-header-well flex items-center gap-2 md:gap-3 p-2 md:p-2.5 max-w-[52vw] ${
                         isEditMode
-                          ? "bg-flow-surface border-flow-border text-flow-text-muted cursor-not-allowed opacity-50"
-                          : "bg-flow-surface border-flow-border hover:bg-flow-surface-elevated hover:border-flow-border-accent text-flow-text-primary cursor-pointer"
+                          ? "opacity-50 cursor-not-allowed text-flow-text-muted"
+                          : "flow-header-well-interactive text-flow-text-primary cursor-pointer"
                       }`}
                     >
                       <div className="flex-1">
                         <div className="flex items-center gap-3 mb-1">
-                          <h2 className="text-lg md:text-xl text-flow-text-primary font-semibold truncate max-w-[22rem]">
+                          <h2 className="text-base md:text-lg text-flow-text-primary font-semibold tracking-tight truncate max-w-[22rem]">
                             {currentProfile.name}
                           </h2>
                           {currentProfile.autoLaunchOnBoot && (
@@ -2705,7 +2716,7 @@ export default function App() {
                       </div>
                       {!isEditMode && (
                         <ChevronDown
-                          className={`w-4 h-4 text-flow-text-muted transition-transform duration-200 ${
+                          className={`w-4 h-4 text-flow-text-muted transition-transform duration-150 ease-out ${
                             showProfileDropdown
                               ? "rotate-180"
                               : ""
@@ -2717,7 +2728,7 @@ export default function App() {
                     {/* Profile Dropdown */}
                     {showProfileDropdown && !isEditMode && (
                       <div
-                        className="absolute top-full left-0 mt-2 w-full min-w-[20rem] bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-[60]"
+                        className="absolute top-full left-0 mt-2 w-full min-w-[20rem] bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg overflow-hidden z-[60]"
                         style={{ pointerEvents: "auto" }}
                       >
                         <div className="max-h-80 overflow-y-auto scrollbar-elegant">
@@ -2725,17 +2736,13 @@ export default function App() {
                             <button
                               key={profile.id}
                               onClick={() => {
-                                console.log(
-                                  "🔄 PROFILE CLICKED:",
-                                  profile.name,
-                                );
                                 handleProfileSwitch(profile.id);
                               }}
-                              className="w-full flex items-center gap-3 p-4 text-left hover:bg-flow-border/30 transition-colors"
+                              className="w-full flex items-center gap-3 p-3.5 text-left hover:bg-flow-surface/80 transition-colors duration-150 border-b border-flow-border/30 last:border-b-0"
                             >
                               <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2 mb-1">
-                                  <h3 className="font-semibold text-flow-text-primary">
+                                  <h3 className="text-sm font-semibold text-flow-text-primary tracking-tight">
                                     {profile.name}
                                   </h3>
                                   {profile.id ===
@@ -2799,10 +2806,10 @@ export default function App() {
                   <div className="flex items-center gap-2 md:gap-3 flex-wrap justify-end">
                     <button
                       onClick={() => setIsEditMode(!isEditMode)}
-                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 ${
+                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out ${
                         isEditMode
-                          ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue hover:bg-flow-accent-blue-hover shadow-md ring-2 ring-flow-accent-blue/30"
-                          : "bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
+                          ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue/80 hover:bg-flow-accent-blue-hover shadow-md ring-1 ring-flow-accent-blue/25"
+                          : "bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50"
                       }`}
                     >
                       {isEditMode ? (
@@ -2820,7 +2827,7 @@ export default function App() {
                           currentProfile.id,
                         )
                       }
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50"
                       title="Profile Settings"
                     >
                       <Settings className="w-4 h-4" />
@@ -2829,7 +2836,7 @@ export default function App() {
                     <button
                       onClick={handleLaunch}
                       disabled={isLaunching || isEditMode}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-200 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/80 disabled:opacity-50 shadow-sm"
+                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/40 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/90 disabled:opacity-50 shadow-sm"
                     >
                       {isLaunching ? (
                         <>
@@ -2868,13 +2875,16 @@ export default function App() {
               </div>
             </header>
           ) : (
-            <header className="px-4 md:px-6 xl:px-8 py-2 md:py-3 border-b border-flow-border bg-flow-bg-secondary relative z-10">
+            <header className="px-4 md:px-6 xl:px-8 py-2.5 md:py-3 border-b border-flow-border/50 bg-flow-bg-secondary/80 backdrop-blur-sm relative z-10">
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-4">
-                  <div className="flex items-center gap-3 p-2.5 rounded-lg border bg-flow-surface border-flow-border text-flow-text-muted">
-                    <h2 className="text-xl font-semibold text-flow-text-secondary">
+                  <div className="flow-header-well flex flex-col gap-1 p-3 max-w-md">
+                    <h2 className="text-sm font-semibold text-flow-text-primary tracking-tight">
                       No profile selected
                     </h2>
+                    <p className="text-xs text-flow-text-muted leading-relaxed">
+                      Create a profile from the sidebar to capture layouts and launch your workspace.
+                    </p>
                   </div>
                 </div>
 
@@ -2908,8 +2918,8 @@ export default function App() {
 
           {/* Main Content Area */}
           {currentProfile && (
-            <main className="flex-1 overflow-hidden relative">
-              <div className="h-full px-4 md:px-6 xl:px-8 py-3 md:py-5">
+            <main className="flex-1 overflow-hidden relative flow-shell-canvas">
+              <div className="h-full px-4 md:px-6 xl:px-8 py-4 md:py-6">
                 <MonitorLayout
                   monitors={currentProfile.monitors}
                   minimizedApps={currentProfile.minimizedApps}
@@ -3055,6 +3065,7 @@ export default function App() {
                   onMoveMinimizedFileToMonitor={() => {}} // REMOVED: No standalone minimized file to monitor moves
                   onCustomDragStart={handleCustomDragStart}
                   onAppSelect={handleAppSelect}
+                  onClearAppSelection={handleClearAppSelection}
                   onFileSelect={() => {}} // REMOVED: No standalone file selection
                   onAutoSnapApps={handleAutoSnapApps}
                   large={!rightSidebarOpen}
@@ -3067,17 +3078,18 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-0 w-[clamp(18rem,24vw,24rem)] h-full bg-flow-bg-secondary border-l border-flow-border flex flex-col z-30 transform transition-transform duration-300 ease-in-out ${
+            className={`fixed right-0 top-9 w-[clamp(18rem,24vw,24rem)] h-[calc(100vh-2.25rem)] flow-shell-inspector flex flex-col z-30 transform transition-transform duration-200 ease-out ${
               rightSidebarOpen
                 ? "translate-x-0"
                 : "translate-x-full"
             }`}
           >
             {/* Sidebar Header - Close button only */}
-            <div className="absolute top-4 right-4 z-10">
+            <div className="absolute top-3 right-3 z-10">
               <button
+                type="button"
                 onClick={handleCloseSidebar}
-                className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+                className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
               >
                 <X className="w-4 h-4" />
               </button>
@@ -3116,10 +3128,11 @@ export default function App() {
         {/* Right Sidebar Toggle Button (when closed) */}
         {!rightSidebarOpen && selectedApp && (
           <button
+            type="button"
             onClick={() => setRightSidebarOpen(true)}
-            className="fixed right-0 bg-flow-surface border border-flow-border border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-200 p-2 z-20 shadow-lg"
+            className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
             style={{
-              top: "50%",
+              top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
               transform: "translateY(-50%)",
             }}
             title="Open App Details"

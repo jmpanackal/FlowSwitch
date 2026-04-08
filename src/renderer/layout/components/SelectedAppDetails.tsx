@@ -53,13 +53,13 @@ export function SelectedAppDetails({
   if (!selectedApp) {
     return (
       <div className="h-full flex items-center justify-center p-8">
-        <div className="text-center max-w-sm">
-          <div className="w-16 h-16 bg-flow-surface rounded-2xl flex items-center justify-center mx-auto mb-4">
-            <Monitor className="w-8 h-8 text-flow-text-muted" />
+        <div className="text-center max-w-[17rem] rounded-2xl border border-flow-border/50 bg-flow-surface/40 px-6 py-8">
+          <div className="w-14 h-14 bg-flow-bg-tertiary/80 rounded-xl flex items-center justify-center mx-auto mb-4 ring-1 ring-flow-border/40">
+            <Monitor className="w-7 h-7 text-flow-text-muted" />
           </div>
-          <h3 className="font-semibold text-flow-text-primary mb-2">No App Selected</h3>
-          <p className="text-sm text-flow-text-muted leading-relaxed">
-            Click on any app in the monitor layout or minimized section to view and edit its settings.
+          <h3 className="text-sm font-semibold text-flow-text-primary tracking-tight mb-2">No app selected</h3>
+          <p className="text-xs text-flow-text-muted leading-relaxed">
+            Select an app on a monitor or in the minimized row to view launch options, files, and metadata.
           </p>
         </div>
       </div>
@@ -766,14 +766,14 @@ export function SelectedAppDetails({
   };
 
   return (
-    <div className="h-full flex flex-col bg-flow-bg-secondary">
+    <div className="h-full flex flex-col bg-flow-bg-secondary/95">
       {/* App Header - Always visible */}
-      <div className="px-6 py-4 border-b border-flow-border bg-flow-bg-tertiary">
+      <div className="px-5 py-4 border-b border-flow-border/50 bg-flow-surface/30 backdrop-blur-sm">
         <div className="flex items-start gap-4">
           {renderAppIcon(currentData)}
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <span className="text-lg font-semibold text-flow-text-primary truncate">
+              <span className="text-base font-semibold text-flow-text-primary tracking-tight truncate">
                 {currentData.name}
               </span>
               <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
@@ -797,18 +797,19 @@ export function SelectedAppDetails({
       </div>
 
       {/* Tab Navigation */}
-      <div className="border-b border-flow-border bg-flow-bg-tertiary">
+      <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
         <div className="flex">
           {tabs.map((tab) => {
             const IconComponent = tab.icon;
             return (
               <button
+                type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-2 px-4 py-3 text-xs font-medium transition-all duration-200 border-b-2 ${
+                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-medium transition-all duration-150 ease-out border-b-2 ${
                   activeTab === tab.id
-                    ? 'border-flow-accent-blue text-flow-accent-blue bg-flow-bg-secondary'
-                    : 'border-transparent text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface'
+                    ? 'border-flow-accent-blue text-flow-accent-blue bg-flow-bg-primary/40'
+                    : 'border-transparent text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface/50'
                 }`}
               >
                 <IconComponent className="w-3 h-3" />
@@ -821,7 +822,7 @@ export function SelectedAppDetails({
 
       {/* Tab Content */}
       <div className="flex-1 overflow-y-auto scrollbar-elegant">
-        <div className="p-6">
+        <div className="p-5">
           {renderTabContent()}
         </div>
       </div>

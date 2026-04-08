@@ -225,8 +225,8 @@ export function AppManager({
         {/* Header - CLEAN: Consistent with UI */}
         <div className="flex items-center justify-between mb-3">
           <div className="flex items-center gap-2">
-            <Settings className="w-4 h-4 text-flow-text-muted" />
-            <h2 className="text-xs font-medium text-flow-text-secondary uppercase tracking-wide">Apps</h2>
+            <Settings className="w-3.5 h-3.5 text-flow-text-muted" />
+            <h2 className="text-[11px] font-medium text-flow-text-secondary uppercase tracking-wider">Apps</h2>
           </div>
           <span className="text-flow-text-muted text-xs">{filteredApps.length} available</span>
         </div>
@@ -272,7 +272,9 @@ export function AppManager({
             <button
               onClick={() => setExpandedApp(expandedApp ? null : 'toggle-all')}
               className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded transition-colors ${
-                expandedApp ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30' : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
+                expandedApp
+                  ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30'
+                  : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
               }`}
               title="Show app details"
             >
@@ -283,10 +285,10 @@ export function AppManager({
         </div>
 
         {/* Drag Instructions - Compact */}
-        <div className="bg-flow-accent-blue/10 border border-flow-accent-blue/30 rounded-lg p-3 mb-4">
-          <div className="flex items-center gap-2 text-xs text-flow-accent-blue">
-            <Move className="w-3 h-3" />
-            <span>Drag apps to monitors or minimized section</span>
+        <div className="rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3 mb-4">
+          <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
+            <Move className="w-3.5 h-3.5 text-flow-accent-blue shrink-0" />
+            <span>Drag apps onto a monitor or into the minimized row.</span>
           </div>
         </div>
 
@@ -299,11 +301,11 @@ export function AppManager({
             return (
               <div 
                 key={index} 
-                className="bg-flow-surface border border-flow-border rounded-lg transition-all duration-200 hover:border-flow-border-accent"
+                className="flow-card-quiet rounded-lg"
               >
                 <div className="flex items-center gap-3 p-3">
                   <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform hover:scale-105 select-none relative"
+                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
                     style={{ backgroundColor: `${app.color ?? '#888'}20` }}
                     onMouseDown={(e) => handleMouseDown(e, app)}
                     title="Drag to add to monitor or minimized apps"
