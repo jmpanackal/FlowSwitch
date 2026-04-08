@@ -155,6 +155,62 @@
   h6 { @apply text-xs tracking-tight; font-weight: 600; }
 }
 
+/* Eagle-inspired: region shells, softer chrome, shared rhythm */
+@layer components {
+  .flow-shell-titlebar {
+    @apply border-b border-flow-border/50 bg-flow-bg-secondary/90 backdrop-blur-md;
+  }
+
+  .flow-shell-nav {
+    @apply bg-flow-bg-secondary border-r border-flow-border/50;
+  }
+
+  .flow-shell-canvas {
+    @apply bg-flow-bg-primary;
+  }
+
+  .flow-shell-inspector {
+    @apply bg-flow-bg-secondary border-l border-flow-border/50;
+    box-shadow: -12px 0 40px -16px oklch(0.05 0.02 240 / 0.55);
+  }
+
+  .flow-section-label {
+    @apply text-[11px] font-medium text-flow-text-secondary uppercase tracking-wider;
+  }
+
+  .flow-card-quiet {
+    @apply rounded-xl border border-flow-border/60 bg-flow-surface/90 transition-all duration-150 ease-out;
+  }
+
+  .flow-card-quiet:hover {
+    @apply border-flow-border-accent/40 bg-flow-surface-elevated;
+  }
+
+  .flow-segment-track {
+    @apply flex rounded-lg border border-flow-border/50 bg-flow-surface/70 p-0.5 gap-0.5;
+  }
+
+  .flow-segment-tab {
+    @apply flex-1 rounded-md text-xs font-medium transition-all duration-150 ease-out;
+  }
+
+  .flow-segment-tab-active {
+    @apply bg-flow-surface-elevated text-flow-text-primary shadow-sm ring-1 ring-flow-border-accent/20;
+  }
+
+  .flow-segment-tab-idle {
+    @apply text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary;
+  }
+
+  .flow-header-well {
+    @apply rounded-xl border border-flow-border/50 bg-flow-surface/60 shadow-flow-shadow-sm transition-all duration-150 ease-out;
+  }
+
+  .flow-header-well-interactive:hover {
+    @apply border-flow-border-accent/35 bg-flow-surface-elevated;
+  }
+}
+
 @layer utilities {
   /* ENHANCED Monitor Layout System - FIXED for padding clipping */
   

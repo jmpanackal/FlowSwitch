@@ -100,18 +100,13 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
           clearHoverTimer();
           if (!disabled) setShowDetails(false);
         }}
-        className={`relative p-4 rounded-lg transition-all duration-200 group border ${
+        className={`relative p-3.5 rounded-xl transition-all duration-150 ease-out group border ${
           disabled
-            ? 'bg-flow-surface border-flow-border opacity-60 cursor-not-allowed'
-            : profile.isActive 
-              ? 'border-flow-accent-blue/50 bg-flow-accent-blue/10 shadow-lg cursor-pointer' 
-              : 'bg-flow-surface border-flow-border hover:bg-flow-surface-elevated hover:border-flow-border-accent shadow-sm cursor-pointer'
+            ? 'bg-flow-surface/80 border-flow-border/50 opacity-60 cursor-not-allowed'
+            : profile.isActive
+              ? 'border-flow-border-accent/35 bg-flow-surface-elevated ring-1 ring-flow-accent-blue/35 shadow-flow-shadow-md cursor-pointer'
+              : 'flow-card-quiet cursor-pointer'
         }`}
-        style={{ 
-          boxShadow: profile.isActive 
-            ? '0 0 0 1px var(--flow-accent-blue), var(--flow-shadow-md)' 
-            : 'var(--flow-shadow-sm)'
-        }}
       >
         {/* Status indicators - removed active dot */}
         {(profile.autoLaunchOnBoot || profile.autoSwitchTime) && (
@@ -130,15 +125,15 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
         )}
         
         <div className="flex items-start gap-3">
-          <div className={`p-2 rounded-lg transition-colors ${
-            profile.isActive ? 'bg-flow-accent-blue/20' : 'bg-flow-surface-elevated group-hover:bg-flow-surface'
+          <div className={`p-2 rounded-lg transition-colors duration-150 ${
+            profile.isActive ? 'bg-flow-accent-blue/15' : 'bg-flow-bg-tertiary/80 group-hover:bg-flow-surface'
           }`}>
             {getProfileIcon()}
           </div>
           
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
-              <h3 className={`font-medium truncate ${
+              <h3 className={`text-sm font-semibold tracking-tight truncate ${
                 profile.isActive ? 'text-flow-accent-blue' : 'text-flow-text-primary'
               }`}>{profile.name}</h3>
               {profile.hotkey && (
@@ -148,7 +143,7 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
               )}
             </div>
             
-            <p className="text-flow-text-muted text-xs mb-3 line-clamp-2">{profile.description}</p>
+            <p className="text-flow-text-muted text-[11px] leading-snug mb-3 line-clamp-2">{profile.description}</p>
             
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex items-center gap-1 text-flow-text-muted">
@@ -188,7 +183,7 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
               </button>
             
               {showActions && (
-                <div className="absolute top-6 right-0 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg z-10 py-1">
+                <div className="absolute top-6 right-0 w-48 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-10 py-1">
                   {onSettings && (
                     <button
                       onClick={(e) => handleActionClick(e, onSettings)}
@@ -244,8 +239,8 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
       
       {/* Hover details tooltip */}
       {showDetails && !showActions && !profile.isActive && (
-        <div className="absolute top-0 left-full ml-4 w-80 p-4 bg-flow-surface-elevated border border-flow-border rounded-xl shadow-lg z-50">
-          <h4 className="text-flow-text-primary font-medium mb-3">Apps &amp; Layout Preview</h4>
+        <div className="absolute top-0 left-full ml-4 w-80 p-4 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-50">
+          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-flow-text-secondary mb-3">Apps &amp; layout</h4>
           <div className="space-y-3 max-h-64 overflow-y-auto">
             {(Array.isArray(profile.monitors) ? profile.monitors : []).map((monitor, index) => (
               <div key={monitor?.id || index} className="space-y-2">
