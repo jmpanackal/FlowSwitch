@@ -155,14 +155,18 @@
   h6 { @apply text-xs tracking-tight; font-weight: 600; }
 }
 
-/* Eagle-inspired: region shells, softer chrome, shared rhythm */
+/* Eagle-inspired: region shells, softer chrome, shared rhythm.
+   Avoid opacity modifiers inside @apply with custom theme colors (PostCSS/Tailwind limitation). */
 @layer components {
   .flow-shell-titlebar {
-    @apply border-b border-flow-border/50 bg-flow-bg-secondary/90 backdrop-blur-md;
+    @apply border-b bg-flow-bg-secondary backdrop-blur-md;
+    border-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-bg-secondary) 92%, transparent);
   }
 
   .flow-shell-nav {
-    @apply bg-flow-bg-secondary border-r border-flow-border/50;
+    @apply bg-flow-bg-secondary border-r;
+    border-right-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
   }
 
   .flow-shell-canvas {
@@ -170,7 +174,8 @@
   }
 
   .flow-shell-inspector {
-    @apply bg-flow-bg-secondary border-l border-flow-border/50;
+    @apply bg-flow-bg-secondary border-l;
+    border-left-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
     box-shadow: -12px 0 40px -16px oklch(0.05 0.02 240 / 0.55);
   }
 
@@ -179,15 +184,20 @@
   }
 
   .flow-card-quiet {
-    @apply rounded-xl border border-flow-border/60 bg-flow-surface/90 transition-all duration-150 ease-out;
+    @apply rounded-xl transition-all duration-150 ease-out;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 62%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 92%, transparent);
   }
 
   .flow-card-quiet:hover {
-    @apply border-flow-border-accent/40 bg-flow-surface-elevated;
+    @apply bg-flow-surface-elevated;
+    border-color: color-mix(in oklch, var(--flow-border-accent) 42%, transparent);
   }
 
   .flow-segment-track {
-    @apply flex rounded-lg border border-flow-border/50 bg-flow-surface/70 p-0.5 gap-0.5;
+    @apply flex rounded-lg p-0.5 gap-0.5;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 72%, transparent);
   }
 
   .flow-segment-tab {
@@ -195,7 +205,10 @@
   }
 
   .flow-segment-tab-active {
-    @apply bg-flow-surface-elevated text-flow-text-primary shadow-sm ring-1 ring-flow-border-accent/20;
+    @apply bg-flow-surface-elevated text-flow-text-primary shadow-sm;
+    box-shadow:
+      0 1px 2px 0 rgb(0 0 0 / 0.06),
+      0 0 0 1px color-mix(in oklch, var(--flow-border-accent) 22%, transparent);
   }
 
   .flow-segment-tab-idle {
@@ -203,11 +216,14 @@
   }
 
   .flow-header-well {
-    @apply rounded-xl border border-flow-border/50 bg-flow-surface/60 shadow-flow-shadow-sm transition-all duration-150 ease-out;
+    @apply rounded-xl shadow-flow-shadow-sm transition-all duration-150 ease-out;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 62%, transparent);
   }
 
   .flow-header-well-interactive:hover {
-    @apply border-flow-border-accent/35 bg-flow-surface-elevated;
+    @apply bg-flow-surface-elevated;
+    border-color: color-mix(in oklch, var(--flow-border-accent) 38%, transparent);
   }
 }
 
