@@ -50,6 +50,8 @@ interface MinimizedAppsProps {
   onRemoveApp?: (appIndex: number) => void;
   onRemoveFile?: (fileIndex: number) => void;
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
+  /** Clicking the minimized strip background (not a tile) clears selection. */
+  onClearAppSelection?: () => void;
   isEditMode?: boolean;
   compact?: boolean;
 }
@@ -68,6 +70,7 @@ export function MinimizedApps({
   onRemoveApp,
   onRemoveFile,
   onCustomDragStart,
+  onClearAppSelection,
   isEditMode = false,
   compact = false,
 }: MinimizedAppsProps) {
@@ -430,9 +433,11 @@ export function MinimizedApps({
         app.name.toLowerCase().includes("browser");
 
       return (
-        <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48 max-w-xs">
-          <div className="text-sm font-medium text-flow-text-primary mb-1">{app.name}</div>
-          <div className="text-xs text-flow-text-muted mb-2">
+        <div className="inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-lg">
+          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate" title={app.name}>
+            {app.name}
+          </div>
+          <div className="text-xs text-flow-text-muted mb-2 whitespace-normal">
             Target: {monitorInfo.name}
             {monitorInfo.primary && (
               <span className="ml-1 text-flow-accent-blue">(Primary)</span>
@@ -476,8 +481,10 @@ export function MinimizedApps({
       const file = hoveredFileData;
       const monitorInfo = getMonitorInfo(file.targetMonitor || "monitor-1");
       return (
-        <div className="bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg p-3 min-w-48 max-w-xs">
-          <div className="text-sm font-medium text-flow-text-primary mb-1">{file.name}</div>
+        <div className="inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-lg">
+          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate" title={file.name}>
+            {file.name}
+          </div>
           <div className="text-xs text-flow-text-muted mb-1">
             Type: {file.type.toUpperCase()}
           </div>
@@ -530,6 +537,11 @@ export function MinimizedApps({
             : `border-dashed border-flow-border/50 bg-flow-surface/10 ${compact ? 'p-2.5' : 'p-4'}`
         }`}
         data-drop-target="minimized"
+        onClick={(e) => {
+          if (!onClearAppSelection) return;
+          if ((e.target as HTMLElement).closest("[data-minimized-tile]")) return;
+          onClearAppSelection();
+        }}
       >
         {totalItems > 0 ? (
           <div
@@ -546,6 +558,7 @@ export function MinimizedApps({
               return (
                 <div
                   key={`app-${index}`}
+                  data-minimized-tile=""
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
                   onMouseEnter={(e) => {
                     setHoveredApp(index);
@@ -571,9 +584,7 @@ export function MinimizedApps({
                   >
                     {/* App Icon Container */}
                     <div 
-                      className={`relative ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-lg flex items-center justify-center transition-all duration-200 ${
-                        isSelected ? 'scale-105' : 'group-hover:scale-105'
-                      }`}
+                      className={`relative ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-lg flex items-center justify-center transition-all duration-200 group-hover:scale-105`}
                       style={{ 
                         backgroundColor: `${app.color}20`,
                         border: `1px solid ${app.color}40`
@@ -620,11 +631,6 @@ export function MinimizedApps({
                           </div>
                         );
                       })()}
-                      
-                      {/* Selection Ring */}
-                      {isSelected && (
-                        <div className="absolute -inset-1 border-2 border-flow-accent-blue rounded-lg animate-pulse" />
-                      )}
                     </div>
 
                     {/* App Name */}
@@ -667,6 +673,7 @@ export function MinimizedApps({
 
             {hiddenAppsCount > 0 && (
               <div
+                data-minimized-tile=""
                 className={`relative flex shrink-0 flex-col items-center justify-center gap-1 p-1.5 rounded-lg border border-flow-border/60 bg-flow-surface/30 ${
                   compact ? 'w-[4.25rem]' : 'w-[5rem]'
                 }`}
@@ -690,6 +697,7 @@ export function MinimizedApps({
               return (
                 <div
                   key={`file-${index}`}
+                  data-minimized-tile=""
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
                   onMouseEnter={(e) => {
                     setHoveredApp(`file-${index}`);
@@ -715,20 +723,13 @@ export function MinimizedApps({
                   >
                     {/* File Icon Container */}
                     <div 
-                      className={`relative w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 ${
-                        isSelected ? 'scale-105' : 'group-hover:scale-105'
-                      }`}
+                      className="relative w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 group-hover:scale-105"
                       style={{ 
                         backgroundColor: `${fileColor}20`,
                         border: `1px solid ${fileColor}40`
                       }}
                     >
                       <FileIcon type={file.type} className="w-5 h-5" />
-                      
-                      {/* Selection Ring */}
-                      {isSelected && (
-                        <div className="absolute -inset-1 border-2 border-flow-accent-blue rounded-lg animate-pulse" />
-                      )}
                     </div>
 
                     {/* File Name */}
@@ -788,7 +789,7 @@ export function MinimizedApps({
     </div>
     {tooltipAnchor && hoverTipEl && createPortal(
       <div
-        className="pointer-events-none fixed z-[9999] w-max max-w-[min(20rem,calc(100vw-1.5rem))]"
+        className="pointer-events-none fixed z-[9999] w-max"
         style={{
           left: tooltipAnchor.x,
           top: tooltipAnchor.y,

@@ -271,6 +271,11 @@ export default function App() {
   }, [showProfileDropdown]);
 
   // SELECTED APP HANDLERS
+  const handleClearAppSelection = useCallback(() => {
+    setSelectedApp(null);
+    setRightSidebarOpen(false);
+  }, []);
+
   const handleAppSelect = useCallback(
     (
       appData: any,
@@ -3060,6 +3065,7 @@ export default function App() {
                   onMoveMinimizedFileToMonitor={() => {}} // REMOVED: No standalone minimized file to monitor moves
                   onCustomDragStart={handleCustomDragStart}
                   onAppSelect={handleAppSelect}
+                  onClearAppSelection={handleClearAppSelection}
                   onFileSelect={() => {}} // REMOVED: No standalone file selection
                   onAutoSnapApps={handleAutoSnapApps}
                   large={!rightSidebarOpen}

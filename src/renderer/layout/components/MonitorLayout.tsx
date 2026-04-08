@@ -109,6 +109,7 @@ interface MonitorLayoutProps {
   onAssociateFileWithApp?: (monitorId: string, appIndex: number, fileData: any) => void;
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   onAppSelect?: (appData: any, source: 'monitor' | 'minimized', monitorId?: string, appIndex?: number) => void;
+  onClearAppSelection?: () => void;
   onFileSelect?: (fileData: any, source: 'monitor' | 'minimized', monitorId?: string, fileIndex?: number) => void; // Legacy
   selectedApp?: any;
   onAutoSnapApps?: (monitorId: string, appUpdates: { appIndex: number; position: { x: number; y: number }; size: { width: number; height: number } }[]) => void;
@@ -359,6 +360,7 @@ export function MonitorLayout({
   onAssociateFileWithApp,
   onCustomDragStart,
   onAppSelect,
+  onClearAppSelection,
   onFileSelect, // Legacy
   selectedApp,
   onAutoSnapApps,
@@ -1467,6 +1469,7 @@ export function MonitorLayout({
             onRemoveFile={() => {}} // No more file removal
             monitors={monitors}
             compact={layoutColumnHeight > 0 && layoutColumnHeight < 760}
+            onClearAppSelection={onClearAppSelection}
           />
         </div>
       </div>
