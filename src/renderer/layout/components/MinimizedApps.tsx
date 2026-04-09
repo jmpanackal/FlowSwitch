@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
+import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal, AlertTriangle } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
@@ -28,6 +28,7 @@ interface MinimizedApp {
     useDefaultApp: boolean;
   }[];
 }
+
 
 interface MonitorInfo {
   id: string;
@@ -77,6 +78,11 @@ export function MinimizedApps({
   isEditMode = false,
   compact = false,
 }: MinimizedAppsProps) {
+  const [pendingRemove, setPendingRemove] = useState<{
+    kind: 'app' | 'file';
+    index: number;
+    name: string;
+  } | null>(null);
   const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
   /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -186,12 +192,7 @@ export function MinimizedApps({
   // Handle delete with confirmation
   const handleDelete = (e: React.MouseEvent, appIndex: number, appName: string) => {
     e.stopPropagation();
-    
-    if (window.confirm(`Are you sure you want to remove "${appName}" from minimized apps?`)) {
-      if (onRemoveApp) {
-        onRemoveApp(appIndex);
-      }
-    }
+    setPendingRemove({ kind: 'app', index: appIndex, name: appName });
   };
 
   // Handle maximize - restore app to its remembered monitor
@@ -387,12 +388,21 @@ export function MinimizedApps({
   // Handle file delete with confirmation
   const handleFileDelete = (e: React.MouseEvent, fileIndex: number, fileName: string) => {
     e.stopPropagation();
-    
-    if (window.confirm(`Are you sure you want to remove "${fileName}" from minimized files?`)) {
-      if (onRemoveFile) {
-        onRemoveFile(fileIndex);
-      }
+    setPendingRemove({ kind: 'file', index: fileIndex, name: fileName });
+  };
+
+  const handleConfirmRemove = () => {
+    if (!pendingRemove) return;
+    if (pendingRemove.kind === 'app') {
+      onRemoveApp?.(pendingRemove.index);
+    } else {
+      onRemoveFile?.(pendingRemove.index);
     }
+    setPendingRemove(null);
+  };
+
+  const handleCancelRemove = () => {
+    setPendingRemove(null);
   };
 
   // Handle file maximize - restore file to its remembered monitor
@@ -813,6 +823,46 @@ export function MinimizedApps({
         }}
       >
         <div className="pointer-events-auto">{hoverTipEl}</div>
+      </div>,
+      document.body,
+    )}
+    {pendingRemove && createPortal(
+      <div
+        className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 backdrop-blur-sm px-4"
+        onClick={handleCancelRemove}
+      >
+        <div
+          className="w-full max-w-md rounded-xl border border-flow-border bg-flow-surface-elevated shadow-2xl"
+          onClick={(e) => e.stopPropagation()}
+        >
+          <div className="flex items-start gap-3 p-4 border-b border-flow-border/60">
+            <div className="mt-0.5 w-8 h-8 rounded-full bg-flow-accent-red/15 text-flow-accent-red flex items-center justify-center">
+              <AlertTriangle className="w-4 h-4" />
+            </div>
+            <div>
+              <h4 className="text-sm font-semibold text-flow-text-primary">Remove minimized item?</h4>
+              <p className="mt-1 text-xs text-flow-text-muted">
+                "{pendingRemove.name}" will be removed from minimized items.
+              </p>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 p-3">
+            <button
+              type="button"
+              onClick={handleCancelRemove}
+              className="px-3 py-1.5 rounded-md border border-flow-border text-flow-text-primary hover:bg-flow-surface transition-colors"
+            >
+              Cancel
+            </button>
+            <button
+              type="button"
+              onClick={handleConfirmRemove}
+              className="px-3 py-1.5 rounded-md bg-flow-accent-red text-white hover:bg-red-600 transition-colors"
+            >
+              Remove
+            </button>
+          </div>
+        </div>
       </div>,
       document.body,
     )}
