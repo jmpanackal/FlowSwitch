@@ -553,6 +553,13 @@ export function AppFileWindow({
       type: 'app',
       monitorId: monitorId,
       appIndex: itemIndex,
+      name: item.name,
+      icon: (item as AppItem).icon,
+      iconPath: (item as AppItem).iconPath ?? null,
+      executablePath: (item as AppItem).executablePath ?? null,
+      shortcutPath: (item as AppItem).shortcutPath ?? null,
+      launchUrl: (item as AppItem).launchUrl ?? null,
+      color: (item as AppItem).color,
       app: {
         name: item.name,
         icon: (item as AppItem).icon,
@@ -581,12 +588,16 @@ export function AppFileWindow({
     }
     
     const globalDragEvent = new CustomEvent('flowswitch:dragstart', {
-      detail: dragData,
+      detail: {
+        dragData,
+        startPos: { x: e.clientX, y: e.clientY },
+      },
       bubbles: true
     });
     
     document.dispatchEvent(globalDragEvent);
     (window as any).flowswitchDragData = dragData;
+    onDragStart();
   };
 
   const handleDragEndEvent = (e: React.DragEvent) => {
@@ -598,6 +609,8 @@ export function AppFileWindow({
     
     document.dispatchEvent(globalDragEndEvent);
     delete (window as any).flowswitchDragData;
+    // Must run so MonitorLayout clears localDragState (snap/drag chrome) after HTML5 drag.
+    onDragEnd();
   };
 
   // ENHANCED MOUSE SYSTEM with click vs drag detection
@@ -667,14 +680,26 @@ export function AppFileWindow({
     
     console.log('🖱️ MOUSE UP - Processing click/drag result');
     
-    // Clear the drag timer
     if (dragTimerRef.current) {
       clearTimeout(dragTimerRef.current);
       dragTimerRef.current = null;
     }
-    
-    // If drag wasn't initiated and mouse didn't move much, it's a click
-    if (!mouseStateRef.current.dragInitiated && !mouseStateRef.current.hasMoved) {
+
+    const hadDragInitiated = mouseStateRef.current.dragInitiated;
+
+    document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
+    document.removeEventListener('mouseup', handleMouseUpForClickDetection);
+    document.body.style.userSelect = '';
+
+    mouseStateRef.current.isMouseDown = false;
+
+    // initiateDrag() swaps to handleGlobalMouseUp for mouseup; this handler only runs when
+    // custom drag never attached document listeners (e.g. failed lookup).
+    if (hadDragInitiated && !dragStateRef.current.isDragging) {
+      mouseStateRef.current.dragInitiated = false;
+    }
+
+    if (!hadDragInitiated && !mouseStateRef.current.hasMoved) {
       console.log('🎯 CLICK DETECTED - Triggering selection');
       if (isFile && onFileSelect) {
         onFileSelect();
@@ -682,20 +707,9 @@ export function AppFileWindow({
         onAppSelect();
       }
     }
-    
-    // Clean up mouse state
-    mouseStateRef.current.isMouseDown = false;
+
+    mouseStateRef.current.hasMoved = false;
     mouseStateRef.current.dragInitiated = false;
-    
-    // Remove global listeners
-    document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
-    document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = '';
-    
-    // If drag was initiated, handle drag end
-    if (mouseStateRef.current.dragInitiated && dragStateRef.current.isDragging) {
-      handleGlobalMouseUp(e);
-    }
   };
 
   const initiateDrag = (clientX: number, clientY: number) => {
@@ -709,7 +723,10 @@ export function AppFileWindow({
     }
     
     const monitorContainer = document.elementFromPoint(clientX, clientY)?.closest('.monitor-container');
-    if (!monitorContainer) return;
+    if (!monitorContainer) {
+      mouseStateRef.current.dragInitiated = false;
+      return;
+    }
     
     dragStateRef.current = {
       isDragging: true,
@@ -910,26 +927,55 @@ export function AppFileWindow({
     switch (visualState) {
       case 'snapping':
         return {
-          border: 'border-green-400',
-          background: 'bg-green-400/20',
-          shadow: 'shadow-lg shadow-green-400/50'
+          ring: 'ring-flow-accent-blue/90',
+          background: 'rgba(56, 189, 248, 0.18)',
+          innerGlow: 'shadow-md shadow-flow-accent-blue/20',
         };
       case 'dragging':
         return {
-          border: 'border-blue-400',
-          background: 'bg-blue-400/10',
-          shadow: 'shadow-lg shadow-blue-400/50'
+          ring: 'ring-flow-accent-blue/70',
+          background: 'rgba(56, 189, 248, 0.1)',
+          innerGlow: 'shadow-sm shadow-flow-accent-blue/15',
         };
       default:
         return {
-          border: isEditable ? 'border-white/30 hover:border-white/60' : 'border-white/20',
+          ring: isEditable ? 'ring-white/30 hover:ring-white/55' : 'ring-white/20',
           background: `${mainColor}20`,
-          shadow: ''
+          innerGlow: '',
         };
     }
   };
 
   const styling = getStyling();
+
+  /** Match monitor preview bezel (rounded-xl) on corners that touch the screen edge. */
+  const monitorTileRadiusClass = (() => {
+    if (isFile) return 'rounded-md';
+    const { x, y } = item.position;
+    const { width: w, height: h } = item.size;
+    const left = x - w / 2;
+    const right = x + w / 2;
+    const top = y - h / 2;
+    const bottom = y + h / 2;
+    const e = 1.25;
+    const touchL = left <= e;
+    const touchR = right >= 100 - e;
+    const touchT = top <= e;
+    const touchB = bottom >= 100 - e;
+    if (touchL && touchR && touchT && touchB) return 'rounded-xl';
+    const parts: string[] = [];
+    if (touchL && touchT) parts.push('rounded-tl-xl');
+    if (touchR && touchT) parts.push('rounded-tr-xl');
+    if (touchL && touchB) parts.push('rounded-bl-xl');
+    if (touchR && touchB) parts.push('rounded-br-xl');
+    return parts.length > 0 ? parts.join(' ') : 'rounded-none';
+  })();
+
+  /** Near-fullscreen / edge-flush: remove default app-window-content inset so tiles meet the bezel. */
+  const flushContentInset =
+    !isFile &&
+    item.size.width >= 98 &&
+    item.size.height >= 98;
 
   // Smart text truncation for names
   const truncateText = (text: string, maxLength: number = 12) => {
@@ -967,8 +1013,8 @@ export function AppFileWindow({
     <>
       <div 
         className={`absolute transition-all duration-200 ${
-          isCurrentlyDragging ? 'opacity-90 scale-105 z-50' : 'z-10'
-        } ${styling.shadow}`}
+          isCurrentlyDragging ? 'opacity-90 z-50' : 'z-10'
+        }`}
         style={{
           left: `${item.position.x - item.size.width/2}%`,
           top: `${item.position.y - item.size.height/2}%`,
@@ -987,12 +1033,15 @@ export function AppFileWindow({
       >
         <div 
           ref={mainWindowRef}
-          className={`relative w-full h-full rounded-lg border-2 transition-all duration-200 select-none ${
+          className={`relative w-full h-full ${monitorTileRadiusClass} ring-1 ring-inset transition-all duration-200 select-none ${
             isEditable ? 'cursor-move' : 'cursor-pointer'
-          } ${isSelected 
-            ? 'border-flow-accent-blue shadow-lg shadow-flow-accent-blue/50 ring-2 ring-flow-accent-blue/60 scale-[1.02]' 
-            : styling.border
-          }`}
+          } ${
+            isCurrentlyDragging
+              ? `${styling.ring} ${styling.innerGlow}`
+              : isSelected
+                ? 'ring-2 ring-inset ring-flow-accent-blue/55'
+                : styling.ring
+          } ${!isCurrentlyDragging && !isSelected ? styling.innerGlow : ''}`}
           style={{ 
             backgroundColor: styling.background,
             backdropFilter: 'blur(8px)'
@@ -1004,7 +1053,10 @@ export function AppFileWindow({
           title={isFile ? getTooltipText() : undefined}
         >
           {/* FIXED: Simple content centering */}
-          <div className="app-window-content">
+          <div
+            className="app-window-content"
+            style={flushContentInset ? { inset: 0 } : undefined}
+          >
             {renderContent()}
           </div>
           
@@ -1024,36 +1076,6 @@ export function AppFileWindow({
             </div>
           )}
 
-          {/* Drag state indicator */}
-          {isCurrentlyDragging && (
-            <div className="absolute -inset-1 border-2 rounded-lg animate-pulse">
-              <div className="absolute inset-0 flex items-center justify-center">
-                <div className={`text-xs font-bold px-3 py-1 rounded-full shadow-lg border backdrop-blur-sm ${
-                  visualState === 'snapping'
-                    ? 'text-green-200 bg-green-900/90 border-green-300/50'
-                    : 'text-blue-200 bg-blue-900/90 border-blue-300/50'
-                }`}>
-                  {visualState === 'snapping' && '🪟 SNAP ZONE!'}
-                  {visualState === 'dragging' && '🎯 DRAGGING'}
-                </div>
-              </div>
-              
-              {/* Corner indicators */}
-              <div className={`absolute -top-2 -left-2 w-4 h-4 rounded-full animate-ping ${
-                visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-              }`} />
-              <div className={`absolute -top-2 -right-2 w-4 h-4 rounded-full animate-ping ${
-                visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-              }`} />
-              <div className={`absolute -bottom-2 -left-2 w-4 h-4 rounded-full animate-ping ${
-                visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-              }`} />
-              <div className={`absolute -bottom-2 -right-2 w-4 h-4 rounded-full animate-ping ${
-                visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-              }`} />
-            </div>
-          )}
-          
           {/* Settings and Actions */}
           {(isHovered || showSettings) && isEditable && !isCurrentlyDragging && (
             <div className="absolute -top-2 -right-2 flex items-center gap-1 z-20">
