@@ -7,6 +7,7 @@ import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
+import { matchesMonitorAppSelection } from "../utils/appSelection";
 
 interface App {
   name: string;
@@ -389,6 +390,16 @@ export function MonitorLayout({
     lastValidSnapState: null
   });
 
+  const [externalSnapState, setExternalSnapState] = useState<{
+    monitorId: string | null;
+    position: { x: number; y: number } | null;
+    snapZone: SnapZone | null;
+  }>({
+    monitorId: null,
+    position: null,
+    snapZone: null,
+  });
+
   const lastValidSnapStateRef = useRef<{
     snapZone: SnapZone | null;
     conflictItem: { itemIndex: number; item: App; itemType: 'app' } | null;
@@ -715,7 +726,7 @@ export function MonitorLayout({
   };
 
   // Get available snap zones based on app count
-  const getSnapZones = (monitor: any): SnapZone[] => {
+  const getSnapZones = (monitor: any, appCountOverride?: number): SnapZone[] => {
     if (monitor.predefinedLayout) {
       const layouts = monitor.orientation === 'portrait' ? PORTRAIT_LAYOUTS : LANDSCAPE_LAYOUTS;
       const layout = layouts[monitor.predefinedLayout as keyof typeof layouts];
@@ -723,11 +734,11 @@ export function MonitorLayout({
     }
     
     // Use total app count for dynamic layouts
-    const totalItems = monitor.apps.length;
+    const totalItems = typeof appCountOverride === 'number' ? appCountOverride : monitor.apps.length;
     const isPortrait = monitor.orientation === 'portrait';
     
     if (isPortrait) {
-      if (totalItems === 1) {
+      if (totalItems <= 1) {
         // Match 'fullscreen' layout exactly
         return [
           { id: 'full', position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }
@@ -755,7 +766,7 @@ export function MonitorLayout({
         ];
       }
     } else {
-      if (totalItems === 1) {
+      if (totalItems <= 1) {
         // Match 'fullscreen' layout exactly
         return [
           { id: 'full', position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }
@@ -802,6 +813,117 @@ export function MonitorLayout({
     
     return null;
   };
+
+  const findClosestZone = (zones: SnapZone[], position: { x: number; y: number }): SnapZone | null => {
+    if (zones.length === 0) return null;
+    let best: SnapZone | null = null;
+    let bestDistance = Number.POSITIVE_INFINITY;
+
+    for (const zone of zones) {
+      const distance = Math.sqrt(
+        Math.pow(position.x - zone.position.x, 2) +
+        Math.pow(position.y - zone.position.y, 2)
+      );
+      if (distance < bestDistance) {
+        bestDistance = distance;
+        best = zone;
+      }
+    }
+
+    return best;
+  };
+
+  // Sidebar/minimized drags must not leave in-monitor drag state (was snapping wrong monitor).
+  useEffect(() => {
+    if (!dragState?.isDragging || !dragState.dragData || dragState.dragData.type !== 'app') {
+      return;
+    }
+    const src = dragState.dragData.source;
+    if (src !== 'sidebar' && src !== 'minimized') return;
+
+    lastValidSnapStateRef.current = null;
+    setLocalDragState({
+      isDragging: false,
+      draggedItem: null,
+      currentMonitorId: null,
+      snapZone: null,
+      conflictItem: null,
+      displacementZone: null,
+      lastValidSnapState: null,
+    });
+  }, [dragState?.isDragging, dragState?.dragData?.source, dragState?.dragData?.type]);
+
+  useEffect(() => {
+    // Pointer-driven drop preview for any app drag (including cross-monitor while localDrag is active).
+    if (!isEditMode) {
+      setExternalSnapState({ monitorId: null, position: null, snapZone: null });
+      return;
+    }
+
+    if (!dragState?.isDragging || !dragState.dragData || dragState.dragData.type !== 'app') {
+      setExternalSnapState({ monitorId: null, position: null, snapZone: null });
+      return;
+    }
+
+    const { x: clientX, y: clientY } = dragState.currentPosition;
+    const stack = document.elementsFromPoint(clientX, clientY);
+    let monitorContainer: HTMLElement | null = null;
+    let monitorId: string | null = null;
+
+    for (const node of stack) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.closest('[data-app-drag-overlay="true"]')) continue;
+      const mc = node.closest('.monitor-container');
+      if (mc instanceof HTMLElement) {
+        const id = mc.getAttribute('data-monitor-id');
+        if (id) {
+          monitorContainer = mc;
+          monitorId = id;
+          break;
+        }
+      }
+    }
+
+    if (!monitorContainer || !monitorId) {
+      setExternalSnapState({ monitorId: null, position: null, snapZone: null });
+      return;
+    }
+
+    const rect = monitorContainer.getBoundingClientRect();
+    const width = Math.max(1, rect.width);
+    const height = Math.max(1, rect.height);
+    const xPct = ((clientX - rect.left) / width) * 100;
+    const yPct = ((clientY - rect.top) / height) * 100;
+    const position = {
+      x: Math.max(0, Math.min(100, xPct)),
+      y: Math.max(0, Math.min(100, yPct)),
+    };
+
+    const monitor = monitors.find((m) => m.id === monitorId);
+    if (!monitor) {
+      setExternalSnapState({ monitorId: null, position: null, snapZone: null });
+      return;
+    }
+
+    const source = dragState.dragData?.source;
+    const sourceMonitorId = dragState.dragData?.sourceMonitorId || dragState.dragData?.monitorId || null;
+    const isIncomingApp =
+      source === 'sidebar' ||
+      source === 'minimized' ||
+      (source === 'monitor' && sourceMonitorId && sourceMonitorId !== monitor.id);
+    const prospectiveAppCount = monitor.apps.length + (isIncomingApp ? 1 : 0);
+
+    const zones = getSnapZones(monitor, prospectiveAppCount);
+    const snapZone = findClosestZone(zones, position);
+    setExternalSnapState({ monitorId, position, snapZone });
+  }, [
+    dragState?.isDragging,
+    dragState?.dragData,
+    dragState?.currentPosition?.x,
+    dragState?.currentPosition?.y,
+    isEditMode,
+    monitors,
+  ]);
 
   // Check if item is positioned in a specific zone
   const isItemInZone = (item: App, zone: SnapZone): boolean => {
@@ -1097,35 +1219,92 @@ export function MonitorLayout({
     onAutoSnapApps(monitorId, appUpdates);
   };
 
-  // Render snap zones
+  /** When dragging an app onto the layout from sidebar/minimized/another monitor, zone grids use appCount+1. */
+  const getProspectiveAppCountForDropZones = (monitor: any): number | undefined => {
+    const globalAppDragActive = !!(dragState?.isDragging && dragState.dragData && dragState.dragData.type === 'app');
+    if (!globalAppDragActive) return undefined;
+
+    const source = dragState.dragData?.source;
+    const sourceMonitorId = dragState.dragData?.sourceMonitorId || dragState.dragData?.monitorId || null;
+    const base = monitor.apps.length;
+    if (source === 'sidebar' || source === 'minimized') {
+      return base + 1;
+    }
+    if (source === 'monitor' && sourceMonitorId && sourceMonitorId !== monitor.id) {
+      return base + 1;
+    }
+    return undefined;
+  };
+
+  const appDragZonesActive =
+    isEditMode && (localDragState.isDragging || !!(dragState?.isDragging && dragState.dragData?.type === 'app'));
+
+  // Render snap zones — show on every monitor while dragging an app (subtle); stronger on hovered target zone
   const renderSnapZones = (monitor: any) => {
-    if (!isEditMode || !localDragState.isDragging || !localDragState.draggedItem || 
-        localDragState.draggedItem.monitorId !== monitor.id || localDragState.currentMonitorId !== monitor.id) {
+    const globalAppDragActive = !!(dragState?.isDragging && dragState.dragData && dragState.dragData.type === 'app');
+
+    if (!isEditMode) {
       return null;
     }
-    
-    const zones = getSnapZones(monitor);
-    
+
+    if (!localDragState.isDragging && !globalAppDragActive) {
+      return null;
+    }
+
+    const prospective = getProspectiveAppCountForDropZones(monitor);
+    const zones = prospective !== undefined ? getSnapZones(monitor, prospective) : getSnapZones(monitor);
+
     return zones.map((zone) => {
-      const currentSnapZone = localDragState.snapZone || localDragState.lastValidSnapState?.snapZone || lastValidSnapStateRef.current?.snapZone;
-      const currentConflictItem = localDragState.conflictItem || localDragState.lastValidSnapState?.conflictItem || lastValidSnapStateRef.current?.conflictItem;
-      const currentDisplacementZone = localDragState.displacementZone || localDragState.lastValidSnapState?.displacementZone || lastValidSnapStateRef.current?.displacementZone;
-      
-      const isActiveZone = currentSnapZone?.id === zone.id;
-      const hasConflict = currentConflictItem && isActiveZone;
-      const hasDisplacement = currentDisplacementZone && isActiveZone;
-      
+      const localCurrentSnapZone = localDragState.snapZone || localDragState.lastValidSnapState?.snapZone || lastValidSnapStateRef.current?.snapZone;
+      const localCurrentConflictItem = localDragState.conflictItem || localDragState.lastValidSnapState?.conflictItem || lastValidSnapStateRef.current?.conflictItem;
+      const localCurrentDisplacementZone = localDragState.displacementZone || localDragState.lastValidSnapState?.displacementZone || lastValidSnapStateRef.current?.displacementZone;
+
+      const globalAppDrag = !!(dragState?.isDragging && dragState.dragData?.type === 'app');
+      const hasPointerDrop =
+        globalAppDrag &&
+        externalSnapState.monitorId != null &&
+        externalSnapState.snapZone != null;
+
+      const pointerActive =
+        hasPointerDrop &&
+        externalSnapState.monitorId === monitor.id &&
+        externalSnapState.snapZone?.id === zone.id;
+
+      const localActive =
+        localDragState.isDragging &&
+        localDragState.draggedItem?.monitorId === monitor.id &&
+        localCurrentSnapZone?.id === zone.id;
+
+      const isActiveZone = hasPointerDrop
+        ? pointerActive
+        : localActive;
+
+      const hasConflict =
+        localDragState.isDragging &&
+        localCurrentConflictItem &&
+        isActiveZone &&
+        localDragState.draggedItem?.monitorId === monitor.id;
+      const hasDisplacement =
+        localDragState.isDragging &&
+        localCurrentDisplacementZone &&
+        isActiveZone &&
+        localDragState.draggedItem?.monitorId === monitor.id;
+
+      const activeClasses = hasConflict && !hasDisplacement
+        ? 'ring-1 ring-flow-accent-blue border-flow-accent-blue/90 bg-flow-accent-blue/18 shadow-[0_0_0_1px_rgba(56,189,248,0.5)]'
+        : 'ring-1 ring-flow-accent-blue border-flow-accent-blue bg-flow-accent-blue/14 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]';
+
+      const zoneFlush =
+        zone.size.width >= 99 && zone.size.height >= 99;
+      const zoneRadius = zoneFlush ? 'rounded-none' : 'rounded-lg';
+
       return (
         <div
           key={zone.id}
-          className={`absolute border-2 rounded-lg transition-all duration-200 z-40 ${
+          className={`absolute ${zoneRadius} transition-all duration-200 z-40 border pointer-events-none ${
             isActiveZone
-              ? hasConflict
-                ? hasDisplacement
-                  ? 'border-yellow-400 bg-yellow-400/25 shadow-lg shadow-yellow-400/60 scale-[1.02]'
-                  : 'border-red-400 bg-red-400/25 shadow-lg shadow-red-400/60 scale-[1.02]'
-                : 'border-green-400 bg-green-400/30 shadow-lg shadow-green-400/60 scale-[1.02]'
-              : 'border-blue-400/60 bg-blue-400/10 border-dashed'
+              ? activeClasses
+              : 'border-flow-accent-blue/45 bg-flow-accent-blue/[0.08] shadow-[inset_0_0_0_1px_rgba(255,255,255,0.05)]'
           }`}
           style={{
             left: `${zone.position.x - zone.size.width/2}%`,
@@ -1133,31 +1312,7 @@ export function MonitorLayout({
             width: `${zone.size.width}%`,
             height: `${zone.size.height}%`,
           }}
-        >
-          <div className="absolute inset-0 flex items-center justify-center">
-            <div className={`text-xs font-bold px-3 py-1.5 rounded-lg backdrop-blur-sm transition-all ${
-              isActiveZone
-                ? hasConflict
-                  ? hasDisplacement
-                    ? 'text-yellow-200 bg-yellow-900/80 border border-yellow-300/50 shadow-md'
-                    : 'text-red-200 bg-red-900/80 border border-red-300/50 shadow-md'
-                  : 'text-green-200 bg-green-900/80 border border-green-300/50 shadow-md'
-                : 'text-white bg-black/60 border border-white/20'
-            }`}>
-              {zone.id.replace('-', ' ')}
-              {isActiveZone && (
-                <div className="text-xs mt-1 font-bold animate-pulse">
-                  {hasConflict 
-                    ? hasDisplacement 
-                      ? '🔄 DISPLACE!'
-                      : '❌ NO SPACE!'
-                    : '🪟 SNAP!'
-                  }
-                </div>
-              )}
-            </div>
-          </div>
-        </div>
+        />
       );
     });
   };
@@ -1315,12 +1470,16 @@ export function MonitorLayout({
                   
                   {/* Monitor display - Enhanced sizing */}
                   <div 
-                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl ${densePreviewMode ? 'p-1.5' : compactPreviewMode ? 'p-2' : 'p-3'} ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 border-white/20`}
+                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-0 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 ${
+                      appDragZonesActive
+                        ? 'border-flow-accent-blue/40 ring-1 ring-flow-accent-blue/20 shadow-[inset_0_0_20px_rgba(56,189,248,0.06)]'
+                        : 'border-white/20'
+                    }`}
                     data-drop-target="monitor"
                     data-target-id={monitor.id}
                     data-monitor-id={monitor.id}
                   >
-                    <div className="relative w-full h-full bg-black/60 rounded-lg border border-white/10 overflow-hidden">
+                    <div className="relative h-full w-full min-h-0 bg-black/60 overflow-hidden rounded-xl ring-1 ring-inset ring-white/10">
                       
                       {/* Monitor-Specific Snap Zones */}
                       {renderSnapZones(monitor)}
@@ -1339,7 +1498,11 @@ export function MonitorLayout({
                         {/* Render Apps Only */}
                         {monitor.apps.map((app: App, appIndex: number) => (
                           <AppFileWindow
-                            key={`app-${monitor.id}-${appIndex}`}
+                            key={
+                              app.instanceId
+                                ? `app-${monitor.id}-${app.instanceId}`
+                                : `app-${monitor.id}-i${appIndex}-${app.name}`
+                            }
                             item={{
                               type: 'app',
                               name: app.name,
@@ -1370,6 +1533,13 @@ export function MonitorLayout({
                               const dragData = {
                                 source: 'monitor',
                                 type: 'app',
+                                name: app.name,
+                                icon: app.icon,
+                                iconPath: app.iconPath ?? null,
+                                executablePath: app.executablePath ?? null,
+                                shortcutPath: app.shortcutPath ?? null,
+                                launchUrl: app.launchUrl ?? null,
+                                color: app.color,
                                 sourceMonitorId: monitor.id,
                                 appIndex,
                                 app: {
@@ -1417,7 +1587,14 @@ export function MonitorLayout({
                               localDragState.snapZone !== null &&
                               localDragState.draggedItem?.monitorId === monitor.id &&
                               localDragState.draggedItem?.itemIndex === appIndex &&
-                              localDragState.draggedItem?.itemType === 'app'
+                              localDragState.draggedItem?.itemType === 'app' &&
+                              !(
+                                dragState?.isDragging &&
+                                dragState.dragData?.type === 'app' &&
+                                externalSnapState.monitorId != null &&
+                                localDragState.draggedItem?.monitorId &&
+                                externalSnapState.monitorId !== localDragState.draggedItem.monitorId
+                              )
                             }
                             isConflicting={
                               localDragState.conflictItem?.itemIndex === appIndex &&
@@ -1428,13 +1605,12 @@ export function MonitorLayout({
                               localDragState.conflictItem?.itemType === 'app' &&
                               localDragState.displacementZone !== null
                             }
-                            isSelected={
-                              selectedApp && 
-                              selectedApp.source === 'monitor' &&
-                              selectedApp.monitorId === monitor.id &&
-                              selectedApp.appIndex === appIndex &&
-                              (selectedApp.type === 'app' || selectedApp.type === 'browser')
-                            }
+                            isSelected={matchesMonitorAppSelection(
+                              selectedApp,
+                              monitor.id,
+                              appIndex,
+                              app,
+                            )}
                           />
                         ))}
                       </div>
@@ -1460,6 +1636,7 @@ export function MonitorLayout({
             browserTabs={browserTabs}
             isEditMode={isEditMode}
             selectedApp={selectedApp}
+            dragState={dragState || null}
             onCustomDragStart={onCustomDragStart}
             onAppSelect={onAppSelect}
             onFileSelect={() => {}} // No more file selection

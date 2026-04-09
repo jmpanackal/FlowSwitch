@@ -4,6 +4,7 @@ import { safeIconSrc } from "../../utils/safeIconSrc";
 import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
+import { matchesMinimizedAppSelection } from "../utils/appSelection";
 
 interface MinimizedApp {
   name: string;
@@ -42,6 +43,7 @@ interface MinimizedAppsProps {
   monitors?: MonitorInfo[];
   browserTabs?: any[];
   selectedApp?: any;
+  dragState?: { isDragging: boolean; dragData: any } | null;
   onAppSettings?: (app: MinimizedApp) => void;
   onAppSelect?: (appData: any, source: 'monitor' | 'minimized', monitorId?: string, appIndex?: number) => void;
   onFileSelect?: (fileData: any, source: 'monitor' | 'minimized', monitorId?: string, fileIndex?: number) => void;
@@ -62,6 +64,7 @@ export function MinimizedApps({
   monitors = [], 
   browserTabs = [],
   selectedApp,
+  dragState,
   onAppSettings, 
   onAppSelect,
   onFileSelect,
@@ -301,7 +304,15 @@ export function MinimizedApps({
       const app = mouseStateRef.current.itemData;
       const dragData = {
         source: 'minimized',
+        type: 'app',
         appIndex: mouseStateRef.current.itemIndex,
+        name: app.name,
+        icon: app.icon,
+        iconPath: app.iconPath ?? null,
+        executablePath: app.executablePath ?? null,
+        shortcutPath: app.shortcutPath ?? null,
+        launchUrl: app.launchUrl ?? null,
+        color: app.color,
         app: {
           name: app.name,
           icon: app.icon,
@@ -535,6 +546,10 @@ export function MinimizedApps({
           totalItems > 0 
             ? `border-flow-border bg-flow-surface/30 ${compact ? 'p-2' : 'p-3'}` 
             : `border-dashed border-flow-border/50 bg-flow-surface/10 ${compact ? 'p-2.5' : 'p-4'}`
+        } ${
+          dragState?.isDragging && dragState.dragData?.type === 'app'
+            ? 'ring-2 ring-flow-accent-blue/40 border-flow-accent-blue/60 bg-flow-accent-blue/5'
+            : ''
         }`}
         data-drop-target="minimized"
         onClick={(e) => {
@@ -550,14 +565,15 @@ export function MinimizedApps({
             {/* Render Apps — fixed-width tiles so a single app never stretches to full row width */}
             {visibleApps.map((app, index) => {
               const monitorInfo = getMonitorInfo(app.targetMonitor || 'monitor-1');
-              const isSelected = selectedApp && 
-                selectedApp.source === 'minimized' &&
-                selectedApp.appIndex === index &&
-                (selectedApp.type === 'app' || selectedApp.type === 'browser');
+              const isSelected = matchesMinimizedAppSelection(
+                selectedApp,
+                index,
+                app,
+              );
               
               return (
                 <div
-                  key={`app-${index}`}
+                  key={app.instanceId ? `min-${app.instanceId}` : `min-${index}-${app.name}`}
                   data-minimized-tile=""
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
                   onMouseEnter={(e) => {

@@ -236,6 +236,74 @@ export default function App() {
   const dragStateRef = useRef<DragState>(dragState);
   dragStateRef.current = dragState;
 
+  useEffect(() => {
+    const handleNativeDragStart = (event: Event) => {
+      const custom = event as CustomEvent<any>;
+      const detail = custom.detail;
+      const nativeDragData = detail?.dragData ?? detail;
+      const startPos = detail?.startPos ?? null;
+
+      if (!nativeDragData) return;
+      if (!isEditMode) {
+        setIsEditMode(true);
+      }
+
+      // Only enable the overlay/zone highlighting for app drags.
+      if (nativeDragData.type !== "app") return;
+
+      const initialPos = startPos ?? { x: 0, y: 0 };
+      setDragState({
+        isDragging: true,
+        dragData: nativeDragData,
+        startPosition: initialPos,
+        currentPosition: initialPos,
+        sourceType: "monitor",
+        sourceId: String(nativeDragData.monitorId || nativeDragData.sourceMonitorId || ""),
+        dragPreview: null,
+      });
+    };
+
+    const handleNativeDragEnd = () => {
+      // Only clear if we were in a native-drag-driven state (no mouse listeners).
+      if (!dragStateRef.current.isDragging) return;
+      if (!dragStateRef.current.dragData) return;
+      if (dragStateRef.current.dragData.type !== "app") return;
+
+      setDragState({
+        isDragging: false,
+        dragData: null,
+        startPosition: { x: 0, y: 0 },
+        currentPosition: { x: 0, y: 0 },
+        sourceType: null,
+        sourceId: null,
+        dragPreview: null,
+      });
+    };
+
+    const handleDragOver = (e: DragEvent) => {
+      if (!dragStateRef.current.isDragging) return;
+      if (!dragStateRef.current.dragData) return;
+      if (dragStateRef.current.dragData.type !== "app") return;
+
+      // Keep drop targets active and update overlay/zone position.
+      e.preventDefault();
+      setDragState((prev) => ({
+        ...prev,
+        currentPosition: { x: e.clientX, y: e.clientY },
+      }));
+    };
+
+    document.addEventListener("flowswitch:dragstart", handleNativeDragStart as EventListener);
+    document.addEventListener("flowswitch:dragend", handleNativeDragEnd as EventListener);
+    document.addEventListener("dragover", handleDragOver);
+
+    return () => {
+      document.removeEventListener("flowswitch:dragstart", handleNativeDragStart as EventListener);
+      document.removeEventListener("flowswitch:dragend", handleNativeDragEnd as EventListener);
+      document.removeEventListener("dragover", handleDragOver);
+    };
+  }, [isEditMode]);
+
   const currentProfile = profiles.find(
     (p) => p.id === selectedProfile,
   ) || null;
@@ -368,6 +436,49 @@ export default function App() {
     },
     [currentProfile],
   );
+
+  // After moves/reorders, list indices change; keep selection index aligned with instanceId.
+  useEffect(() => {
+    if (!selectedApp || !currentProfile) return;
+
+    if (
+      selectedApp.source === "monitor" &&
+      selectedApp.monitorId &&
+      (selectedApp.type === "app" || selectedApp.type === "browser")
+    ) {
+      const instanceId = selectedApp.data?.instanceId;
+      if (instanceId == null || instanceId === "") return;
+
+      const monitor = currentProfile.monitors.find(
+        (m) => m.id === selectedApp.monitorId,
+      );
+      if (!monitor) return;
+
+      const idx = monitor.apps.findIndex(
+        (a: { instanceId?: string }) => a.instanceId === instanceId,
+      );
+      if (idx >= 0 && idx !== selectedApp.appIndex) {
+        setSelectedApp((prev) => (prev ? { ...prev, appIndex: idx } : null));
+      }
+      return;
+    }
+
+    if (
+      selectedApp.source === "minimized" &&
+      (selectedApp.type === "app" || selectedApp.type === "browser")
+    ) {
+      const instanceId = selectedApp.data?.instanceId;
+      if (instanceId == null || instanceId === "") return;
+
+      const list = currentProfile.minimizedApps || [];
+      const idx = list.findIndex(
+        (a: { instanceId?: string }) => a.instanceId === instanceId,
+      );
+      if (idx >= 0 && idx !== selectedApp.appIndex) {
+        setSelectedApp((prev) => (prev ? { ...prev, appIndex: idx } : null));
+      }
+    }
+  }, [currentProfile, selectedApp]);
 
   const handleSelectedAppUpdate = useCallback(
     (updates: any) => {
@@ -953,10 +1064,80 @@ export default function App() {
         ((dropPosition.x - rect.left) / rect.width) * 100;
       const relativeY =
         ((dropPosition.y - rect.top) / rect.height) * 100;
+      const rawPosition = {
+        x: Math.max(0, Math.min(100, relativeX)),
+        y: Math.max(0, Math.min(100, relativeY)),
+      };
+
+      const targetMonitor = currentProfile.monitors?.find((m: any) => m.id === targetMonitorId);
+      const isPortrait = targetMonitor?.orientation === "portrait";
+      const sourceMonitorId = dragData.sourceMonitorId || dragData.monitorId || null;
+      const isIncomingApp =
+        dragData.type === "app" &&
+        (dragData.source === "sidebar" ||
+          dragData.source === "minimized" ||
+          (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId));
+      const prospectiveAppCount = (targetMonitor?.apps?.length || 0) + (isIncomingApp ? 1 : 0);
+
+      const getDropZones = (count: number) => {
+        if (isPortrait) {
+          if (count <= 1) return [{ position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }];
+          if (count === 2) return [
+            { position: { x: 50, y: 25 }, size: { width: 100, height: 50 } },
+            { position: { x: 50, y: 75 }, size: { width: 100, height: 50 } },
+          ];
+          if (count === 3) return [
+            { position: { x: 50, y: 16.67 }, size: { width: 100, height: 33.33 } },
+            { position: { x: 50, y: 50 }, size: { width: 100, height: 33.33 } },
+            { position: { x: 50, y: 83.33 }, size: { width: 100, height: 33.33 } },
+          ];
+          return [
+            { position: { x: 50, y: 12.5 }, size: { width: 100, height: 25 } },
+            { position: { x: 50, y: 37.5 }, size: { width: 100, height: 25 } },
+            { position: { x: 50, y: 62.5 }, size: { width: 100, height: 25 } },
+            { position: { x: 50, y: 87.5 }, size: { width: 100, height: 25 } },
+          ];
+        }
+
+        if (count <= 1) return [{ position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }];
+        if (count === 2) return [
+          { position: { x: 25, y: 50 }, size: { width: 50, height: 100 } },
+          { position: { x: 75, y: 50 }, size: { width: 50, height: 100 } },
+        ];
+        if (count === 3) return [
+          { position: { x: 16.67, y: 50 }, size: { width: 33.33, height: 100 } },
+          { position: { x: 50, y: 50 }, size: { width: 33.33, height: 100 } },
+          { position: { x: 83.33, y: 50 }, size: { width: 33.33, height: 100 } },
+        ];
+        return [
+          { position: { x: 25, y: 25 }, size: { width: 50, height: 50 } },
+          { position: { x: 75, y: 25 }, size: { width: 50, height: 50 } },
+          { position: { x: 25, y: 75 }, size: { width: 50, height: 50 } },
+          { position: { x: 75, y: 75 }, size: { width: 50, height: 50 } },
+        ];
+      };
+
+      const zones = getDropZones(prospectiveAppCount);
+      let activeZone = zones[0];
+      let bestDistance = Number.POSITIVE_INFINITY;
+      for (const zone of zones) {
+        const distance = Math.sqrt(
+          Math.pow(rawPosition.x - zone.position.x, 2) +
+          Math.pow(rawPosition.y - zone.position.y, 2),
+        );
+        if (distance < bestDistance) {
+          bestDistance = distance;
+          activeZone = zone;
+        }
+      }
 
       const position = {
-        x: Math.max(15, Math.min(85, relativeX)),
-        y: Math.max(15, Math.min(85, relativeY)),
+        x: activeZone.position.x,
+        y: activeZone.position.y,
+      };
+      const snappedSize = {
+        width: activeZone.size.width,
+        height: activeZone.size.height,
       };
 
       console.log("🎯 DROP ON MONITOR:", {
@@ -1065,7 +1246,7 @@ export default function App() {
             launchUrl: dragData.launchUrl ?? null,
             color: dragData.color,
             position,
-            size: { width: 60, height: 60 },
+            size: snappedSize,
             volume: 50,
             launchBehavior: "new" as const,
             runAsAdmin: false,
@@ -1088,6 +1269,7 @@ export default function App() {
           dragData.appIndex,
           targetMonitorId,
           position,
+          snappedSize,
         );
       } else if (dragData.source === "minimized") {
         // Move app from minimized to monitor (only apps, no files)
@@ -1096,6 +1278,7 @@ export default function App() {
           dragData.appIndex,
           targetMonitorId,
           position,
+          snappedSize,
         );
       }
     },
@@ -3141,9 +3324,10 @@ export default function App() {
           </button>
         )}
 
-        {/* Drag Overlay */}
+        {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
         {dragState.isDragging && dragState.dragData && (
           <div
+            data-app-drag-overlay="true"
             className="fixed pointer-events-none z-[9999] select-none"
             style={{
               left: dragState.currentPosition.x + 12,
