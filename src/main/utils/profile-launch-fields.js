@@ -1,13 +1,6 @@
 const path = require('path');
-
-const MAX_URL_LENGTH = 2048;
-const MAX_SHORTCUT_PATH_LENGTH = 4096;
-
-const safeLimitedString = (value, maxLength) => {
-  const str = String(value || '').trim();
-  if (!str) return '';
-  return str.slice(0, Math.max(1, Number(maxLength || 1)));
-};
+const { MAX_URL_LENGTH, MAX_SHORTCUT_PATH_LENGTH } = require('./limits');
+const { safeLimitedString } = require('./url-safety');
 
 /**
  * Protocols allowed for shell.openExternal from saved profiles (not http/https/file).

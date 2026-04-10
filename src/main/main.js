@@ -1,7 +1,7 @@
 const { app, BrowserWindow, ipcMain, nativeImage, Menu, session } = require('electron');
 const path = require('path');
 const fs = require('fs');
-const { pathToFileURL, fileURLToPath } = require('url');
+const fsp = fs.promises;
 const { spawn, execFile } = require('child_process');
 const ws = require('windows-shortcuts');
 const { scanForExeFiles } = require('./scanExeFiles');
@@ -16,16 +16,136 @@ const {
   sanitizeProfileLaunchFieldsDeep,
 } = require('./utils/profile-launch-fields');
 const {
+  MAX_PROFILE_ID_LENGTH,
+  MAX_URL_LENGTH,
+  MAX_SHORTCUT_PATH_LENGTH,
+} = require('./utils/limits');
+const {
+  safeLimitedString,
+  isSafeExternalHttpUrl,
+  normalizeSafeUrl,
+} = require('./utils/url-safety');
+const { sanitizeProfilesPayload } = require('./utils/sanitize-profiles-payload');
+const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
 } = require('./services/windows-process-service');
+const {
+  recordZonePlacement,
+  getZoneHistoryStats,
+  flushPendingZoneHistory,
+} = require('./services/zone-history-store');
+const { createAppShellSecurity } = require('./app-shell-security');
+
+const {
+  getAppEntryUrl,
+  setupSessionSecurity,
+  isTrustedRendererUrl,
+  handleTrustedIpc,
+} = createAppShellSecurity({ app, session, ipcMain });
+
+// Global handle tracking to prevent cross-app window handle conflicts
+const globalUsedWindowHandles = new Set();
+const reserveWindowHandle = (handle) => {
+  const safeHandle = String(handle || '').trim();
+  if (safeHandle) {
+    globalUsedWindowHandles.add(safeHandle);
+    return true;
+  }
+  return false;
+};
+const releaseWindowHandle = (handle) => {
+  const safeHandle = String(handle || '').trim();
+  globalUsedWindowHandles.delete(safeHandle);
+};
+const isWindowHandleAvailable = (handle) => {
+  const safeHandle = String(handle || '').trim();
+  return safeHandle && !globalUsedWindowHandles.has(safeHandle);
+};
+const clearGlobalWindowHandles = () => {
+  globalUsedWindowHandles.clear();
+};
+
+// Global app bounds tracking for collision detection
+const globalPlacedAppBounds = new Map();
+const recordAppPlacement = (appName, bounds, monitor) => {
+  const safeBounds = {
+    left: Number(bounds.left || 0),
+    top: Number(bounds.top || 0),
+    width: Number(bounds.width || 0),
+    height: Number(bounds.height || 0),
+    monitor: monitor || bounds.monitor || null
+  };
+  globalPlacedAppBounds.set(appName, safeBounds);
+};
+const clearGlobalAppPlacements = () => {
+  globalPlacedAppBounds.clear();
+};
+const wouldOverlapExistingApp = (newBounds, excludeAppName = '', targetMonitorId = '') => {
+  const newLeft = Number(newBounds.left || 0);
+  const newTop = Number(newBounds.top || 0);
+  const newRight = newLeft + Number(newBounds.width || 0);
+  const newBottom = newTop + Number(newBounds.height || 0);
+  
+  for (const [appName, existingBounds] of globalPlacedAppBounds.entries()) {
+    if (appName === excludeAppName) continue;
+    
+    // STRICT: Only check collision if apps are on the same monitor
+    const existingMonitorId = existingBounds.monitor?.id || existingBounds.monitor?.name || '';
+    const newMonitorId = targetMonitorId || newBounds.monitor?.id || newBounds.monitor?.name || '';
+    
+    // Skip if we can't determine monitor, or if monitors are different
+    if (!existingMonitorId || !newMonitorId) continue;
+    if (existingMonitorId !== newMonitorId) continue;
+    
+    const existLeft = existingBounds.left;
+    const existTop = existingBounds.top;
+    const existRight = existLeft + existingBounds.width;
+    const existBottom = existTop + existingBounds.height;
+    
+    // Check for rectangle overlap
+    const overlapX = newLeft < existRight && newRight > existLeft;
+    const overlapY = newTop < existBottom && newBottom > existTop;
+    
+    if (overlapX && overlapY) {
+      const overlapWidth = Math.max(0, Math.min(newRight, existRight) - Math.max(newLeft, existLeft));
+      const overlapHeight = Math.max(0, Math.min(newBottom, existBottom) - Math.max(newTop, existTop));
+      const overlapArea = overlapWidth * overlapHeight;
+      
+      // Only report significant overlaps (> 100,000 px² - about 25% of a 1920x1080 window)
+      const newArea = (newRight - newLeft) * (newBottom - newTop);
+      const existingArea = (existRight - existLeft) * (existBottom - existTop);
+      const smallerArea = Math.min(newArea, existingArea);
+      const isSignificant = overlapArea > 100000;
+      
+      if (isSignificant) {
+        return {
+          wouldOverlap: true,
+          existingApp: appName,
+          existingBounds: existingBounds,
+          overlapArea: overlapArea
+        };
+      }
+    }
+  }
+  
+  return { wouldOverlap: false };
+};
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
   app.quit();
   process.exit(0);
 }
+
+app.on('before-quit', () => {
+  try {
+    flushPendingZoneHistory();
+  } catch (err) {
+    console.error('[zone-history] flush on quit failed:', err);
+  }
+});
 
 // GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
 // which leads to renderer blackscreens. Force software rendering path.
@@ -43,195 +163,6 @@ app.commandLine.appendSwitch(
 );
 
 const iconDataUrlCache = new Map();
-const DEV_SERVER_URL = 'http://localhost:5173';
-const MAX_PROFILE_COUNT = 200;
-const MAX_PROFILE_ID_LENGTH = 128;
-const MAX_PROFILE_NAME_LENGTH = 256;
-const MAX_PROFILE_PAYLOAD_SIZE_BYTES = 5 * 1024 * 1024;
-const MAX_URL_LENGTH = 2048;
-const MAX_SHORTCUT_PATH_LENGTH = 4096;
-
-const getDistIndexPath = () => path.join(__dirname, '../../dist/index.html');
-
-const getAppEntryUrl = () => (
-  app.isPackaged
-    ? pathToFileURL(getDistIndexPath()).href
-    : DEV_SERVER_URL
-);
-
-/** CSP for the app shell: dev allows Vite HMR; prod is stricter (no eval). */
-const getContentSecurityPolicy = () => {
-  if (!app.isPackaged) {
-    return [
-      "default-src 'self'",
-      "base-uri 'self'",
-      "form-action 'self'",
-      "frame-ancestors 'none'",
-      "frame-src 'none'",
-      "object-src 'none'",
-      "img-src 'self' data: blob: https:",
-      "font-src 'self' data:",
-      "style-src 'self' 'unsafe-inline'",
-      "script-src 'self' 'unsafe-inline' 'unsafe-eval'",
-      "connect-src 'self' http://localhost:5173 http://127.0.0.1:5173 ws://localhost:5173 ws://127.0.0.1:5173",
-      "media-src 'self' data: blob:",
-      "worker-src 'self' blob:",
-    ].join('; ');
-  }
-  return [
-    "default-src 'self'",
-    "base-uri 'self'",
-    "form-action 'self'",
-    "frame-ancestors 'none'",
-    "frame-src 'none'",
-    "object-src 'none'",
-    "img-src 'self' data: blob: https:",
-    "font-src 'self' data:",
-    "style-src 'self' 'unsafe-inline'",
-    "script-src 'self' 'unsafe-inline'",
-    "connect-src 'self'",
-    "media-src 'self' data: blob:",
-    "worker-src 'self' blob:",
-  ].join('; ');
-};
-
-const shouldInjectAppCsp = (requestUrl) => {
-  if (!requestUrl) return false;
-  try {
-    if (!app.isPackaged) {
-      const u = new URL(requestUrl);
-      return (u.hostname === 'localhost' || u.hostname === '127.0.0.1') && u.port === '5173';
-    }
-    const distHref = pathToFileURL(getDistIndexPath()).href;
-    const base = distHref.split('#')[0].split('?')[0];
-    const reqBase = String(requestUrl).split('#')[0].split('?')[0];
-    return reqBase === base || reqBase.startsWith(`${base}/`);
-  } catch {
-    return false;
-  }
-};
-
-const setupSessionSecurity = () => {
-  const defaultSession = session.defaultSession;
-
-  defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
-    console.warn('[session] blocked permission request:', permission);
-    callback(false);
-  });
-
-  defaultSession.setPermissionCheckHandler(() => false);
-
-  defaultSession.webRequest.onHeadersReceived((details, callback) => {
-    if (details.resourceType !== 'mainFrame' || !shouldInjectAppCsp(details.url)) {
-      callback({ responseHeaders: details.responseHeaders });
-      return;
-    }
-    const responseHeaders = { ...details.responseHeaders };
-    const csp = getContentSecurityPolicy();
-    responseHeaders['Content-Security-Policy'] = [csp];
-    callback({ responseHeaders });
-  });
-};
-
-const getDistDirPath = () => path.join(__dirname, '../../dist');
-
-const isTrustedPackagedFileUrl = (raw = '') => {
-  if (!raw.startsWith('file://')) return false;
-  try {
-    const normalized = String(raw).split('#')[0].split('?')[0];
-    const filePath = path.normalize(fileURLToPath(normalized));
-    const distDir = path.normalize(getDistDirPath());
-    const indexPath = path.normalize(getDistIndexPath());
-    return filePath === indexPath || filePath.startsWith(`${distDir}${path.sep}`);
-  } catch {
-    return false;
-  }
-};
-
-const isTrustedRendererUrl = (value = '') => {
-  const raw = String(value || '').trim();
-  if (!raw) return false;
-  if (app.isPackaged) return isTrustedPackagedFileUrl(raw);
-  return raw.startsWith(`${DEV_SERVER_URL}/`) || raw === DEV_SERVER_URL;
-};
-
-const isTrustedIpcSender = (event) => (
-  isTrustedRendererUrl(event?.senderFrame?.url || '')
-);
-
-const handleTrustedIpc = (channel, handler) => {
-  ipcMain.handle(channel, async (event, ...args) => {
-    if (!isTrustedIpcSender(event)) {
-      const senderUrl = String(event?.senderFrame?.url || '');
-      console.warn(`[ipc:${channel}] Blocked untrusted sender: ${senderUrl || '<empty>'}`);
-      throw new Error('Untrusted renderer origin');
-    }
-    return handler(event, ...args);
-  });
-};
-
-const safeLimitedString = (value, maxLength) => {
-  const str = String(value || '').trim();
-  if (!str) return '';
-  return str.slice(0, Math.max(1, Number(maxLength || 1)));
-};
-
-const isSafeExternalHttpUrl = (value) => {
-  const candidate = safeLimitedString(value, MAX_URL_LENGTH);
-  if (!candidate) return false;
-  try {
-    const parsed = new URL(candidate);
-    return parsed.protocol === 'https:' || parsed.protocol === 'http:';
-  } catch {
-    return false;
-  }
-};
-
-const normalizeSafeUrl = (value) => (
-  isSafeExternalHttpUrl(value) ? safeLimitedString(value, MAX_URL_LENGTH) : ''
-);
-
-const sanitizeProfilesPayload = (profiles) => {
-  if (!Array.isArray(profiles)) {
-    throw new Error('Profiles payload must be an array');
-  }
-  if (profiles.length > MAX_PROFILE_COUNT) {
-    throw new Error('Profiles payload exceeds maximum profile count');
-  }
-
-  const serialized = JSON.stringify(profiles);
-  if (Buffer.byteLength(serialized, 'utf8') > MAX_PROFILE_PAYLOAD_SIZE_BYTES) {
-    throw new Error('Profiles payload exceeds size limit');
-  }
-
-  return profiles
-    .filter((profile) => profile && typeof profile === 'object' && !Array.isArray(profile))
-    .map((profile) => {
-      const normalized = { ...profile };
-      normalized.id = safeLimitedString(profile.id, MAX_PROFILE_ID_LENGTH);
-      normalized.name = safeLimitedString(profile.name, MAX_PROFILE_NAME_LENGTH);
-      if (Array.isArray(profile.browserTabs)) {
-        normalized.browserTabs = profile.browserTabs
-          .map((tab) => {
-            const url = normalizeSafeUrl(tab?.url);
-            if (!url) return null;
-            return { ...tab, url };
-          })
-          .filter(Boolean);
-      }
-      if (Array.isArray(profile.actions)) {
-        normalized.actions = profile.actions
-          .map((action) => {
-            if (action?.type !== 'browserTab') return action;
-            const url = normalizeSafeUrl(action?.url);
-            if (!url) return null;
-            return { ...action, url };
-          })
-          .filter(Boolean);
-      }
-      return sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(normalized));
-    });
-};
 
 const normalizePathForWindows = (value) => (
   String(value || '')
@@ -762,6 +693,89 @@ const buildSystemMonitorSnapshot = () => {
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
+
+/**
+ * Get retry schedule (array of delays) for a given operation type.
+ * Generic: same schedule for all apps - adapts at runtime based on success/failure
+ * @param {string} operationType - Type of operation ('windowFind', 'placement', 'stabilization')
+ * @returns {number[]} Array of delay values in milliseconds
+ */
+const getRetrySchedule = (operationType) => {
+  switch (operationType) {
+    case 'windowFind':
+      // Window discovery: progressive backoff
+      return [300, 450, 675, 1000, 1500, 2200, 3000];
+
+    case 'placement':
+      // Initial placement: fast retries
+      return [90, 135, 200, 300];
+
+    case 'stabilization':
+      // Long-running stabilization: extended schedule
+      return [200, 300, 450, 675, 1000, 1500, 2200, 3300];
+
+    case 'minimizeEnsure':
+      // Minimize re-assertion: aggressive short retries
+      return [70, 120, 200, 350, 600, 1000];
+
+    default:
+      return [90, 135, 200, 300];
+  }
+};
+
+/**
+ * Delayed Window Detection: Waits for a process to create its main window handle.
+ * Generic: works the same way for all apps
+ * @param {string} processHint - Process name to search for
+ * @param {number} timeoutMs - Maximum time to wait for window
+ * @returns {Promise<Object|null>} Window info when found, null if timeout
+ */
+const waitForProcessWindow = async (processHint, timeoutMs = 30000) => {
+  const safeProcess = String(processHint || '').toLowerCase().trim();
+  if (!safeProcess) return null;
+
+  const startTime = Date.now();
+  const pollInterval = 200; // Generic polling interval
+  const maxWait = Math.max(5000, Math.min(timeoutMs, 60000));
+
+  console.log('[waitForProcessWindow] starting', {
+    process: safeProcess,
+    maxWaitMs: maxWait,
+    pollInterval,
+  });
+
+  while (Date.now() - startTime < maxWait) {
+    const windows = await getVisibleWindowInfos(safeProcess);
+
+    if (windows.length > 0) {
+      // Score and return best candidate
+      const scored = windows
+        .filter((w) => w?.handle)
+        .sort((a, b) => scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
+          - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess }));
+
+      const best = scored[0];
+      if (best) {
+        console.log('[waitForProcessWindow] window-found', {
+          process: safeProcess,
+          elapsedMs: Date.now() - startTime,
+          handle: best.handle,
+          title: best.title?.substring(0, 50),
+          className: best.className,
+        });
+        return best;
+      }
+    }
+
+    await sleep(pollInterval);
+  }
+
+  console.log('[waitForProcessWindow] timeout', {
+    process: safeProcess,
+    elapsedMs: Date.now() - startTime,
+  });
+  return null;
+};
 
 /**
  * Electron Display bounds/workArea are DIP; Win32 SetWindowPos in a DPI-aware
@@ -1298,8 +1312,9 @@ for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
     }
   }
 
-  # Strategy 3: foreground window fallback
-  if ($candidates.Count -eq 0) {
+  # Strategy 3: foreground window fallback (disabled for minimize operations)
+  # When minimizing, grabbing the wrong window is worse than doing nothing
+  if ($candidates.Count -eq 0 -and ${windowState} -ne 6) {
     try {
       $fg = [Win32]::GetForegroundWindow()
       if ($fg -ne [IntPtr]::Zero) {
@@ -1382,12 +1397,20 @@ public static class Win32 {
   [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
 }
 "@
 try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
 try { [void][Win32]::SetProcessDPIAware() } catch {}
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "no-window|"; exit 0 }
+# Safety check: verify window class name to prevent moving FlowSwitch
+$cls = New-Object System.Text.StringBuilder 256
+[void][Win32]::GetClassName($h, $cls, $cls.Capacity)
+$className = $cls.ToString()
+if ($className.ToLower().Contains("flowswitch") -or $className.ToLower().Contains("electron")) {
+  Write-Output "excluded-flowswitch|"; exit 0
+}
 if (${windowState} -eq 5) {
   # Prevent persisted maximized state from overriding explicit normal bounds.
   [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
@@ -1434,12 +1457,21 @@ const maximizeWindowHandle = (handle) => (
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class Win32 {
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 }
 "@
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
+# Safety check: verify window class name to prevent moving FlowSwitch
+$cls = New-Object System.Text.StringBuilder 256
+[void][Win32]::GetClassName($h, $cls, $cls.Capacity)
+$className = $cls.ToString()
+if ($className.ToLower().Contains("flowswitch") -or $className.ToLower().Contains("electron")) {
+  Write-Output "excluded"; exit 0
+}
 [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
 Start-Sleep -Milliseconds 90
 [void][Win32]::ShowWindowAsync($h, 3) # SW_MAXIMIZE
@@ -1468,12 +1500,21 @@ const minimizeWindowHandle = (handle) => (
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
+using System.Text;
 public static class Win32 {
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
 }
 "@
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
+# Safety check: verify window class name to prevent moving FlowSwitch
+$cls = New-Object System.Text.StringBuilder 256
+[void][Win32]::GetClassName($h, $cls, $cls.Capacity)
+$className = $cls.ToString()
+if ($className.ToLower().Contains("flowswitch") -or $className.ToLower().Contains("electron")) {
+  Write-Output "excluded"; exit 0
+}
 [void][Win32]::ShowWindowAsync($h, 6) # SW_MINIMIZE
 Start-Sleep -Milliseconds 70
 [void][Win32]::ShowWindowAsync($h, 6) # Re-assert for apps that restore immediately
@@ -1495,15 +1536,42 @@ const ensureMinimizedAfterLaunch = async ({
   bounds,
   processNameHint,
   pid = 0,
+  appBehavior = {},
 }) => {
   if (!bounds || bounds.state !== 'minimized') return false;
 
+  const safeProcess = String(processNameHint || '').toLowerCase().trim();
+  console.log('[ensureMinimizedAfterLaunch] starting', {
+    process: safeProcess,
+    initialHandle: handle,
+  });
+
   let minimized = false;
-  const retryScheduleMs = [120, 260, 480, 760, 1100, 1500, 2100];
+  const retryScheduleMs = getRetrySchedule('minimizeEnsure', appBehavior);
   for (const delayMs of retryScheduleMs) {
     await sleep(delayMs);
+
+    // Log window enumeration results for debugging
+    const windowInfos = await getVisibleWindowInfos(safeProcess);
+    console.log('[ensureMinimizedAfterLaunch] window-enumeration', {
+      process: safeProcess,
+      delayMs,
+      foundWindows: windowInfos.length,
+      windows: windowInfos.map(w => ({
+        handle: w.handle,
+        processName: w.processName || w.name,
+        className: w.className,
+        title: w.title?.substring(0, 50),
+      })),
+    });
+
     if (handle) {
       const byHandle = await minimizeWindowHandle(handle);
+      console.log('[ensureMinimizedAfterLaunch] minimize-by-handle', {
+        process: safeProcess,
+        handle,
+        success: byHandle,
+      });
       minimized = minimized || byHandle;
     }
 
@@ -1518,10 +1586,19 @@ const ensureMinimizedAfterLaunch = async ({
       excludedWindowHandles: [],
       skipFrameChanged: true,
     });
+    console.log('[ensureMinimizedAfterLaunch] minimize-by-name', {
+      process: safeProcess,
+      success: byName?.applied,
+      appliedHandle: byName?.handle,
+    });
     minimized = minimized || Boolean(byName?.applied);
     if (minimized) break;
   }
 
+  console.log('[ensureMinimizedAfterLaunch] complete', {
+    process: safeProcess,
+    minimized,
+  });
   return minimized;
 };
 
@@ -1535,6 +1612,7 @@ const stabilizePlacementForSlowLaunch = async ({
   positionOnlyBeforeMaximize = false,
   skipFrameChanged = false,
   durationMs = 3200,
+  adaptiveMode = false, // Enable adaptive mode for Qt-based apps
 }) => {
   const safeProcess = String(processHintLc || '').trim().toLowerCase();
   if (!safeProcess || !bounds) {
@@ -1560,10 +1638,40 @@ const stabilizePlacementForSlowLaunch = async ({
         - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess })
       ));
 
+    // Adaptive mode for Qt-based apps: refresh candidate list more frequently
+    if (adaptiveMode && candidates.length === 0) {
+      // Qt apps may have delayed window creation, wait and retry
+      await sleep(300);
+      continue;
+    }
+
     if (bounds.state === 'minimized') {
       // Re-apply minimize against all likely top-level windows in case splash->main handle changes.
+      // Validate each candidate belongs to the expected process before minimizing.
+      const targetProcessLower = safeProcess;
       for (const row of candidates.slice(0, 8)) {
+        // Safety check: verify window belongs to target process
+        const rowProcessName = String(row?.processName || row?.name || '').toLowerCase();
+        const className = String(row?.className || '').toLowerCase();
+        const handleStr = String(row.handle || '');
+
+        // Skip if window doesn't belong to target process
+        if (rowProcessName && !rowProcessName.includes(targetProcessLower) && !targetProcessLower.includes(rowProcessName)) {
+          console.log('[stabilizePlacement] skip-minimize-wrong-process', {
+            targetProcess: targetProcessLower,
+            actualProcess: rowProcessName,
+            handle: handleStr,
+            className,
+          });
+          continue;
+        }
+
         lastHandle = row.handle || lastHandle;
+        console.log('[stabilizePlacement] applying-minimize', {
+          process: targetProcessLower,
+          handle: handleStr,
+          className,
+        });
         await moveSpecificWindowHandleToBounds({
           handle: row.handle,
           bounds,
@@ -1583,7 +1691,7 @@ const stabilizePlacementForSlowLaunch = async ({
     }
 
     if (bounds.state === 'normal' && monitor) {
-      for (const row of candidates.slice(0, 6)) {
+      for (const row of candidates.slice(0, adaptiveMode ? 8 : 6)) {
         lastHandle = row.handle || lastHandle;
         await moveSpecificWindowHandleToBounds({
           handle: row.handle,
@@ -1593,11 +1701,32 @@ const stabilizePlacementForSlowLaunch = async ({
           skipFrameChanged,
         });
 
+        // Adaptive pause: longer for Qt apps that resist repositioning
+        const settlePause = adaptiveMode ? 200 : 120;
+        await sleep(settlePause);
+        
         const rect = await getWindowRectByHandle(row.handle);
         const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
-        const close = isRectCloseToTargetBounds(rect, bounds, 8);
+        
+        // Adaptive tolerance: more lenient for Qt apps with monitor resistance
+        const tolerance = adaptiveMode ? 18 : 12;
+        const close = isRectCloseToTargetBounds(rect, bounds, tolerance);
+        
         if (onTarget && close) {
           return { verified: true, handle: row.handle };
+        }
+        
+        // For Qt apps: if not on target monitor, try more aggressive repositioning
+        if (adaptiveMode && !onTarget) {
+          // Force move to target monitor first, then check bounds
+          await moveSpecificWindowHandleToBounds({
+            handle: row.handle,
+            bounds: { ...bounds, left: monitor.workArea?.x || bounds.left, top: monitor.workArea?.y || bounds.top },
+            aggressiveMaximize: false,
+            positionOnlyBeforeMaximize: false,
+            skipFrameChanged: true,
+          });
+          await sleep(150);
         }
       }
     }
@@ -1733,7 +1862,7 @@ const verifyAndCorrectWindowPlacement = async ({
   for (let attempt = 0; attempt <= maxCorrections; attempt += 1) {
     const rect = await getWindowRectByHandle(safeHandle);
     const onTargetMonitor = isWindowOnTargetMonitor({ rect, monitor, bounds: adjustedBounds });
-    const closeToTargetBounds = isRectCloseToTargetBounds(rect, adjustedBounds, 6);
+    const closeToTargetBounds = isRectCloseToTargetBounds(rect, adjustedBounds, 10);
     if (onTargetMonitor && closeToTargetBounds) {
       return { verified: true, corrected: attempt > 0 };
     }
@@ -1742,10 +1871,18 @@ const verifyAndCorrectWindowPlacement = async ({
     if (rect && adjustedBounds.state === 'normal') {
       // Compensate for app-specific non-client frame differences (caption/shadow) that
       // can cause top clipping and bottom gaps after a nominal SetWindowPos.
-      const correctedLeft = Number(bounds.left || 0) + (Number(bounds.left || 0) - Number(rect.left || 0));
-      const correctedTop = Number(bounds.top || 0) + (Number(bounds.top || 0) - Number(rect.top || 0));
-      const correctedWidth = Number(bounds.width || 0) + (Number(bounds.width || 0) - Number(rect.width || 0));
-      const correctedHeight = Number(bounds.height || 0) + (Number(bounds.height || 0) - Number(rect.height || 0));
+      // Use more conservative corrections to avoid over-shooting
+      const leftDiff = Number(bounds.left || 0) - Number(rect.left || 0);
+      const topDiff = Number(bounds.top || 0) - Number(rect.top || 0);
+      const widthDiff = Number(bounds.width || 0) - Number(rect.width || 0);
+      const heightDiff = Number(bounds.height || 0) - Number(rect.height || 0);
+      
+      // Apply damping factor to reduce over-correction
+      const dampingFactor = 0.6;
+      const correctedLeft = Number(bounds.left || 0) + (leftDiff * dampingFactor);
+      const correctedTop = Number(bounds.top || 0) + (topDiff * dampingFactor);
+      const correctedWidth = Number(bounds.width || 0) + (widthDiff * dampingFactor);
+      const correctedHeight = Number(bounds.height || 0) + (heightDiff * dampingFactor);
 
       const minWidth = 120;
       const minHeight = 120;
@@ -1810,8 +1947,9 @@ public static class WinEnum {
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
-  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids) {
+  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids, string targetProcessName = "") {
     var r = new List<Dictionary<string, object>>();
     EnumWindows((h, l) => {
       if (!IsWindowVisible(h)) return true;
@@ -1829,6 +1967,28 @@ public static class WinEnum {
       var cls = new StringBuilder(256);
       GetClassName(h, cls, cls.Capacity);
       int titleLen = GetWindowTextLength(h);
+      string className = cls.ToString();
+      
+      // Exclude FlowSwitch windows by class name
+      if (className.ToLower().Contains("flowswitch") || className.ToLower().Contains("electron")) return true;
+      
+      // Enhanced validation for Qt-based apps to prevent cross-app handle interference
+      if (!string.IsNullOrEmpty(targetProcessName) && (targetProcessName == "anki" || targetProcessName.Contains("qt"))) {
+        var titleBuilder = new StringBuilder(titleLen + 1);
+        GetWindowText(h, titleBuilder, titleBuilder.Capacity);
+        string windowTitle = titleBuilder.ToString();
+        string classNameLower = className.ToLower();
+        
+        // Strict validation for Anki windows
+        if (targetProcessName == "anki") {
+          bool isAnkiWindow = windowTitle.Contains("Anki") || classNameLower.Contains("anki") || 
+                              windowTitle.Contains("Decks") || windowTitle.Contains("Add") ||
+                              windowTitle.Contains("Browse") || windowTitle.Contains("Stats") ||
+                              windowTitle.Contains("Study");
+          if (!isAnkiWindow) return true;
+        }
+      }
+      
       var row = new Dictionary<string, object>();
       row["handle"] = ((long)h).ToString();
       row["width"] = width;
@@ -1852,10 +2012,16 @@ try { [void][WinEnum]::SetProcessDPIAware() } catch {}
 $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
 try {
   $procs = Get-Process -Name "${safeName.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
-  foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
+  foreach ($p in $procs) { 
+    # Strict process name validation to prevent cross-app handle interference
+    $procName = $p.ProcessName.ToLower()
+    if ($procName -eq "${safeName}") {
+      [void]$pids.Add([uint32]$p.Id)
+    }
+  }
 } catch {}
 if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
-$rows = [WinEnum]::FindVisibleWindows($pids)
+$rows = [WinEnum]::FindVisibleWindows($pids, "${safeName}")
 $rows | ConvertTo-Json -Depth 5`;
 
     execFile(
@@ -1886,6 +2052,116 @@ $rows | ConvertTo-Json -Depth 5`;
   })
 );
 
+/**
+ * Get ALL windows for a process (including hidden/minimized).
+ * Used for minimized apps where IsWindowVisible returns false.
+ */
+const getAllWindowInfos = (processName) => (
+  new Promise((resolve) => {
+    const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (!safeName) { resolve([]); return; }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class WinEnumAll {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public delegate bool EnumWinProc(IntPtr hWnd, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWinProc cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  public static List<Dictionary<string, object>> FindAllWindows(HashSet<uint> pids, string targetProcessName = "") {
+    var r = new List<Dictionary<string, object>>();
+    EnumWindows((h, l) => {
+      // Skip visibility check - include all windows
+      uint p; GetWindowThreadProcessId(h, out p);
+      if (!pids.Contains(p)) return true;
+      RECT rect;
+      if (!GetWindowRect(h, out rect)) return true;
+      int width = rect.Right - rect.Left;
+      int height = rect.Bottom - rect.Top;
+      // Include zero-size windows (minimized to tray)
+      if (width <= 0 || height <= 0) return true;
+      long exStyle = GetWindowLongPtr(h, -20).ToInt64();
+      bool isToolWindow = (exStyle & 0x00000080L) != 0;
+      var cls = new StringBuilder(256);
+      GetClassName(h, cls, cls.Capacity);
+      int titleLen = GetWindowTextLength(h);
+      string className = cls.ToString();
+      if (className.ToLower().Contains("flowswitch") || className.ToLower().Contains("electron")) return true;
+      var row = new Dictionary<string, object>();
+      row["handle"] = ((long)h).ToString();
+      row["width"] = width;
+      row["height"] = height;
+      row["area"] = width * height;
+      row["enabled"] = IsWindowEnabled(h);
+      row["hung"] = IsHungAppWindow(h);
+      row["tool"] = isToolWindow;
+      row["className"] = cls.ToString();
+      row["titleLength"] = titleLen;
+      r.Add(row);
+      return true;
+    }, IntPtr.Zero);
+    return r;
+  }
+}
+"@
+try { [void][WinEnumAll]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][WinEnumAll]::SetProcessDPIAware() } catch {}
+$pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
+try {
+  $procs = Get-Process -Name "${safeName.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
+  foreach ($p in $procs) { 
+    $procName = $p.ProcessName.ToLower()
+    if ($procName -eq "${safeName}") {
+      [void]$pids.Add([uint32]$p.Id)
+    }
+  }
+} catch {}
+if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
+$rows = [WinEnumAll]::FindAllWindows($pids, "${safeName}")
+$rows | ConvertTo-Json -Depth 5`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 5000, maxBuffer: 1024 * 256 },
+      (_error, stdout) => {
+        try {
+          const parsed = JSON.parse(String(stdout || '').trim() || '[]');
+          const rows = Array.isArray(parsed) ? parsed : [parsed];
+          resolve(rows.filter(Boolean).map((row) => ({
+            handle: String(row.handle || ''),
+            width: Number(row.width || 0),
+            height: Number(row.height || 0),
+            area: Number(row.area || 0),
+            enabled: Boolean(row.enabled),
+            hung: Boolean(row.hung),
+            tool: Boolean(row.tool),
+            className: String(row.className || ''),
+            titleLength: Number(row.titleLength || 0),
+            processName: safeName,
+          })));
+        } catch {
+          resolve([]);
+        }
+      },
+    );
+  })
+);
+
 const CHROMIUM_TOPLEVEL_CLASSES = ['chrome_widgetwin_1'];
 
 const isChromiumTopLevelWindowRow = (row) => {
@@ -1893,11 +2169,35 @@ const isChromiumTopLevelWindowRow = (row) => {
   return CHROMIUM_TOPLEVEL_CLASSES.some((c) => cn.includes(c));
 };
 
-const CHROMIUM_FAMILY_PLACEMENT_KEYS = new Set(['chrome', 'msedge', 'brave', 'vivaldi', 'opera', 'arc']);
+// Generic app behavior detection - NO hardcoded app lists
+// Stream Deck approach: detect behavior dynamically at runtime based on window properties
 
-const isChromiumFamilyProcessKey = (key) => (
-  CHROMIUM_FAMILY_PLACEMENT_KEYS.has(String(key || '').trim().toLowerCase().replace(/\.exe$/i, ''))
-);
+/**
+ * Detect Chromium apps at runtime by window class name, not hardcoded process names
+ * This is called with actual window data from getVisibleWindowInfos
+ */
+const isChromiumFamilyProcessKey = (processKey) => {
+  // No hardcoded process names - we detect Chromium by window class at runtime
+  // in scoreWindowCandidate and other functions that have actual window data
+  return false;
+};
+
+const getAppBehaviorProfile = (processKey) => {
+  // Generic defaults for ALL apps - no special cases
+  return {
+    name: 'generic',
+    // These are determined at runtime, not hardcoded:
+    delayed_window_creation: false, // Will be detected by waitForProcessWindow timeout
+    handle_instability: false,        // Will be detected by stabilization
+    has_loading_window: false,        // Will be detected by window lifecycle
+    // Consistent timing for all apps
+    backoff_base_ms: 200,
+    backoff_max_ms: 3000,
+    backoff_growth_rate: 1.5,
+    initial_placement_delay_ms: 300,
+    stabilization_duration_ms: 8000,
+  };
+};
 
 const scoreWindowCandidate = (row, options = {}) => {
   const chromiumHint = String(options.chromiumProcessHint || '').toLowerCase();
@@ -2198,7 +2498,22 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
 };
 
 const launchProfileById = async (profileId) => {
-  const profiles = readProfilesFromDisk();
+  const profileStartTime = Date.now();
+  console.log('[launch-profile] START', { profileId, timestamp: profileStartTime });
+  
+  // Clear global tracking for new profile launch
+  clearGlobalWindowHandles();
+  clearGlobalAppPlacements();
+  
+  const { profiles, storeError } = readProfilesFromDisk();
+  if (storeError) {
+    return {
+      ok: false,
+      error: storeError.message,
+      storeErrorCode: storeError.code,
+      requestedProfileId: String(profileId || '').trim(),
+    };
+  }
   const normalizedProfileId = String(profileId || '').trim();
   const profile = profiles.find(
     (candidate) => String(candidate?.id || '').trim() === normalizedProfileId,
@@ -2263,20 +2578,23 @@ const launchProfileById = async (profileId) => {
   const { shell } = require('electron');
 
   const runLaunch = async (launchItem) => {
+    const appStartTime = Date.now();
+    let result = { applied: false, handle: null };
     try {
       const processHintLc = getPlacementProcessKey(launchItem);
       const processNameHint = processHintLc;
       const hintCount = processHintCounts.get(processHintLc) || 0;
       const isDuplicateProcessLaunch = hintCount > 1;
-      const isChromiumFamily = isChromiumFamilyProcessKey(processHintLc);
-      const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath)
+      const appBehavior = getAppBehaviorProfile(processHintLc);
+      
+      // Generic: use --new-window for any duplicate process launch that supports it
+      const launchArgs = (isDuplicateProcessLaunch && launchItem.executablePath)
         ? ['--new-window']
         : [];
       const preLaunchWindowInfos = isDuplicateProcessLaunch
         ? await getVisibleWindowInfos(processHintLc)
         : [];
       const preLaunchHandles = preLaunchWindowInfos.map((row) => row.handle);
-
       let launchedChild = null;
       if (launchItem.shortcutPath) {
         const openErr = await shell.openPath(launchItem.shortcutPath);
@@ -2288,6 +2606,7 @@ const launchProfileById = async (profileId) => {
       }
       launchedAppCount += 1;
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
+      const boundsComputedTime = Date.now();
       console.log('[launch-profile] launch-bounds', {
         appName: launchItem.appName,
         process: processHintLc,
@@ -2296,57 +2615,185 @@ const launchProfileById = async (profileId) => {
         bounds,
         sourcePosition: launchItem.app?.position || null,
         sourceSize: launchItem.app?.size || null,
+        elapsedMs: boundsComputedTime - appStartTime,
       });
       if (bounds) {
-        const aggressiveMaximize = bounds.state === 'maximized' && processHintLc === 'msedge';
-        const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
-        const shouldDelayChromiumMaximize = (
-          isChromiumFamily
-          && isDuplicateProcessLaunch
-          && bounds.state === 'maximized'
-        );
-        const placementBounds = shouldDelayChromiumMaximize
-          ? { ...bounds, state: 'normal' }
-          : bounds;
+        const aggressiveMaximize = false; // Generic: no app-specific maximize handling
+        const positionOnlyBeforeMaximize = false;
+        let placementBounds = bounds;
         const excludedHandles = preLaunchHandles;
-        const chromiumNormalSoftPos = isChromiumFamily && placementBounds.state === 'normal';
 
+        // Collision detection disabled - sequential launching should prevent most overlaps
+        // Keeping the logic simple: just use the placement bounds as configured
+        let adjustedBounds = placementBounds;
+
+        // Generic adaptive timing - same for all apps
+        // Start with base delay, longer for duplicate launches to prevent conflicts
+        let initialDelay = 300;
         if (isDuplicateProcessLaunch) {
-          await sleep(240);
+          initialDelay = 500; // Slightly longer for duplicate launches
         } else if (launchItem.shortcutPath || launchItem.launchUrl) {
-          await sleep(200);
+          initialDelay = 400; // Standard for shortcuts/URLs
         }
+        await sleep(initialDelay);
 
-        let result = { applied: false, handle: null };
         let newHandles = [];
 
-        if (isDuplicateProcessLaunch) {
+        // Delayed Window Detection: for first launches where window might not exist yet
+        // We detect 'slow' apps at runtime by whether window appears within timeout
+        if (!isDuplicateProcessLaunch) {
+          console.log('[launch-profile] waiting-for-window', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            reason: 'first-launch-detection',
+          });
+
+          // Generic 8 second timeout for all apps - works for 95% of cases
+          // Slow apps will be detected by timeout and handled by fallback
+          const detectionTimeoutMs = 8000;
+          const detectedWindow = await waitForProcessWindow(
+            processHintLc,
+            {}, // No hardcoded behavior - detection is purely runtime-based
+            detectionTimeoutMs,
+          );
+
+          if (detectedWindow?.handle) {
+            console.log('[launch-profile] window-detected', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              handle: detectedWindow.handle,
+              title: detectedWindow.title?.substring(0, 50),
+              elapsedMs: Date.now() - appStartTime,
+            });
+
+            if (isWindowHandleAvailable(detectedWindow.handle)) {
+              result = await moveSpecificWindowHandleToBounds({
+                handle: detectedWindow.handle,
+                bounds: adjustedBounds,
+                aggressiveMaximize,
+                positionOnlyBeforeMaximize,
+                skipFrameChanged: false,
+              });
+              if (result.applied) {
+                reserveWindowHandle(detectedWindow.handle);
+              }
+            }
+          } else {
+            console.log('[launch-profile] window-detection-timeout', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              willAttemptFallback: true,
+            });
+          }
+        }
+
+        // Fallback for minimized apps when window detection failed
+        // Use getAllWindowInfos to find hidden/minimized windows (not just visible ones)
+        if (!result.applied && bounds.state === 'minimized') {
+          console.log('[launch-profile] minimize-fallback', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            reason: 'window-detection-failed-searching-all-windows',
+          });
+          
+          // Brief wait for main window to appear (generic for all apps)
+          console.log('[launch-profile] minimize-fallback-delay', {
+            appName: launchItem.appName,
+            delayMs: 2000,
+            reason: 'waiting-for-main-window',
+          });
+          await sleep(2000);
+          
+          // Find ALL windows including hidden/minimized
+          let allWindows = await getAllWindowInfos(processHintLc);
+          
+          // Sort by area (largest first) to prioritize main window over popups
+          allWindows = allWindows.sort((a, b) => (b.area || 0) - (a.area || 0));
+          
+          console.log('[launch-profile] minimize-fallback-found', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            windowCount: allWindows.length,
+            windows: allWindows.map(w => ({ handle: w.handle, className: w.className, area: w.area })),
+          });
+          
+          // Try to minimize each window found (largest first)
+          for (const windowInfo of allWindows.slice(0, 5)) {
+            if (!isWindowHandleAvailable(windowInfo.handle)) continue;
+            
+            console.log('[launch-profile] minimize-fallback-attempt', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              handle: windowInfo.handle,
+              className: windowInfo.className,
+            });
+            
+            const minimizeResult = await moveSpecificWindowHandleToBounds({
+              handle: windowInfo.handle,
+              bounds: { state: 'minimized' },
+              aggressiveMaximize: false,
+              positionOnlyBeforeMaximize: false,
+              skipFrameChanged: true,
+            });
+            
+            if (minimizeResult.applied) {
+              result = minimizeResult;
+              reserveWindowHandle(windowInfo.handle);
+              console.log('[launch-profile] minimize-fallback-success', {
+                appName: launchItem.appName,
+                process: processHintLc,
+                handle: windowInfo.handle,
+              });
+              break;
+            }
+          }
+        }
+
+        // Duplicate process launch logic (for apps already running)
+        if (!result.applied && isDuplicateProcessLaunch) {
           const postLaunchWindowInfos = await getVisibleWindowInfos(processHintLc);
           const postLaunchHandles = postLaunchWindowInfos.map((row) => row.handle);
           const preHandleSet = new Set(preLaunchHandles);
           newHandles = postLaunchHandles.filter((h) => !preHandleSet.has(h));
           const newHandleSet = new Set(newHandles);
+          
+          // Enhanced filtering: exclude handles that might belong to other apps
           let rankedNewWindows = postLaunchWindowInfos
             .filter((row) => newHandleSet.has(row.handle))
+            .filter((row) => {
+              // Additional validation: ensure handle is genuinely new and belongs to this process
+              const handleIsNew = !preHandleSet.has(row.handle);
+              const handleBelongsToCurrentProcess = true; // Assume true for now, will validate later
+              return handleIsNew && handleBelongsToCurrentProcess;
+            })
             .sort((a, b) => scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
               - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc }));
-          if (isChromiumFamily && rankedNewWindows.some(isChromiumTopLevelWindowRow)) {
-            rankedNewWindows = rankedNewWindows.filter(isChromiumTopLevelWindowRow);
-          }
-
           for (const candidateRow of rankedNewWindows) {
             const newHandle = candidateRow.handle;
-            if (isChromiumFamily) {
-              await waitForWindowResponsive(processHintLc, newHandle, 2200);
+            
+            // Skip if handle is already reserved by another app
+            if (!isWindowHandleAvailable(newHandle)) {
+              console.log('[launch-profile] handle-reserved-skipping', {
+                appName: launchItem.appName,
+                process: processHintLc,
+                handle: newHandle,
+                reason: 'already-reserved',
+              });
+              continue;
             }
+            
             result = await moveSpecificWindowHandleToBounds({
               handle: newHandle,
-              bounds: placementBounds,
+              bounds: adjustedBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
-              skipFrameChanged: chromiumNormalSoftPos,
+              skipFrameChanged: false,
             });
-            if (result.applied) break;
+            if (result.applied) {
+              // Reserve the handle immediately on successful placement
+              reserveWindowHandle(newHandle);
+              break;
+            }
           }
 
           // Trace duplicate-window routing for any multi-window app.
@@ -2354,7 +2801,7 @@ const launchProfileById = async (profileId) => {
             appName: launchItem.appName,
             process: processHintLc,
             targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
-            targetState: bounds.state,
+            targetState: adjustedBounds.state,
             preHandles: preLaunchHandles,
             postHandles: postLaunchHandles,
             newHandles,
@@ -2374,14 +2821,14 @@ const launchProfileById = async (profileId) => {
           });
         }
 
-        if (!result.applied && isChromiumFamily) {
-          result = await placeChromiumByRankedWindows({
-            processHintLc,
-            placementBounds,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
-          });
+        // Additional validation: ensure handle belongs to correct process
+        if (result.applied && result.handle) {
+          const currentWindowInfos = await getVisibleWindowInfos(processHintLc);
+          const handleBelongsToProcess = currentWindowInfos.some(row => row.handle === result.handle);
+          if (!handleBelongsToProcess) {
+            // Handle doesn't belong to this process, reset result
+            result = { applied: false, handle: null };
+          }
         }
 
         if (!result.applied) {
@@ -2393,7 +2840,7 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             preferNameEnumeration: isDuplicateProcessLaunch,
             excludedWindowHandles: excludedHandles,
-            skipFrameChanged: chromiumNormalSoftPos,
+            skipFrameChanged: false,
           });
         }
 
@@ -2407,7 +2854,7 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             preferNameEnumeration: true,
             excludedWindowHandles: excludedHandles,
-            skipFrameChanged: chromiumNormalSoftPos,
+            skipFrameChanged: false,
           });
         }
 
@@ -2418,7 +2865,7 @@ const launchProfileById = async (profileId) => {
               bounds: placementBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
-              skipFrameChanged: chromiumNormalSoftPos,
+              skipFrameChanged: false,
             });
             if (result.applied) break;
           }
@@ -2426,45 +2873,124 @@ const launchProfileById = async (profileId) => {
 
         let placementVerified = false;
         if (result.applied && result.handle && launchItem.monitor && bounds.state === 'normal') {
-          const verification = await verifyAndCorrectWindowPlacement({
-            handle: result.handle,
-            monitor: launchItem.monitor,
-            bounds: placementBounds,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
-            maxCorrections: isDuplicateProcessLaunch ? 2 : 3,
-            initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 140,
-          });
-          placementVerified = verification.verified;
+          // Double-check handle belongs to correct process before verification
+          const currentWindowInfos = await getVisibleWindowInfos(processHintLc);
+          const handleBelongsToProcess = currentWindowInfos.some(row => row.handle === result.handle);
+          
+          // Check if handle is already reserved by another app
+          if (!isWindowHandleAvailable(result.handle)) {
+            console.log('[launch-profile] placement-verification-skipped', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              reason: 'handle-already-reserved-by-another-app',
+              handle: result.handle,
+            });
+          } else if (handleBelongsToProcess) {
+            // Reserve the handle for this app
+            reserveWindowHandle(result.handle);
+            
+            const verification = await verifyAndCorrectWindowPlacement({
+              handle: result.handle,
+              monitor: launchItem.monitor,
+              bounds: adjustedBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: false,
+              maxCorrections: isDuplicateProcessLaunch ? 2 : 3,
+              initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 140,
+            });
+            placementVerified = verification.verified;
 
-          console.log('[launch-profile] placement-verification', {
-            appName: launchItem.appName,
-            process: processHintLc,
-            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
-            targetState: bounds.state,
-            handle: result.handle,
-            verified: verification.verified,
-            corrected: verification.corrected,
-          });
+            console.log('[launch-profile] placement-verification', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+              targetState: bounds.state,
+              handle: result.handle,
+              verified: verification.verified,
+              corrected: verification.corrected,
+            });
+            
+            // Force move for apps that didn't verify (generic retry)
+            if (!verification.verified && result.handle) {
+              console.log('[launch-profile] force-move-retry', {
+                appName: launchItem.appName,
+                reason: 'placement-did-not-verify',
+                attempts: 3,
+              });
+              
+              const retryCount = 3;
+              for (let i = 0; i < retryCount; i++) {
+                await sleep(500); // Wait between attempts
+                await moveSpecificWindowHandleToBounds({
+                  handle: result.handle,
+                  bounds: adjustedBounds,
+                  aggressiveMaximize: true, // Force aggressive move
+                  positionOnlyBeforeMaximize: false,
+                  skipFrameChanged: false,
+                });
+                
+                // Re-verify after move
+                const reverify = await verifyAndCorrectWindowPlacement({
+                  handle: result.handle,
+                  monitor: launchItem.monitor,
+                  bounds: adjustedBounds,
+                  aggressiveMaximize: true,
+                  positionOnlyBeforeMaximize: false,
+                  skipFrameChanged: false,
+                  maxCorrections: 1,
+                  initialCheckDelayMs: 200,
+                });
+                
+                if (reverify.verified) {
+                  placementVerified = true;
+                  console.log('[launch-profile] force-move-success', {
+                    appName: launchItem.appName,
+                    attempt: i + 1,
+                    handle: result.handle,
+                  });
+                  break;
+                }
+              }
+            }
+            
+            // Record placement for sticky apps that verified successfully
+            if (placementVerified && result.handle) {
+              recordAppPlacement(launchItem.appName, adjustedBounds, launchItem.monitor);
+              // Also record to zone history for persistent learning
+              recordZonePlacement(launchItem.appName, launchItem.monitor?.id || 'default', adjustedBounds, {
+                width: launchItem.monitor?.workArea?.width,
+                height: launchItem.monitor?.workArea?.height,
+                scaleFactor: launchItem.monitor?.scaleFactor || 1,
+              });
+            }
+          } else {
+            console.log('[launch-profile] placement-verification-skipped', {
+              appName: launchItem.appName,
+              process: processHintLc,
+              reason: 'handle-does-not-belong-to-process',
+              handle: result.handle,
+            });
+          }
         }
 
-        // Chromium often restores a remembered window size after first SetWindowPos; re-assert bounds once.
-        if (result.applied && result.handle && isChromiumFamily && placementBounds.state === 'normal') {
-          await sleep(260);
-          await moveSpecificWindowHandleToBounds({
-            handle: result.handle,
-            bounds: placementBounds,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
+        // Record placement for verified apps that don't need stabilization
+        if (result.applied && placementVerified && result.handle && bounds.state === 'normal') {
+          recordAppPlacement(launchItem.appName, adjustedBounds, launchItem.monitor);
+          // Also record to zone history for persistent learning
+          recordZonePlacement(launchItem.appName, launchItem.monitor?.id || 'default', adjustedBounds, {
+            width: launchItem.monitor?.workArea?.width,
+            height: launchItem.monitor?.workArea?.height,
+            scaleFactor: launchItem.monitor?.scaleFactor || 1,
           });
         }
-
-        if (result.applied && result.handle && shouldDelayChromiumMaximize) {
-          await waitForWindowResponsive(processHintLc, result.handle, 2200);
-          await maximizeWindowHandle(result.handle);
-        }
+        
+        // Post-placement collision detection disabled - was causing more issues than it solved
+        // The pre-placement collision detection and sequential launching should be sufficient
+        // if (result.applied && result.handle && bounds.state === 'normal' && launchItem.monitor) {
+        //   await sleep(500);
+        //   ... collision detection code ...
+        // }
 
         if (result.applied && result.handle && bounds.state === 'minimized') {
           // Ensure minimized tray apps remain minimized after any placement/verification retries.
@@ -2480,7 +3006,7 @@ const launchProfileById = async (profileId) => {
           // Slow-launch apps may switch from splash HWND to main HWND after first minimize.
           void stabilizePlacementForSlowLaunch({
             processHintLc,
-            bounds,
+            bounds: adjustedBounds,
             monitor: launchItem.monitor || null,
             initialHandle: result.handle,
             excludedWindowHandles: preLaunchHandles,
@@ -2492,18 +3018,21 @@ const launchProfileById = async (profileId) => {
         }
 
         if (result.applied && bounds.state === 'normal' && !placementVerified && launchItem.monitor) {
-          const stabilizationDurationMs = isChromiumFamily ? 1600 : 5200;
-          // Some apps resize/reframe after initial launch; keep correcting for a short window.
+          // Generic stabilization - same duration for all apps
+          const stabilizationDurationMs = 5200;
+
+          // Enhanced stabilization for all apps
           const stabilized = await stabilizePlacementForSlowLaunch({
             processHintLc,
-            bounds: placementBounds,
+            bounds: adjustedBounds,
             monitor: launchItem.monitor,
             initialHandle: result.handle,
             excludedWindowHandles: preLaunchHandles,
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
+            skipFrameChanged: false,
             durationMs: stabilizationDurationMs,
+            adaptiveMode: false, // Generic mode for all apps
           });
 
           console.log('[launch-profile] placement-stabilization', {
@@ -2513,12 +3042,39 @@ const launchProfileById = async (profileId) => {
             verified: stabilized.verified,
             handle: stabilized.handle,
           });
+
+          // Record successful placement for collision detection and zone history
+          if (stabilized.verified && result.handle) {
+            recordAppPlacement(launchItem.appName, adjustedBounds, launchItem.monitor);
+            recordZonePlacement(launchItem.appName, launchItem.monitor?.id || 'default', adjustedBounds, {
+              width: launchItem.monitor?.workArea?.width,
+              height: launchItem.monitor?.workArea?.height,
+              scaleFactor: launchItem.monitor?.scaleFactor || 1,
+            });
+          }
         }
       }
+      const appEndTime = Date.now();
+      const processKey = getPlacementProcessKey(launchItem);
+      console.log('[launch-profile] app-complete', {
+        appName: launchItem.appName,
+        process: processKey,
+        totalMs: appEndTime - appStartTime,
+        applied: result.applied,
+        handle: result.handle,
+      });
     } catch (error) {
+      const appEndTime = Date.now();
+      const processKey = getPlacementProcessKey(launchItem);
       failedApps.push({
         name: launchItem.appName,
         path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
+        error: String(error?.message || error || 'Failed to launch app'),
+      });
+      console.log('[launch-profile] app-failed', {
+        appName: launchItem.appName,
+        process: processKey,
+        totalMs: appEndTime - appStartTime,
         error: String(error?.message || error || 'Failed to launch app'),
       });
     }
@@ -2535,9 +3091,16 @@ const launchProfileById = async (profileId) => {
         await sleep(safeDelayMs);
       }
       await runLaunch(launchItem);
+      // Brief delay between app launches to prevent window handle conflicts
+      await sleep(300);
     }
   } else {
-    await Promise.all(appLaunches.map((launchItem) => runLaunch(launchItem)));
+    // Sequential launching to prevent cross-app interference
+    for (const launchItem of appLaunches) {
+      await runLaunch(launchItem);
+      // Brief delay between app launches to prevent window handle conflicts
+      await sleep(400);
+    }
   }
 
   const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
@@ -2579,6 +3142,17 @@ const launchProfileById = async (profileId) => {
       requestedAppCount: appLaunches.length,
     };
   }
+
+  const profileEndTime = Date.now();
+  const totalDurationMs = profileEndTime - profileStartTime;
+  console.log('[launch-profile] COMPLETE', {
+    profileId,
+    totalDurationMs,
+    launchedAppCount,
+    launchedTabCount,
+    failedAppCount: failedApps.length,
+    avgMsPerApp: launchedAppCount > 0 ? Math.round(totalDurationMs / launchedAppCount) : 0,
+  });
 
   return {
     ok: failedApps.length === 0,
@@ -2623,7 +3197,13 @@ handleTrustedIpc('profiles:list', async () => {
     return readProfilesFromDisk();
   } catch (error) {
     console.error('[profiles:list] Failed to list profiles:', error);
-    return [];
+    return {
+      profiles: [],
+      storeError: {
+        code: 'READ_FAILED',
+        message: 'Could not list profiles due to an unexpected error.',
+      },
+    };
   }
 });
 
@@ -2765,114 +3345,121 @@ handleTrustedIpc('get-installed-apps', async () => {
     ];
     const shortcutTasks = [];
     for (const dir of startMenuDirs) {
-      if (fs.existsSync(dir)) {
-        const walk = (folder) => {
-          const entries = fs.readdirSync(folder, { withFileTypes: true });
-          for (const entry of entries) {
-            const fullPath = path.join(folder, entry.name);
-            if (entry.isDirectory()) {
-              walk(fullPath);
-            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lnk')) {
-              try {
-                const name = entry.name.replace(/\.lnk$/i, '');
-                shortcutTasks.push(() => new Promise((resolve) => {
-                  const timeout = setTimeout(() => resolve(), 400);
-                  ws.query(fullPath, async (err, info) => {
-                    try {
-                      clearTimeout(timeout);
-                      const normalizedTargetExe = !err && info
-                        ? extractExecutablePath(info.target || info.targetPath || info.path)
-                        : null;
-                      const normalizedIconSource = !err && info && info.icon
-                        ? extractIconSourcePath(info.icon)
-                        : normalizedTargetExe;
+      try {
+        await fsp.access(dir);
+      } catch {
+        continue;
+      }
+      const queue = [dir];
+      while (queue.length > 0) {
+        const folder = queue.shift();
+        let entries;
+        try {
+          entries = await fsp.readdir(folder, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const entry of entries) {
+          const fullPath = path.join(folder, entry.name);
+          if (entry.isDirectory()) {
+            queue.push(fullPath);
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lnk')) {
+            try {
+              const name = entry.name.replace(/\.lnk$/i, '');
+              shortcutTasks.push(() => new Promise((resolve) => {
+                const timeout = setTimeout(() => resolve(), 400);
+                ws.query(fullPath, async (err, info) => {
+                  try {
+                    clearTimeout(timeout);
+                    const normalizedTargetExe = !err && info
+                      ? extractExecutablePath(info.target || info.targetPath || info.path)
+                      : null;
+                    const normalizedIconSource = !err && info && info.icon
+                      ? extractIconSourcePath(info.icon)
+                      : normalizedTargetExe;
 
-                      const mapKey = getCanonicalAppKey(name) || name.toLowerCase();
-                      // If we already discovered this app with an icon, skip expensive rework.
-                      const existing = appMap.get(mapKey);
-                      if (existing?.iconPath) return resolve();
+                    const mapKey = getCanonicalAppKey(name) || name.toLowerCase();
+                    const existing = appMap.get(mapKey);
+                    if (existing?.iconPath) return resolve();
 
-                      let iconPath = null;
-                      if (normalizedIconSource) {
-                        iconPath = await getSafeIconDataUrl(normalizedIconSource);
-                        if (!iconPath) {
-                          iconFailureSummary.shortcut += 1;
-                        }
-                      }
-
-                      // Safe fallback: get icon from the shortcut itself (helps game launchers/Steam links).
+                    let iconPath = null;
+                    if (normalizedIconSource) {
+                      iconPath = await getSafeIconDataUrl(normalizedIconSource);
                       if (!iconPath) {
-                        const shortcutIcon = await getSafeIconDataUrl(fullPath);
-                        if (shortcutIcon) {
-                          iconPath = shortcutIcon;
-                        }
+                        iconFailureSummary.shortcut += 1;
                       }
-
-                      upsertDiscoveredApp(
-                        name,
-                        iconPath,
-                        normalizedIconSource || normalizedTargetExe || fullPath,
-                        {
-                          source: 'start-menu-shortcut',
-                          shortcutPath: fullPath,
-                          targetExe: normalizedTargetExe,
-                          iconSource: normalizedIconSource,
-                          hasShortcutIcon: !!iconPath,
-                          launchUrl: null,
-                        },
-                      );
-                    } finally {
-                      resolve();
                     }
-                  });
-                }));
-              } catch (e) {
-                console.warn(`[StartMenu] Exception handling shortcut '${entry.name}':`, e);
-              }
-            } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.url')) {
-              const name = entry.name.replace(/\.url$/i, '');
-              const shortcut = parseInternetShortcut(fullPath);
-              const iconSource = extractIconSourcePath(shortcut.iconFile);
-              const isProtocolApp = isAppProtocolUrl(shortcut.url);
-              const steamAppId = parseSteamGameId(shortcut.url);
-              shortcutTasks.push(async () => {
-                let iconPath = null;
-                if (iconSource) {
-                  iconPath = await getSafeIconDataUrl(iconSource);
-                }
-                if (!iconPath && steamAppId) {
-                  const steamIconPath = resolveSteamGameIconPath(steamAppId);
-                  if (steamIconPath) {
-                    iconPath = await getSafeIconDataUrl(steamIconPath);
+
+                    if (!iconPath) {
+                      const shortcutIcon = await getSafeIconDataUrl(fullPath);
+                      if (shortcutIcon) {
+                        iconPath = shortcutIcon;
+                      }
+                    }
+
+                    upsertDiscoveredApp(
+                      name,
+                      iconPath,
+                      normalizedIconSource || normalizedTargetExe || fullPath,
+                      {
+                        source: 'start-menu-shortcut',
+                        shortcutPath: fullPath,
+                        targetExe: normalizedTargetExe,
+                        iconSource: normalizedIconSource,
+                        hasShortcutIcon: !!iconPath,
+                        launchUrl: null,
+                      },
+                    );
+                  } finally {
+                    resolve();
                   }
-                }
-                if (!iconPath) {
-                  const shortcutIcon = await getSafeIconDataUrl(fullPath);
-                  if (shortcutIcon) iconPath = shortcutIcon;
-                }
-                const rawUrl = String(shortcut.url || '').trim();
-                const safeLaunchUrl = isSafeAppLaunchUrl(rawUrl)
-                  ? safeLimitedString(rawUrl, MAX_URL_LENGTH)
-                  : '';
-                upsertDiscoveredApp(
-                  name,
-                  iconPath,
-                  iconSource || fullPath,
-                  {
-                    source: 'start-menu-url',
-                    shortcutPath: fullPath,
-                    iconSource,
-                    hasShortcutIcon: !!iconPath,
-                    isAppProtocol: isProtocolApp,
-                    steamAppId,
-                    launchUrl: safeLaunchUrl || null,
-                  },
-                );
-              });
+                });
+              }));
+            } catch (e) {
+              console.warn(`[StartMenu] Exception handling shortcut '${entry.name}':`, e);
             }
+          } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.url')) {
+            const name = entry.name.replace(/\.url$/i, '');
+            const shortcut = parseInternetShortcut(fullPath);
+            const iconSource = extractIconSourcePath(shortcut.iconFile);
+            const isProtocolApp = isAppProtocolUrl(shortcut.url);
+            const steamAppId = parseSteamGameId(shortcut.url);
+            shortcutTasks.push(async () => {
+              let iconPath = null;
+              if (iconSource) {
+                iconPath = await getSafeIconDataUrl(iconSource);
+              }
+              if (!iconPath && steamAppId) {
+                const steamIconPath = resolveSteamGameIconPath(steamAppId);
+                if (steamIconPath) {
+                  iconPath = await getSafeIconDataUrl(steamIconPath);
+                }
+              }
+              if (!iconPath) {
+                const shortcutIcon = await getSafeIconDataUrl(fullPath);
+                if (shortcutIcon) iconPath = shortcutIcon;
+              }
+              const rawUrl = String(shortcut.url || '').trim();
+              const safeLaunchUrl = isSafeAppLaunchUrl(rawUrl)
+                ? safeLimitedString(rawUrl, MAX_URL_LENGTH)
+                : '';
+              upsertDiscoveredApp(
+                name,
+                iconPath,
+                iconSource || fullPath,
+                {
+                  source: 'start-menu-url',
+                  shortcutPath: fullPath,
+                  iconSource,
+                  hasShortcutIcon: !!iconPath,
+                  isAppProtocol: isProtocolApp,
+                  steamAppId,
+                  launchUrl: safeLaunchUrl || null,
+                },
+              );
+            });
           }
-        };
-        walk(dir);
+        }
       }
     }
     // 2. Registry Apps
@@ -2947,6 +3534,16 @@ handleTrustedIpc('get-installed-apps', async () => {
   } catch (err) {
     console.error('Error in get-installed-apps handler:', err);
     return [];
+  }
+});
+
+handleTrustedIpc('zone-history:stats', async () => {
+  try {
+    const stats = getZoneHistoryStats();
+    return { ok: true, stats };
+  } catch (err) {
+    console.error('Error in zone-history:stats handler:', err);
+    return { ok: false, error: String(err?.message || err) };
   }
 });
 

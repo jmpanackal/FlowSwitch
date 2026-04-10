@@ -9,6 +9,8 @@ const PROFILE_STORE_FILENAME = 'profiles.v1.json';
 const MAGIC = Buffer.from([0x46, 0x4c, 0x53, 0x32]); // "FLS2"
 const FORMAT_VERSION = 1;
 
+/** @typedef {{ code: string, message: string }} ProfileStoreReadError */
+
 const normalizeProfiles = (raw) => (Array.isArray(raw) ? raw : []);
 
 const getProfileStorePath = () => (
@@ -21,31 +23,105 @@ const parseProfilesPayload = (parsed) => {
   return [];
 };
 
+const mapSanitizedProfiles = (profiles) => (
+  profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)))
+);
+
+/**
+ * Read profiles from disk. Never silently drops encrypted data: if the OS cannot
+ * decrypt, `storeError` is set and `profiles` is empty.
+ * @returns {{ profiles: unknown[], storeError: ProfileStoreReadError | null }}
+ */
 const readProfilesFromDisk = () => {
   const storePath = getProfileStorePath();
-  if (!fs.existsSync(storePath)) return [];
+  if (!fs.existsSync(storePath)) {
+    return { profiles: [], storeError: null };
+  }
 
   try {
     const buf = fs.readFileSync(storePath);
     if (buf.length >= 5 && buf.subarray(0, 4).equals(MAGIC) && buf[4] === FORMAT_VERSION) {
       if (!safeStorage.isEncryptionAvailable()) {
+        const message = (
+          'Your profile data is encrypted, but this PC cannot use OS secure storage to unlock it '
+          + '(encryption unavailable). Your profiles were not loaded. '
+          + 'Try signing into Windows with your usual account or move userData to a machine '
+          + 'where Electron safeStorage works.'
+        );
         console.error('[profile-store] Encrypted store present but OS encryption is unavailable');
-        return [];
+        return {
+          profiles: [],
+          storeError: { code: 'ENCRYPTION_UNAVAILABLE', message },
+        };
       }
       const encrypted = buf.subarray(5);
-      const decrypted = safeStorage.decryptString(encrypted);
-      const parsed = JSON.parse(decrypted);
+      let decrypted;
+      try {
+        decrypted = safeStorage.decryptString(encrypted);
+      } catch (err) {
+        console.error('[profile-store] Decrypt failed:', err);
+        return {
+          profiles: [],
+          storeError: {
+            code: 'DECRYPT_FAILED',
+            message: (
+              'Could not decrypt your profile data. The file may be corrupted, '
+              + 'or it was created under a different Windows user or machine.'
+            ),
+          },
+        };
+      }
+      let parsed;
+      try {
+        parsed = JSON.parse(decrypted);
+      } catch (err) {
+        console.error('[profile-store] JSON parse failed (encrypted payload):', err);
+        return {
+          profiles: [],
+          storeError: {
+            code: 'PARSE_FAILED',
+            message: 'Decrypted profile data could not be read. The file may be damaged.',
+          },
+        };
+      }
       const profiles = parseProfilesPayload(parsed);
-      return profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
+      return {
+        profiles: mapSanitizedProfiles(profiles),
+        storeError: null,
+      };
     }
 
-    const content = buf.toString('utf8');
-    const parsed = JSON.parse(content);
+    let parsed;
+    try {
+      parsed = JSON.parse(buf.toString('utf8'));
+    } catch (err) {
+      console.error('[profile-store] JSON parse failed (plain JSON):', err);
+      return {
+        profiles: [],
+        storeError: {
+          code: 'PARSE_FAILED',
+          message: (
+            'Your profiles file could not be parsed. It may be damaged or edited incorrectly.'
+          ),
+        },
+      };
+    }
     const profiles = parseProfilesPayload(parsed);
-    return profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
+    return {
+      profiles: mapSanitizedProfiles(profiles),
+      storeError: null,
+    };
   } catch (error) {
     console.error('[profile-store] Failed to read profiles:', error);
-    return [];
+    return {
+      profiles: [],
+      storeError: {
+        code: 'READ_FAILED',
+        message: (
+          'Could not read your saved profiles (for example a permission or disk error).'
+        ),
+      },
+    };
   }
 };
 
