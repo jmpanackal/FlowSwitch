@@ -1081,9 +1081,9 @@ export function MonitorLayout({
     const updateCallback = onUpdateApp;
     
     // Get snap state from multiple sources
-    let currentSnapZone = localDragState.snapZone || localDragState.lastValidSnapState?.snapZone || lastValidSnapStateRef.current?.snapZone;
-    let currentConflictItem = localDragState.conflictItem || localDragState.lastValidSnapState?.conflictItem || lastValidSnapStateRef.current?.conflictItem;
-    let currentDisplacementZone = localDragState.displacementZone || localDragState.lastValidSnapState?.displacementZone || lastValidSnapStateRef.current?.displacementZone;
+    const currentSnapZone = localDragState.snapZone || localDragState.lastValidSnapState?.snapZone || lastValidSnapStateRef.current?.snapZone;
+    const currentConflictItem = localDragState.conflictItem || localDragState.lastValidSnapState?.conflictItem || lastValidSnapStateRef.current?.conflictItem;
+    const currentDisplacementZone = localDragState.displacementZone || localDragState.lastValidSnapState?.displacementZone || lastValidSnapStateRef.current?.displacementZone;
     
     if (currentSnapZone && updateCallback) {
       if (currentConflictItem && currentDisplacementZone && onUpdateAppsWithDisplacement && itemType === 'app') {
