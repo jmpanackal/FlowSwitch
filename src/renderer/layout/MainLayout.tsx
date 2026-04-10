@@ -36,6 +36,10 @@ import type { FlowProfile } from "../../types/flow-profile";
 import { toSerializableProfiles } from "../../types/flow-profile";
 import { useProfilesPersistence } from "./hooks/useProfilesPersistence";
 import { useLaunchFeedback } from "./hooks/useLaunchFeedback";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "./utils/documentTextSelection";
 
 interface SelectedApp {
   type: "app" | "browser";
@@ -681,7 +685,7 @@ export default function App() {
         handleGlobalMouseMove,
       );
       document.addEventListener("mouseup", handleGlobalMouseUp);
-      document.body.style.userSelect = "none";
+      suspendDocumentTextSelection();
       document.body.style.cursor = "grabbing";
     },
     [isEditMode],
@@ -758,7 +762,7 @@ export default function App() {
         "mouseup",
         handleGlobalMouseUp,
       );
-      document.body.style.userSelect = "";
+      restoreDocumentTextSelection();
       document.body.style.cursor = "";
     },
     [currentProfile],

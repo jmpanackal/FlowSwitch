@@ -4,6 +4,11 @@ import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AppSettings } from "./AppSettings";
 import { safeIconSrc } from "../../utils/safeIconSrc";
+import { startMonitorPercentResize } from "../utils/monitorPercentResize";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 
 interface BaseItem {
   name: string;
@@ -658,7 +663,7 @@ export function AppFileWindow({
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = 'none';
+    suspendDocumentTextSelection();
   };
 
   const handleMouseMoveForClickDetection = (e: MouseEvent) => {
@@ -689,7 +694,7 @@ export function AppFileWindow({
 
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
     document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = '';
+    restoreDocumentTextSelection();
 
     mouseStateRef.current.isMouseDown = false;
 
@@ -826,7 +831,7 @@ export function AppFileWindow({
     
     document.removeEventListener('mousemove', handleGlobalMouseMove);
     document.removeEventListener('mouseup', handleGlobalMouseUp);
-    document.body.style.userSelect = '';
+    restoreDocumentTextSelection();
     
     onDragEnd();
     
@@ -835,48 +840,20 @@ export function AppFileWindow({
     mouseStateRef.current.isMouseDown = false;
   };
 
-  // Resize handling
   const handleResizeStart = (e: React.MouseEvent, direction: string) => {
     if (!isEditable) return;
-    
+
     e.preventDefault();
     e.stopPropagation();
     setIsResizing(true);
-    
-    const startX = e.clientX;
-    const startY = e.clientY;
-    const startSize = { ...item.size };
-    
-    const handleMouseMove = (e: MouseEvent) => {
-      const deltaX = e.clientX - startX;
-      const deltaY = e.clientY - startY;
-      
-      const parentRect = (e.target as HTMLElement).closest('.monitor-container')?.getBoundingClientRect();
-      if (!parentRect) return;
-      
-      const percentX = (deltaX / parentRect.width) * 100;
-      const percentY = (deltaY / parentRect.height) * 100;
-      
-      const newSize = { ...startSize };
-      
-      if (direction.includes('right')) {
-        newSize.width = Math.max(15, Math.min(90, startSize.width + percentX));
-      }
-      if (direction.includes('bottom')) {
-        newSize.height = Math.max(15, Math.min(90, startSize.height + percentY));
-      }
-      
-      onResize(newSize);
-    };
-    
-    const handleMouseUp = () => {
-      document.removeEventListener('mousemove', handleMouseMove);
-      document.removeEventListener('mouseup', handleMouseUp);
-      setIsResizing(false);
-    };
-    
-    document.addEventListener('mousemove', handleMouseMove);
-    document.addEventListener('mouseup', handleMouseUp);
+
+    startMonitorPercentResize(
+      e,
+      direction,
+      { ...item.size },
+      onResize,
+      () => setIsResizing(false),
+    );
   };
 
   // Button click handlers

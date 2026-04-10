@@ -2,6 +2,10 @@ import { useState, useRef, useEffect } from "react";
 import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, Play, ChevronRight, ChevronDown, Folder, FolderPlus, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3 } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AddContentModal } from "./AddContentModal";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 
 // Enhanced content types for the unified system
 interface ContentFolder {
@@ -374,7 +378,7 @@ export function ContentManager({
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = 'none';
+    suspendDocumentTextSelection();
   };
 
   const handleMouseMoveForClickDetection = (e: MouseEvent) => {
@@ -419,7 +423,7 @@ export function ContentManager({
     // Remove global listeners
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
     document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = '';
+    restoreDocumentTextSelection();
   };
 
   const initiateDrag = (clientX: number, clientY: number) => {

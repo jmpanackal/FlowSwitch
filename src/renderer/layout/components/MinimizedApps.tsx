@@ -5,6 +5,10 @@ import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, 
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 
 interface MinimizedApp {
   name: string;
@@ -186,7 +190,7 @@ export function MinimizedApps({
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = 'none';
+    suspendDocumentTextSelection();
   };
 
   // Handle delete with confirmation
@@ -236,7 +240,7 @@ export function MinimizedApps({
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = 'none';
+    suspendDocumentTextSelection();
   };
 
   const handleMouseMoveForClickDetection = (e: MouseEvent) => {
@@ -292,7 +296,7 @@ export function MinimizedApps({
     // Remove global listeners
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
     document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-    document.body.style.userSelect = '';
+    restoreDocumentTextSelection();
   };
 
   const initiateDrag = (clientX: number, clientY: number) => {
