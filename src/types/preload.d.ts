@@ -1,4 +1,5 @@
 import type { Profile } from './profile';
+import type { FlowProfile, ProfileListResult } from './flow-profile';
 
 export {};
 
@@ -8,6 +9,8 @@ declare global {
       launchProfile: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;
+        storeErrorCode?: string;
+        requestedProfileId?: string;
         profile?: Profile;
         launchedAppCount?: number;
         launchedTabCount?: number;
@@ -71,8 +74,18 @@ declare global {
         layoutPosition?: { x: number; y: number };
         apps: Array<unknown>;
       }>>;
-      listProfiles: () => Promise<any[]>;
-      saveProfiles: (profiles: any[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
+      listProfiles: () => Promise<ProfileListResult>;
+      saveProfiles: (profiles: FlowProfile[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
+      getZoneHistoryStats: () => Promise<{
+        ok: boolean;
+        stats?: {
+          totalEntries: number;
+          totalUseCount: number;
+          mostUsedApp: string | null;
+          maxUseCount: number;
+        };
+        error?: string;
+      }>;
     };
   }
 }

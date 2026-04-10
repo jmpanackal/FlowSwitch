@@ -32,35 +32,10 @@ import {
 } from "lucide-react";
 import { DragState, DragSourceType } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
-
-type FlowProfile = {
-  id: string;
-  name: string;
-  description: string;
-  icon: string;
-  appCount: number;
-  tabCount: number;
-  fileCount: number;
-  globalVolume: number;
-  backgroundBehavior: "keep" | "minimize" | "close";
-  restrictedApps: string[];
-  estimatedStartupTime: number;
-  onStartup: boolean;
-  autoLaunchOnBoot: boolean;
-  autoSwitchTime: string | null;
-  hotkey: string;
-  schedule?: any;
-  launchMinimized: boolean;
-  launchMaximized: boolean;
-  launchOrder: "all-at-once" | "sequential";
-  appLaunchDelays: Record<string, number>;
-  monitors: any[];
-  minimizedApps: any[];
-  minimizedFiles: any[];
-  files: any[];
-  browserTabs: any[];
-  [key: string]: any;
-};
+import type { FlowProfile } from "../../types/flow-profile";
+import { toSerializableProfiles } from "../../types/flow-profile";
+import { useProfilesPersistence } from "./hooks/useProfilesPersistence";
+import { useLaunchFeedback } from "./hooks/useLaunchFeedback";
 
 interface SelectedApp {
   type: "app" | "browser";
@@ -70,35 +45,19 @@ interface SelectedApp {
   data: any;
 }
 
-interface LaunchFeedbackState {
-  status: "idle" | "in-progress" | "success" | "error";
-  message: string;
-}
-
-const toSerializableProfiles = (inputProfiles: FlowProfile[]) => {
-  try {
-    return JSON.parse(JSON.stringify(inputProfiles));
-  } catch {
-    // Last-resort fallback to keep profile saves resilient.
-    return (Array.isArray(inputProfiles) ? inputProfiles : []).map(
-      (profile) => ({ ...profile }),
-    );
-  }
-};
-
 export default function App() {
-  const [profiles, setProfiles] = useState<FlowProfile[]>([]);
-  const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [selectedProfile, setSelectedProfile] =
     useState<string>("");
+  const {
+    profiles,
+    setProfiles,
+    profilesLoaded,
+    profileStoreError,
+    skipNextAutosaveRef,
+  } = useProfilesPersistence({ setSelectedProfileId: setSelectedProfile });
   const [isLaunching, setIsLaunching] = useState(false);
-  const [launchFeedback, setLaunchFeedback] =
-    useState<LaunchFeedbackState>({
-      status: "idle",
-      message: "",
-    });
-  const launchFeedbackTimeoutRef = useRef<number | null>(null);
-  const skipNextAutosaveRef = useRef(true);
+  const { launchFeedback, setLaunchFeedback, launchFeedbackTimeoutRef } =
+    useLaunchFeedback();
   const [isEditMode, setIsEditMode] = useState(false);
   const [
     selectedProfileForSettings,
@@ -115,109 +74,6 @@ export default function App() {
     useState(false);
   const [showProfileDropdown, setShowProfileDropdown] =
     useState(false);
-
-  useEffect(() => {
-    let cancelled = false;
-
-    const normalizeProfile = (rawProfile: any): FlowProfile => ({
-      ...rawProfile,
-      id: String(rawProfile?.id || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
-      name: String(rawProfile?.name || "Untitled Profile"),
-      description: String(rawProfile?.description || "Profile without description"),
-      icon: String(rawProfile?.icon || "work"),
-      appCount: Number(rawProfile?.appCount || 0),
-      tabCount: Number(rawProfile?.tabCount || 0),
-      fileCount: Number(rawProfile?.fileCount || 0),
-      globalVolume: Number(rawProfile?.globalVolume || 70),
-      backgroundBehavior: (
-        rawProfile?.backgroundBehavior === "minimize"
-        || rawProfile?.backgroundBehavior === "close"
-      ) ? rawProfile.backgroundBehavior : "keep",
-      estimatedStartupTime: Number(rawProfile?.estimatedStartupTime || 3),
-      onStartup: Boolean(rawProfile?.onStartup),
-      autoLaunchOnBoot: Boolean(rawProfile?.autoLaunchOnBoot),
-      autoSwitchTime: rawProfile?.autoSwitchTime || null,
-      hotkey: rawProfile?.hotkey || "",
-      launchMinimized: Boolean(rawProfile?.launchMinimized),
-      launchMaximized: Boolean(rawProfile?.launchMaximized),
-      launchOrder: rawProfile?.launchOrder === "sequential" ? "sequential" : "all-at-once",
-      monitors: Array.isArray(rawProfile?.monitors) ? rawProfile.monitors : [],
-      minimizedApps: Array.isArray(rawProfile?.minimizedApps) ? rawProfile.minimizedApps : [],
-      minimizedFiles: Array.isArray(rawProfile?.minimizedFiles) ? rawProfile.minimizedFiles : [],
-      browserTabs: Array.isArray(rawProfile?.browserTabs) ? rawProfile.browserTabs : [],
-      files: Array.isArray(rawProfile?.files) ? rawProfile.files : [],
-      contentItems: Array.isArray(rawProfile?.contentItems) ? rawProfile.contentItems : [],
-      contentFolders: Array.isArray(rawProfile?.contentFolders) ? rawProfile.contentFolders : [],
-      restrictedApps: Array.isArray(rawProfile?.restrictedApps) ? rawProfile.restrictedApps : [],
-      appLaunchDelays: rawProfile?.appLaunchDelays && typeof rawProfile.appLaunchDelays === "object"
-        ? rawProfile.appLaunchDelays
-        : {},
-    });
-
-    const loadProfiles = async () => {
-      if (!window.electron?.listProfiles) {
-        if (!cancelled) setProfilesLoaded(true);
-        return;
-      }
-
-      try {
-        const storedProfiles = await window.electron.listProfiles();
-        if (cancelled) return;
-
-        const normalizedProfiles = Array.isArray(storedProfiles)
-          ? storedProfiles.map(normalizeProfile)
-          : [];
-        setProfiles(normalizedProfiles);
-        setSelectedProfile((prev) => prev || normalizedProfiles[0]?.id || "");
-      } catch (error) {
-        console.error("Failed to load persisted profiles:", error);
-      } finally {
-        if (!cancelled) setProfilesLoaded(true);
-      }
-    };
-
-    void loadProfiles();
-
-    return () => {
-      cancelled = true;
-    };
-  }, []);
-
-  useEffect(() => (
-    () => {
-      if (launchFeedbackTimeoutRef.current) {
-        window.clearTimeout(launchFeedbackTimeoutRef.current);
-      }
-    }
-  ), []);
-
-  useEffect(() => {
-    if (!profilesLoaded) return;
-    if (!window.electron?.saveProfiles) return;
-    if (skipNextAutosaveRef.current) {
-      skipNextAutosaveRef.current = false;
-      return;
-    }
-
-    const timer = window.setTimeout(() => {
-      void window.electron.saveProfiles(profiles).catch((error) => {
-        console.error("Failed to save persisted profiles:", error);
-      });
-    }, 200);
-
-    return () => {
-      window.clearTimeout(timer);
-    };
-  }, [profiles, profilesLoaded]);
-
-  useEffect(() => {
-    if (!profilesLoaded) return;
-
-    setSelectedProfile((prev) => {
-      if (prev && profiles.some((profile) => profile.id === prev)) return prev;
-      return profiles[0]?.id || "";
-    });
-  }, [profiles, profilesLoaded]);
 
   // Ref for the dropdown container
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -372,7 +228,7 @@ export default function App() {
         appData.name?.toLowerCase().includes("edge");
 
       // Get fresh app data with current browser tabs
-      let freshAppData = { ...appData };
+      const freshAppData = { ...appData };
 
       if (isBrowser) {
         if (source === "monitor" && monitorId) {
@@ -514,7 +370,7 @@ export default function App() {
             .includes("safari") ||
           selectedApp.data.name?.toLowerCase().includes("edge");
 
-        let updatedData = { ...selectedApp.data, ...updates };
+        const updatedData = { ...selectedApp.data, ...updates };
 
         if (isBrowser) {
           // NEW: Use instance ID for precise tab matching
@@ -2587,6 +2443,18 @@ export default function App() {
 
   return (
     <div className="h-screen overflow-hidden flow-shell-canvas">
+      {profileStoreError ? (
+        <div
+          className="shrink-0 px-4 py-2 bg-amber-950/80 border-b border-amber-700/60 text-amber-100 text-xs"
+          role="alert"
+        >
+          <strong className="font-semibold">Profiles could not be loaded.</strong>
+          {" "}
+          {profileStoreError.message}
+          {" "}
+          Autosave is disabled until you restart the app after the issue is resolved, to avoid overwriting your data.
+        </div>
+      ) : null}
       <div className="app-drag-region h-9 px-3 flow-shell-titlebar flex items-center justify-between select-none">
         <div className="flex items-center gap-2">
           <img

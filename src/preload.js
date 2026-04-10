@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('electron', {
   // Profile persistence API
   listProfiles: () => ipcRenderer.invoke('profiles:list'),
   saveProfiles: (profiles) => ipcRenderer.invoke('profiles:save-all', profiles),
+
+  // Zone placement history (main-process stats)
+  getZoneHistoryStats: () => ipcRenderer.invoke('zone-history:stats'),
 });
