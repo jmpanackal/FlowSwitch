@@ -697,7 +697,7 @@ const buildSystemMonitorSnapshot = () => {
     let workAreaPhysical = null;
     if (process.platform === 'win32') {
       try {
-        workAreaPhysical = screen.dipToScreenRect(display, {
+        workAreaPhysical = screen.dipToScreenRect(null, {
           x: display.workArea.x,
           y: display.workArea.y,
           width: display.workArea.width,
@@ -763,23 +763,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
-const getElectronDisplayForMonitor = (monitor) => {
-  try {
-    const { screen } = require('electron');
-    const rawId = monitor?.displayId;
-    if (rawId === undefined || rawId === null) return null;
-    const displays = screen.getAllDisplays();
-    return displays.find((d) => d.id === rawId) || null;
-  } catch {
-    return null;
-  }
-};
-
 /**
- * Electron Display bounds/workArea are DIP; Win32 SetWindowPos expects physical pixels on Windows.
- * Use the monitor's display for conversion so multi-monitor DPI scaling does not skew placement.
+ * Electron Display bounds/workArea are DIP; Win32 SetWindowPos in a DPI-aware
+ * PowerShell process expects physical screen pixels.
+ *
+ * `screen.dipToScreenRect(null, rect)` converts using the display nearest to `rect`.
+ * Passing a Display object (not BrowserWindow) caused a silent failure in earlier code.
  */
-const physicalBoundsFromDip = (dipBounds, monitor) => {
+const physicalBoundsFromDip = (dipBounds) => {
   if (process.platform !== 'win32' || !dipBounds) return dipBounds;
   try {
     const { screen } = require('electron');
@@ -789,12 +780,7 @@ const physicalBoundsFromDip = (dipBounds, monitor) => {
       width: Math.round(Number(dipBounds.width)),
       height: Math.round(Number(dipBounds.height)),
     };
-    const display = getElectronDisplayForMonitor(monitor)
-      || screen.getDisplayNearestPoint({
-        x: Math.floor(rect.x + rect.width / 2),
-        y: Math.floor(rect.y + rect.height / 2),
-      });
-    const p = screen.dipToScreenRect(display, rect);
+    const p = screen.dipToScreenRect(null, rect);
     return {
       left: p.x,
       top: p.y,
@@ -1000,6 +986,54 @@ const trySnapLayoutPartitionBounds = ({
     }
   }
 
+  // Quadrant layouts: half-width + half-height (4-quadrants preset).
+  if (isHalfWidth && isHalfHeight) {
+    const leftW = Math.floor(ww / 2);
+    const rightW = ww - leftW;
+    const topH = Math.floor(wh / 2);
+    const bottomH = wh - topH;
+    const isLeft = centerXPct < 50;
+    const isTop = centerYPct < 50;
+    return {
+      left: isLeft ? wx : wx + leftW,
+      top: isTop ? wy : wy + topH,
+      width: isLeft ? leftW : rightW,
+      height: isTop ? topH : bottomH,
+      state: 'normal',
+    };
+  }
+
+  // Three horizontal rows (~33% height each): partition exactly like 3-columns does for width.
+  const isThirdHeight = heightPct >= 27 && heightPct <= 40;
+  if (isFullWidth && isThirdHeight) {
+    const h0 = Math.floor(wh / 3);
+    const h1 = Math.floor((wh - h0) / 2);
+    const h2 = wh - h0 - h1;
+    let row = 1;
+    if (centerYPct < 37) row = 0;
+    else if (centerYPct > 63) row = 2;
+    if (row === 0) return { left: wx, top: wy, width: ww, height: h0, state: 'normal' };
+    if (row === 1) return { left: wx, top: wy + h0, width: ww, height: h1, state: 'normal' };
+    return { left: wx, top: wy + h0 + h1, width: ww, height: h2, state: 'normal' };
+  }
+
+  // Four vertical panels (25% width each).
+  const isQuarterWidth = widthPct >= 20 && widthPct <= 30;
+  if (isQuarterWidth && isFullHeight) {
+    const w0 = Math.floor(ww / 4);
+    const w1 = Math.floor((ww - w0) / 3);
+    const w2 = Math.floor((ww - w0 - w1) / 2);
+    const w3 = ww - w0 - w1 - w2;
+    let col = 0;
+    if (centerXPct >= 20 && centerXPct < 45) col = 1;
+    else if (centerXPct >= 45 && centerXPct < 70) col = 2;
+    else if (centerXPct >= 70) col = 3;
+    const widths = [w0, w1, w2, w3];
+    let x = wx;
+    for (let i = 0; i < col; i++) x += widths[i];
+    return { left: x, top: wy, width: widths[col], height: wh, state: 'normal' };
+  }
+
   return null;
 };
 
@@ -1028,8 +1062,14 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
   const heightPct = clamp(Number(appSize.height || 70), 5, 100);
   const centerXPct = clamp(Number(appPosition.x || 50), 0, 100);
   const centerYPct = clamp(Number(appPosition.y || 50), 0, 100);
-  const shouldForceFullscreen = launchState === 'maximized' || app?.launchBehavior === 'maximize';
-  const shouldMinimize = launchState === 'minimized' || app?.launchBehavior === 'minimize';
+  const shouldMinimize = (
+    launchState === 'minimized'
+    || app?.launchBehavior === 'minimize'
+    || app?._launchFromMinimizedTray === true
+  );
+  // Minimize intent wins over maximize/profile defaults.
+  const shouldForceFullscreen = !shouldMinimize
+    && (launchState === 'maximized' || app?.launchBehavior === 'maximize');
   const looksFullscreenByGeometry = widthPct >= 95 && heightPct >= 95;
   const minimizedWithoutSavedGeometry = (
     shouldMinimize
@@ -1037,7 +1077,16 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
     && !(hasExplicitSize && hasExplicitPosition)
   );
 
-  const finalizeBounds = (b) => physicalBoundsFromDip(b, monitor);
+  const finalizeBounds = (b) => physicalBoundsFromDip(b);
+
+  // Windows 11 apps have an invisible shadow/resize border (~7px at 96 DPI, scales with DPI).
+  // When Windows 11 snaps windows, it extends SetWindowPos bounds past the visible area so
+  // adjacent shadows overlap and windows appear edge-to-edge with no gaps.
+  // Derive the scale factor from monitor data so the extension matches the actual shadow size.
+  const dipW = workArea.width || 1;
+  const physW = monitor?.workAreaPhysical?.width || dipW;
+  const scaleFactor = physW / dipW;
+  const framePx = Math.round(7 * scaleFactor);
 
   if (shouldForceFullscreen || looksFullscreenByGeometry || minimizedWithoutSavedGeometry) {
     return finalizeBounds({
@@ -1057,15 +1106,33 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
     centerYPct,
     shouldMinimize,
   });
-  if (snapBounds) return finalizeBounds(snapBounds);
+  if (snapBounds) {
+    const phys = finalizeBounds(snapBounds);
+    return {
+      ...phys,
+      left: phys.left - framePx,
+      width: phys.width + (2 * framePx),
+      height: phys.height + framePx,
+    };
+  }
 
-  const width = Math.round(clamp((workArea.width * widthPct) / 100, 280, workArea.width));
-  const height = Math.round(clamp((workArea.height * heightPct) / 100, 220, workArea.height));
-  const left = Math.round(workArea.x + ((centerXPct / 100) * workArea.width) - (width / 2));
-  const top = Math.round(workArea.y + ((centerYPct / 100) * workArea.height) - (height / 2));
+  // Convert from center/size percentages into edge percentages first, then round edges to pixels.
+  // This keeps shared boundaries (and monitor edges) aligned without 1px gaps between snapped apps.
+  const leftPct = clamp(centerXPct - (widthPct / 2), 0, 100);
+  const topPct = clamp(centerYPct - (heightPct / 2), 0, 100);
+  const rightPct = clamp(centerXPct + (widthPct / 2), 0, 100);
+  const bottomPct = clamp(centerYPct + (heightPct / 2), 0, 100);
 
-  const boundedLeft = clamp(left, workArea.x, workArea.x + Math.max(0, workArea.width - width));
-  const boundedTop = clamp(top, workArea.y, workArea.y + Math.max(0, workArea.height - height));
+  const leftEdge = Math.round(workArea.x + ((leftPct / 100) * workArea.width));
+  const topEdge = Math.round(workArea.y + ((topPct / 100) * workArea.height));
+  const rightEdge = Math.round(workArea.x + ((rightPct / 100) * workArea.width));
+  const bottomEdge = Math.round(workArea.y + ((bottomPct / 100) * workArea.height));
+
+  const width = clamp(rightEdge - leftEdge, 120, workArea.width);
+  const height = clamp(bottomEdge - topEdge, 120, workArea.height);
+
+  const boundedLeft = clamp(leftEdge, workArea.x, workArea.x + Math.max(0, workArea.width - width));
+  const boundedTop = clamp(topEdge, workArea.y, workArea.y + Math.max(0, workArea.height - height));
 
   return finalizeBounds({
     left: boundedLeft,
@@ -1110,8 +1177,8 @@ const moveWindowToBounds = ({
     const windowState = bounds.state === 'maximized'
       ? 3 // SW_MAXIMIZE
       : bounds.state === 'minimized'
-        ? 2 // SW_MINIMIZE
-        : 9; // SW_RESTORE
+        ? 6 // SW_MINIMIZE
+        : 5; // SW_SHOW
 
     const excludedCsv = (Array.isArray(excludedWindowHandles) ? excludedWindowHandles : [])
       .map((h) => String(h || '').trim())
@@ -1126,6 +1193,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 
 public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
   [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
@@ -1152,6 +1221,8 @@ public static class Win32 {
   }
 }
 "@
+try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][Win32]::SetProcessDPIAware() } catch {}
 $excludedSet = New-Object 'System.Collections.Generic.HashSet[string]'
 foreach ($tok in ("${excludedCsv.replace(/"/g, '`"')}" -split ',')) {
   $t = $tok.Trim()
@@ -1161,6 +1232,11 @@ foreach ($tok in ("${excludedCsv.replace(/"/g, '`"')}" -split ',')) {
 function Apply-Placement {
   param([IntPtr]$Handle)
   if ($Handle -eq [IntPtr]::Zero) { return $false }
+  if (${windowState} -eq 5) {
+    # If the app restores as maximized from previous session, drop to normal first.
+    [void][Win32]::ShowWindowAsync($Handle, 9) # SW_RESTORE
+    Start-Sleep -Milliseconds 45
+  }
   [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
   [void][Win32]::ShowWindowAsync($Handle, ${windowState})
   if (${(forceMaximize && aggressiveMaximize) ? '$true' : '$false'}) {
@@ -1294,20 +1370,29 @@ const moveSpecificWindowHandleToBounds = ({
     const windowState = bounds.state === 'maximized'
       ? 3 // SW_MAXIMIZE
       : bounds.state === 'minimized'
-        ? 2 // SW_MINIMIZE
-        : 9; // SW_RESTORE
+        ? 6 // SW_MINIMIZE
+        : 5; // SW_SHOW
 
     const psScript = `
 Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
   [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
   [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
 }
 "@
+try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][Win32]::SetProcessDPIAware() } catch {}
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "no-window|"; exit 0 }
+if (${windowState} -eq 5) {
+  # Prevent persisted maximized state from overriding explicit normal bounds.
+  [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
+  Start-Sleep -Milliseconds 45
+}
 [void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
 [void][Win32]::ShowWindowAsync($h, ${windowState})
 if (${(bounds.state === 'maximized' && aggressiveMaximize) ? '$true' : '$false'}) {
@@ -1371,6 +1456,158 @@ Write-Output "ok"`;
   })
 );
 
+const minimizeWindowHandle = (handle) => (
+  new Promise((resolve) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle) {
+      resolve(false);
+      return;
+    }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+}
+"@
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
+[void][Win32]::ShowWindowAsync($h, 6) # SW_MINIMIZE
+Start-Sleep -Milliseconds 70
+[void][Win32]::ShowWindowAsync($h, 6) # Re-assert for apps that restore immediately
+Write-Output "ok"`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 3000, maxBuffer: 1024 * 64 },
+      (_error, stdout) => {
+        resolve(String(stdout || '').toLowerCase().includes('ok'));
+      },
+    );
+  })
+);
+
+const ensureMinimizedAfterLaunch = async ({
+  handle,
+  bounds,
+  processNameHint,
+  pid = 0,
+}) => {
+  if (!bounds || bounds.state !== 'minimized') return false;
+
+  let minimized = false;
+  const retryScheduleMs = [120, 260, 480, 760, 1100, 1500, 2100];
+  for (const delayMs of retryScheduleMs) {
+    await sleep(delayMs);
+    if (handle) {
+      const byHandle = await minimizeWindowHandle(handle);
+      minimized = minimized || byHandle;
+    }
+
+    // Slow launchers may create the real top-level HWND after splash windows.
+    const byName = await moveWindowToBounds({
+      pid,
+      bounds,
+      processNameHint,
+      aggressiveMaximize: false,
+      positionOnlyBeforeMaximize: false,
+      preferNameEnumeration: true,
+      excludedWindowHandles: [],
+      skipFrameChanged: true,
+    });
+    minimized = minimized || Boolean(byName?.applied);
+    if (minimized) break;
+  }
+
+  return minimized;
+};
+
+const stabilizePlacementForSlowLaunch = async ({
+  processHintLc,
+  bounds,
+  monitor,
+  initialHandle = null,
+  excludedWindowHandles = [],
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+  skipFrameChanged = false,
+  durationMs = 3200,
+}) => {
+  const safeProcess = String(processHintLc || '').trim().toLowerCase();
+  if (!safeProcess || !bounds) {
+    return { verified: false, handle: initialHandle ? String(initialHandle) : null };
+  }
+
+  const excluded = new Set(
+    (Array.isArray(excludedWindowHandles) ? excludedWindowHandles : [])
+      .map((h) => String(h || '').trim())
+      .filter(Boolean),
+  );
+  const forcedHandle = initialHandle ? String(initialHandle) : null;
+  const deadline = Date.now() + Math.max(1200, Number(durationMs || 0));
+  let lastHandle = forcedHandle;
+
+  while (Date.now() <= deadline) {
+    const rows = await getVisibleWindowInfos(safeProcess);
+    const candidates = rows
+      .filter((row) => row?.handle)
+      .filter((row) => row.handle === forcedHandle || !excluded.has(row.handle))
+      .sort((a, b) => (
+        scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
+        - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess })
+      ));
+
+    if (bounds.state === 'minimized') {
+      // Re-apply minimize against all likely top-level windows in case splash->main handle changes.
+      for (const row of candidates.slice(0, 8)) {
+        lastHandle = row.handle || lastHandle;
+        await moveSpecificWindowHandleToBounds({
+          handle: row.handle,
+          bounds,
+          aggressiveMaximize: false,
+          positionOnlyBeforeMaximize: false,
+          skipFrameChanged: true,
+        });
+      }
+      if (lastHandle) {
+        await minimizeWindowHandle(lastHandle);
+      }
+      if (candidates.length > 0) {
+        return { verified: true, handle: lastHandle };
+      }
+      await sleep(220);
+      continue;
+    }
+
+    if (bounds.state === 'normal' && monitor) {
+      for (const row of candidates.slice(0, 6)) {
+        lastHandle = row.handle || lastHandle;
+        await moveSpecificWindowHandleToBounds({
+          handle: row.handle,
+          bounds,
+          aggressiveMaximize,
+          positionOnlyBeforeMaximize,
+          skipFrameChanged,
+        });
+
+        const rect = await getWindowRectByHandle(row.handle);
+        const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
+        const close = isRectCloseToTargetBounds(rect, bounds, 8);
+        if (onTarget && close) {
+          return { verified: true, handle: row.handle };
+        }
+      }
+    }
+
+    await sleep(220);
+  }
+
+  return { verified: false, handle: lastHandle };
+};
+
 const getWindowRectByHandle = (handle) => (
   new Promise((resolve) => {
     const safeHandle = String(handle || '').trim();
@@ -1384,11 +1621,15 @@ Add-Type -TypeDefinition @"
 using System;
 using System.Runtime.InteropServices;
 public static class Win32Rect {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
   [StructLayout(LayoutKind.Sequential)]
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
 }
 "@
+try { [void][Win32Rect]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][Win32Rect]::SetProcessDPIAware() } catch {}
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "{}"; exit 0 }
 $r = New-Object Win32Rect+RECT
@@ -1453,6 +1694,17 @@ const isWindowOnTargetMonitor = ({ rect, monitor }) => {
   return true;
 };
 
+const isRectCloseToTargetBounds = (rect, bounds, tolerancePx = 6) => {
+  if (!rect || !bounds) return false;
+  if (bounds.state !== 'normal') return true;
+  const tol = Math.max(0, Number(tolerancePx || 0));
+  const dl = Math.abs(Number(rect.left || 0) - Number(bounds.left || 0));
+  const dt = Math.abs(Number(rect.top || 0) - Number(bounds.top || 0));
+  const dw = Math.abs(Number(rect.width || 0) - Number(bounds.width || 0));
+  const dh = Math.abs(Number(rect.height || 0) - Number(bounds.height || 0));
+  return dl <= tol && dt <= tol && dw <= tol && dh <= tol;
+};
+
 const verifyAndCorrectWindowPlacement = async ({
   handle,
   monitor,
@@ -1472,16 +1724,56 @@ const verifyAndCorrectWindowPlacement = async ({
     await sleep(initialCheckDelayMs);
   }
 
+  const target = (
+    process.platform === 'win32' && monitor.workAreaPhysical
+      ? monitor.workAreaPhysical
+      : (monitor.workArea || monitor.bounds || null)
+  );
+  let adjustedBounds = { ...bounds };
   for (let attempt = 0; attempt <= maxCorrections; attempt += 1) {
     const rect = await getWindowRectByHandle(safeHandle);
-    if (isWindowOnTargetMonitor({ rect, monitor, bounds })) {
+    const onTargetMonitor = isWindowOnTargetMonitor({ rect, monitor, bounds: adjustedBounds });
+    const closeToTargetBounds = isRectCloseToTargetBounds(rect, adjustedBounds, 6);
+    if (onTargetMonitor && closeToTargetBounds) {
       return { verified: true, corrected: attempt > 0 };
     }
     if (attempt >= maxCorrections) break;
 
+    if (rect && adjustedBounds.state === 'normal') {
+      // Compensate for app-specific non-client frame differences (caption/shadow) that
+      // can cause top clipping and bottom gaps after a nominal SetWindowPos.
+      const correctedLeft = Number(bounds.left || 0) + (Number(bounds.left || 0) - Number(rect.left || 0));
+      const correctedTop = Number(bounds.top || 0) + (Number(bounds.top || 0) - Number(rect.top || 0));
+      const correctedWidth = Number(bounds.width || 0) + (Number(bounds.width || 0) - Number(rect.width || 0));
+      const correctedHeight = Number(bounds.height || 0) + (Number(bounds.height || 0) - Number(rect.height || 0));
+
+      const minWidth = 120;
+      const minHeight = 120;
+      const maxWidth = target ? Number(target.width || correctedWidth) : Number(bounds.width || correctedWidth);
+      const maxHeight = target ? Number(target.height || correctedHeight) : Number(bounds.height || correctedHeight);
+      const nextWidth = clamp(Math.round(correctedWidth), minWidth, Math.max(minWidth, Math.round(maxWidth)));
+      const nextHeight = clamp(Math.round(correctedHeight), minHeight, Math.max(minHeight, Math.round(maxHeight)));
+      const minLeft = target ? Number(target.x || 0) : Number(bounds.left || 0);
+      const minTop = target ? Number(target.y || 0) : Number(bounds.top || 0);
+      const maxLeft = target
+        ? Number(target.x || 0) + Math.max(0, Number(target.width || 0) - nextWidth)
+        : Number(bounds.left || 0);
+      const maxTop = target
+        ? Number(target.y || 0) + Math.max(0, Number(target.height || 0) - nextHeight)
+        : Number(bounds.top || 0);
+
+      adjustedBounds = {
+        ...adjustedBounds,
+        left: clamp(Math.round(correctedLeft), Math.round(minLeft), Math.round(Math.max(minLeft, maxLeft))),
+        top: clamp(Math.round(correctedTop), Math.round(minTop), Math.round(Math.max(minTop, maxTop))),
+        width: nextWidth,
+        height: nextHeight,
+      };
+    }
+
     await moveSpecificWindowHandleToBounds({
       handle: safeHandle,
-      bounds,
+      bounds: adjustedBounds,
       aggressiveMaximize,
       positionOnlyBeforeMaximize,
       skipFrameChanged,
@@ -1504,6 +1796,8 @@ using System.Collections.Generic;
 using System.Runtime.InteropServices;
 using System.Text;
 public static class WinEnum {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
   [StructLayout(LayoutKind.Sequential)]
   public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
   public delegate bool EnumWinProc(IntPtr hWnd, IntPtr lp);
@@ -1553,6 +1847,8 @@ public static class WinEnum {
   }
 }
 "@
+try { [void][WinEnum]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][WinEnum]::SetProcessDPIAware() } catch {}
 $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
 try {
   $procs = Get-Process -Name "${safeName.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
@@ -1814,7 +2110,15 @@ const gatherProfileAppLaunches = (profile, monitorMap) => {
   }
 
   for (const app of (Array.isArray(profile?.minimizedApps) ? profile.minimizedApps : [])) {
-    pushIfLaunchable(app, app?.targetMonitor || primaryProfileMonitorId || null);
+    // Minimized tray entries should always relaunch minimized.
+    pushIfLaunchable(
+      {
+        ...app,
+        launchBehavior: 'minimize',
+        _launchFromMinimizedTray: true,
+      },
+      app?.targetMonitor || primaryProfileMonitorId || null,
+    );
   }
 
   return { launches, skippedApps };
@@ -1920,15 +2224,23 @@ const launchProfileById = async (profileId) => {
   const monitorMap = createProfileMonitorMap(profile?.monitors, systemMonitors);
   const modernLaunchData = gatherProfileAppLaunches(profile, monitorMap);
   const legacyLaunchData = gatherLegacyActionLaunches(profile, monitorMap);
+  const hasModernLaunches = modernLaunchData.launches.length > 0;
   const launchKey = (launch) => {
     const instanceId = String(launch.app?.instanceId || '').trim();
     if (instanceId) {
       return `${instanceId}::${launch.monitor?.id || 'monitor'}`;
     }
-    return `${launch.launchSequence ?? 0}::${launch.monitor?.id || 'monitor'}::${String(launch.executablePath || '').toLowerCase()}::${String(launch.shortcutPath || '').toLowerCase()}::${String(launch.launchUrl || '').toLowerCase()}`;
+    // Without an explicit instanceId, treat same launch target on same monitor as one logical app launch.
+    // This prevents accidental duplicates from mixed/legacy profile data from opening multiple windows.
+    return `${launch.monitor?.id || 'monitor'}::${String(launch.executablePath || '').toLowerCase()}::${String(launch.shortcutPath || '').toLowerCase()}::${String(launch.launchUrl || '').toLowerCase()}`;
   };
   const seenLaunchKeys = new Set();
-  const appLaunches = [...modernLaunchData.launches, ...legacyLaunchData.launches]
+  // Prefer modern monitor-layout launches. Legacy action-app launches are fallback only
+  // when a profile has no modern app definitions.
+  const preferredLaunches = hasModernLaunches
+    ? modernLaunchData.launches
+    : [...modernLaunchData.launches, ...legacyLaunchData.launches];
+  const appLaunches = preferredLaunches
     .filter((launch) => {
       const key = launchKey(launch);
       if (seenLaunchKeys.has(key)) return false;
@@ -1976,6 +2288,15 @@ const launchProfileById = async (profileId) => {
       }
       launchedAppCount += 1;
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
+      console.log('[launch-profile] launch-bounds', {
+        appName: launchItem.appName,
+        process: processHintLc,
+        targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+        state: bounds?.state || null,
+        bounds,
+        sourcePosition: launchItem.app?.position || null,
+        sourceSize: launchItem.app?.size || null,
+      });
       if (bounds) {
         const aggressiveMaximize = bounds.state === 'maximized' && processHintLc === 'msedge';
         const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
@@ -2103,7 +2424,8 @@ const launchProfileById = async (profileId) => {
           }
         }
 
-        if (result.applied && result.handle && isDuplicateProcessLaunch && launchItem.monitor) {
+        let placementVerified = false;
+        if (result.applied && result.handle && launchItem.monitor && bounds.state === 'normal') {
           const verification = await verifyAndCorrectWindowPlacement({
             handle: result.handle,
             monitor: launchItem.monitor,
@@ -2111,9 +2433,10 @@ const launchProfileById = async (profileId) => {
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
-            maxCorrections: isDuplicateProcessLaunch ? 1 : 0,
-            initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 0,
+            maxCorrections: isDuplicateProcessLaunch ? 2 : 3,
+            initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 140,
           });
+          placementVerified = verification.verified;
 
           console.log('[launch-profile] placement-verification', {
             appName: launchItem.appName,
@@ -2141,6 +2464,55 @@ const launchProfileById = async (profileId) => {
         if (result.applied && result.handle && shouldDelayChromiumMaximize) {
           await waitForWindowResponsive(processHintLc, result.handle, 2200);
           await maximizeWindowHandle(result.handle);
+        }
+
+        if (result.applied && result.handle && bounds.state === 'minimized') {
+          // Ensure minimized tray apps remain minimized after any placement/verification retries.
+          await sleep(80);
+          await minimizeWindowHandle(result.handle);
+          void ensureMinimizedAfterLaunch({
+            handle: result.handle,
+            bounds,
+            processNameHint,
+            pid: launchedChild?.pid || 0,
+          });
+
+          // Slow-launch apps may switch from splash HWND to main HWND after first minimize.
+          void stabilizePlacementForSlowLaunch({
+            processHintLc,
+            bounds,
+            monitor: launchItem.monitor || null,
+            initialHandle: result.handle,
+            excludedWindowHandles: preLaunchHandles,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: true,
+            durationMs: 7600,
+          });
+        }
+
+        if (result.applied && bounds.state === 'normal' && !placementVerified && launchItem.monitor) {
+          const stabilizationDurationMs = isChromiumFamily ? 1600 : 5200;
+          // Some apps resize/reframe after initial launch; keep correcting for a short window.
+          const stabilized = await stabilizePlacementForSlowLaunch({
+            processHintLc,
+            bounds: placementBounds,
+            monitor: launchItem.monitor,
+            initialHandle: result.handle,
+            excludedWindowHandles: preLaunchHandles,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            durationMs: stabilizationDurationMs,
+          });
+
+          console.log('[launch-profile] placement-stabilization', {
+            appName: launchItem.appName,
+            process: processHintLc,
+            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+            verified: stabilized.verified,
+            handle: stabilized.handle,
+          });
         }
       }
     } catch (error) {

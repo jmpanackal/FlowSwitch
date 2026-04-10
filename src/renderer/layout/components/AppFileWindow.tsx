@@ -857,7 +857,7 @@ export function AppFileWindow({
       const percentX = (deltaX / parentRect.width) * 100;
       const percentY = (deltaY / parentRect.height) * 100;
       
-      let newSize = { ...startSize };
+      const newSize = { ...startSize };
       
       if (direction.includes('right')) {
         newSize.width = Math.max(15, Math.min(90, startSize.width + percentX));

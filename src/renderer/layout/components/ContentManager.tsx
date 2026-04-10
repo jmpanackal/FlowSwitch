@@ -315,10 +315,11 @@ export function ContentManager({
           return a.name.localeCompare(b.name);
         case 'lastUsed':
           return (b.lastUsed || '').localeCompare(a.lastUsed || '');
-        case 'dateAdded':
+        case 'dateAdded': {
           const aDate = (a as ContentItem).dateAdded || '';
           const bDate = (b as ContentItem).dateAdded || '';
           return bDate.localeCompare(aDate);
+        }
         case 'type':
           return a.type.localeCompare(b.type);
         default:
@@ -597,7 +598,7 @@ export function ContentManager({
 
   // Get help tooltip content based on current state
   const getHelpTooltipContent = () => {
-    let content = [
+    const content = [
       '• Click folder to navigate into it',
       '• Click content to open directly',
       '• Click app name to change default app (all types)',
