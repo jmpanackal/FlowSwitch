@@ -15,6 +15,7 @@ const hiddenProcessNamePatterns = [
   /^widgetboard$/i,
   /^applicationframehost$/i,
   /^startmenuexperiencehost$/i,
+  /^flowswitch$/i, // Exclude FlowSwitch itself from window placement
 ];
 
 const hiddenWindowTitlePatterns = [
@@ -22,6 +23,12 @@ const hiddenWindowTitlePatterns = [
   /^default ime/i,
   /^microsoft text input application/i,
   /^program manager$/i,
+  /flowswitch/i, // Exclude FlowSwitch windows by title
+  /^loading$/i, // Loading windows
+  /splash/i, // Splash screens
+  /please wait/i, // Loading indicators
+  /starting up/i, // Startup windows
+  /initializing/i, // Initialization windows
 ];
 
 function getRunningWindowProcesses() {
