@@ -16,6 +16,12 @@ const {
   sanitizeProfileLaunchFieldsDeep,
 } = require('./utils/profile-launch-fields');
 const {
+  createLaunchDiagnostics,
+  describeBoundsDelta,
+  describeMonitor,
+  summarizeWindowRows,
+} = require('./utils/launch-diagnostics');
+const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
@@ -770,7 +776,7 @@ const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
  * `screen.dipToScreenRect(null, rect)` converts using the display nearest to `rect`.
  * Passing a Display object (not BrowserWindow) caused a silent failure in earlier code.
  */
-const physicalBoundsFromDip = (dipBounds) => {
+const physicalBoundsFromDip = (dipBounds, diagnostics = null, diagnosticsContext = {}) => {
   if (process.platform !== 'win32' || !dipBounds) return dipBounds;
   try {
     const { screen } = require('electron');
@@ -788,7 +794,16 @@ const physicalBoundsFromDip = (dipBounds) => {
       height: p.height,
       state: dipBounds.state,
     };
-  } catch {
+  } catch (error) {
+    if (diagnostics) {
+      diagnostics.failure({
+        ...diagnosticsContext,
+        event: 'dip-to-physical-conversion-failed',
+        reason: 'dip-to-screen-rect-throw',
+        dipBounds,
+        error: String(error?.message || error || 'unknown-error'),
+      });
+    }
     return dipBounds;
   }
 };
@@ -898,6 +913,43 @@ const createProfileMonitorMap = (profileMonitors, systemMonitors) => {
   });
 
   return mapping;
+};
+
+const buildMonitorMappingDiagnostics = (profileMonitors, systemMonitors, monitorMap) => {
+  const profileList = sortMonitorsByLayout(profileMonitors);
+  const systemList = sortMonitorsByLayout(systemMonitors);
+  return profileList.map((profileMonitor, index) => {
+    const target = profileMonitor?.id ? monitorMap.get(profileMonitor.id) : null;
+    const profileOrdinal = parseMonitorOrdinal(profileMonitor?.name) || parseMonitorOrdinal(profileMonitor?.id);
+    const targetOrdinal = parseMonitorOrdinal(target?.name) || parseMonitorOrdinal(target?.id);
+    const profileSystemName = normalizeLabel(profileMonitor?.systemName);
+    const targetSystemName = normalizeLabel(target?.systemName);
+    let reason = 'unmapped';
+    if (target) {
+      if (profileMonitor?.id && target?.id && profileMonitor.id === target.id) {
+        reason = 'system-id';
+      } else if (profileSystemName && targetSystemName && profileSystemName === targetSystemName) {
+        reason = 'system-name';
+      } else if (profileOrdinal && targetOrdinal && profileOrdinal === targetOrdinal) {
+        reason = 'monitor-ordinal';
+      } else if (systemList[index]?.id && systemList[index].id === target.id) {
+        reason = 'index-fallback';
+      } else if (
+        Number.isFinite(Number(profileMonitor?.layoutPosition?.x))
+        && Number.isFinite(Number(profileMonitor?.layoutPosition?.y))
+      ) {
+        reason = 'layout-proximity';
+      } else {
+        reason = 'first-unused-fallback';
+      }
+    }
+
+    return {
+      reason,
+      profileMonitor: describeMonitor(profileMonitor),
+      targetMonitor: describeMonitor(target),
+    };
+  });
 };
 
 /**
@@ -1037,7 +1089,9 @@ const trySnapLayoutPartitionBounds = ({
   return null;
 };
 
-const buildWindowBoundsForApp = (app, monitor, launchState) => {
+const buildWindowBoundsForApp = (app, monitor, launchState, options = {}) => {
+  const diagnostics = options?.diagnostics || null;
+  const diagnosticsContext = options?.diagnosticsContext || {};
   const workArea = monitor?.workArea || monitor?.bounds;
   if (!workArea) return null;
 
@@ -1077,16 +1131,7 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
     && !(hasExplicitSize && hasExplicitPosition)
   );
 
-  const finalizeBounds = (b) => physicalBoundsFromDip(b);
-
-  // Windows 11 apps have an invisible shadow/resize border (~7px at 96 DPI, scales with DPI).
-  // When Windows 11 snaps windows, it extends SetWindowPos bounds past the visible area so
-  // adjacent shadows overlap and windows appear edge-to-edge with no gaps.
-  // Derive the scale factor from monitor data so the extension matches the actual shadow size.
-  const dipW = workArea.width || 1;
-  const physW = monitor?.workAreaPhysical?.width || dipW;
-  const scaleFactor = physW / dipW;
-  const framePx = Math.round(7 * scaleFactor);
+  const finalizeBounds = (b) => physicalBoundsFromDip(b, diagnostics, diagnosticsContext);
 
   if (shouldForceFullscreen || looksFullscreenByGeometry || minimizedWithoutSavedGeometry) {
     return finalizeBounds({
@@ -1107,13 +1152,7 @@ const buildWindowBoundsForApp = (app, monitor, launchState) => {
     shouldMinimize,
   });
   if (snapBounds) {
-    const phys = finalizeBounds(snapBounds);
-    return {
-      ...phys,
-      left: phys.left - framePx,
-      width: phys.width + (2 * framePx),
-      height: phys.height + framePx,
-    };
+    return finalizeBounds(snapBounds);
   }
 
   // Convert from center/size percentages into edge percentages first, then round edges to pixels.
@@ -1152,6 +1191,9 @@ const moveWindowToBounds = ({
   preferNameEnumeration = false,
   excludedWindowHandles = [],
   skipFrameChanged = false,
+  allowForegroundFallback = false,
+  diagnostics = null,
+  diagnosticsContext = {},
 }) => (
   new Promise((resolve) => {
     const safePid = Number(pid || 0);
@@ -1298,8 +1340,8 @@ for ($attempt = 0; $attempt -lt $maxAttempts; $attempt++) {
     }
   }
 
-  # Strategy 3: foreground window fallback
-  if ($candidates.Count -eq 0) {
+  # Strategy 3: foreground window fallback (disabled by default for deterministic placement)
+  if (${allowForegroundFallback ? '$true' : '$false'} -and $candidates.Count -eq 0) {
     try {
       $fg = [Win32]::GetForegroundWindow()
       if ($fg -ne [IntPtr]::Zero) {
@@ -1333,12 +1375,29 @@ Write-Output "ok|$appliedHandle"`;
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
       { windowsHide: true, timeout: 12000, maxBuffer: 1024 * 256 },
-      (_error, stdout) => {
+      (execError, stdout) => {
         const output = String(stdout || '').trim();
         const [status, handle] = output.split('|');
+        const applied = (status || '').toLowerCase() === 'ok';
+        if (!applied && diagnostics) {
+          diagnostics.failure({
+            ...diagnosticsContext,
+            strategy: 'move-window-to-bounds',
+            reason: 'powershell-placement-not-applied',
+            processNameHint: safeProcessNameHint || null,
+            pid: Number.isFinite(safePid) ? safePid : null,
+            status: status || null,
+            handle: handle || null,
+            outputSnippet: output ? output.slice(0, 200) : null,
+            error: execError ? String(execError.message || execError) : null,
+          });
+        }
         resolve({
-          applied: (status || '').toLowerCase() === 'ok',
+          applied,
           handle: handle || null,
+          status: status || null,
+          outputSnippet: output ? output.slice(0, 200) : null,
+          error: execError ? String(execError.message || execError) : null,
         });
       },
     );
@@ -1351,6 +1410,8 @@ const moveSpecificWindowHandleToBounds = ({
   aggressiveMaximize = false,
   positionOnlyBeforeMaximize = false,
   skipFrameChanged = false,
+  diagnostics = null,
+  diagnosticsContext = {},
 }) => (
   new Promise((resolve) => {
     const safeHandle = String(handle || '').trim();
@@ -1410,12 +1471,27 @@ Write-Output "ok|${safeHandle.replace(/"/g, '`"')}"`;
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
       { windowsHide: true, timeout: 6000, maxBuffer: 1024 * 128 },
-      (_error, stdout) => {
+      (execError, stdout) => {
         const output = String(stdout || '').trim();
         const [status, outHandle] = output.split('|');
+        const applied = (status || '').toLowerCase() === 'ok';
+        if (!applied && diagnostics) {
+          diagnostics.failure({
+            ...diagnosticsContext,
+            strategy: 'move-specific-window-handle',
+            reason: 'powershell-placement-not-applied',
+            handle: safeHandle,
+            status: status || null,
+            outputSnippet: output ? output.slice(0, 200) : null,
+            error: execError ? String(execError.message || execError) : null,
+          });
+        }
         resolve({
-          applied: (status || '').toLowerCase() === 'ok',
+          applied,
           handle: outHandle || null,
+          status: status || null,
+          outputSnippet: output ? output.slice(0, 200) : null,
+          error: execError ? String(execError.message || execError) : null,
         });
       },
     );
@@ -1535,6 +1611,8 @@ const stabilizePlacementForSlowLaunch = async ({
   positionOnlyBeforeMaximize = false,
   skipFrameChanged = false,
   durationMs = 3200,
+  diagnostics = null,
+  diagnosticsContext = {},
 }) => {
   const safeProcess = String(processHintLc || '').trim().toLowerCase();
   if (!safeProcess || !bounds) {
@@ -1549,9 +1627,13 @@ const stabilizePlacementForSlowLaunch = async ({
   const forcedHandle = initialHandle ? String(initialHandle) : null;
   const deadline = Date.now() + Math.max(1200, Number(durationMs || 0));
   let lastHandle = forcedHandle;
+  let lastCandidates = [];
 
   while (Date.now() <= deadline) {
-    const rows = await getVisibleWindowInfos(safeProcess);
+    const rows = await getVisibleWindowInfos(safeProcess, {
+      diagnostics,
+      diagnosticsContext,
+    });
     const candidates = rows
       .filter((row) => row?.handle)
       .filter((row) => row.handle === forcedHandle || !excluded.has(row.handle))
@@ -1559,6 +1641,7 @@ const stabilizePlacementForSlowLaunch = async ({
         scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
         - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess })
       ));
+    lastCandidates = candidates;
 
     if (bounds.state === 'minimized') {
       // Re-apply minimize against all likely top-level windows in case splash->main handle changes.
@@ -1570,6 +1653,12 @@ const stabilizePlacementForSlowLaunch = async ({
           aggressiveMaximize: false,
           positionOnlyBeforeMaximize: false,
           skipFrameChanged: true,
+          diagnostics,
+          diagnosticsContext: {
+            ...diagnosticsContext,
+            strategy: 'stabilize-minimized',
+            candidateHandle: row.handle,
+          },
         });
       }
       if (lastHandle) {
@@ -1591,12 +1680,44 @@ const stabilizePlacementForSlowLaunch = async ({
           aggressiveMaximize,
           positionOnlyBeforeMaximize,
           skipFrameChanged,
+          diagnostics,
+          diagnosticsContext: {
+            ...diagnosticsContext,
+            strategy: 'stabilize-normal',
+            candidateHandle: row.handle,
+          },
+        });
+
+        const placementRects = await getWindowPlacementRectsByHandle(row.handle);
+        const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
+        const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
+        const close = isRectCloseToTargetBounds(measuredRect, bounds, 8);
+        if (onTarget && close) {
+          return { verified: true, handle: row.handle };
+        }
+      }
+    }
+
+    if (bounds.state === 'maximized' && monitor) {
+      for (const row of candidates.slice(0, 6)) {
+        lastHandle = row.handle || lastHandle;
+        await moveSpecificWindowHandleToBounds({
+          handle: row.handle,
+          bounds,
+          aggressiveMaximize,
+          positionOnlyBeforeMaximize,
+          skipFrameChanged,
+          diagnostics,
+          diagnosticsContext: {
+            ...diagnosticsContext,
+            strategy: 'stabilize-maximized',
+            candidateHandle: row.handle,
+          },
         });
 
         const rect = await getWindowRectByHandle(row.handle);
         const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
-        const close = isRectCloseToTargetBounds(rect, bounds, 8);
-        if (onTarget && close) {
+        if (onTarget) {
           return { verified: true, handle: row.handle };
         }
       }
@@ -1604,7 +1725,16 @@ const stabilizePlacementForSlowLaunch = async ({
 
     await sleep(220);
   }
-
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'stabilize-placement',
+      reason: 'stabilization-timeout',
+      lastHandle,
+      candidateCount: lastCandidates.length,
+      candidateSample: summarizeWindowRows(lastCandidates, 3),
+    });
+  }
   return { verified: false, handle: lastHandle };
 };
 
@@ -1672,6 +1802,98 @@ if (-not $ok) { Write-Output "{}"; exit 0 }
   })
 );
 
+const getWindowPlacementRectsByHandle = (handle) => (
+  new Promise((resolve) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle) {
+      resolve({ outerRect: null, visibleRect: null });
+      return;
+    }
+
+    const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32PlacementRect {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
+}
+"@
+try { [void][Win32PlacementRect]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][Win32PlacementRect]::SetProcessDPIAware() } catch {}
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "{}"; exit 0 }
+$outer = New-Object Win32PlacementRect+RECT
+$hasOuter = [Win32PlacementRect]::GetWindowRect($h, [ref]$outer)
+$visible = New-Object Win32PlacementRect+RECT
+$hasVisible = $false
+try {
+  # DWMWA_EXTENDED_FRAME_BOUNDS = 9 (visible window frame, excludes resize border padding)
+  $hr = [Win32PlacementRect]::DwmGetWindowAttribute($h, 9, [ref]$visible, [System.Runtime.InteropServices.Marshal]::SizeOf([type]([Win32PlacementRect+RECT])))
+  $hasVisible = ($hr -eq 0)
+} catch {
+  $hasVisible = $false
+}
+if (-not $hasOuter -and -not $hasVisible) { Write-Output "{}"; exit 0 }
+$out = @{}
+if ($hasOuter) {
+  $out.outerRect = @{
+    left = [int]$outer.Left
+    top = [int]$outer.Top
+    width = [int]($outer.Right - $outer.Left)
+    height = [int]($outer.Bottom - $outer.Top)
+  }
+}
+if ($hasVisible) {
+  $out.visibleRect = @{
+    left = [int]$visible.Left
+    top = [int]$visible.Top
+    width = [int]($visible.Right - $visible.Left)
+    height = [int]($visible.Bottom - $visible.Top)
+  }
+}
+$out | ConvertTo-Json -Depth 4`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 4500, maxBuffer: 1024 * 128 },
+      (_error, stdout) => {
+        try {
+          const parsed = JSON.parse(String(stdout || '').trim() || '{}');
+          const normalizeRect = (rect) => {
+            if (!rect || typeof rect !== 'object') return null;
+            if (
+              !Number.isFinite(Number(rect.left))
+              || !Number.isFinite(Number(rect.top))
+              || !Number.isFinite(Number(rect.width))
+              || !Number.isFinite(Number(rect.height))
+            ) {
+              return null;
+            }
+            return {
+              left: Number(rect.left),
+              top: Number(rect.top),
+              width: Number(rect.width),
+              height: Number(rect.height),
+            };
+          };
+          resolve({
+            outerRect: normalizeRect(parsed.outerRect),
+            visibleRect: normalizeRect(parsed.visibleRect),
+          });
+        } catch {
+          resolve({ outerRect: null, visibleRect: null });
+        }
+      },
+    );
+  })
+);
+
 const isWindowOnTargetMonitor = ({ rect, monitor }) => {
   if (!rect || !monitor) return false;
   // GetWindowRect is physical px; compare to workAreaPhysical on Windows (DIP workArea would mismatch).
@@ -1714,6 +1936,8 @@ const verifyAndCorrectWindowPlacement = async ({
   skipFrameChanged = false,
   maxCorrections = 2,
   initialCheckDelayMs = 0,
+  diagnostics = null,
+  diagnosticsContext = {},
 }) => {
   const safeHandle = String(handle || '').trim();
   if (!safeHandle || !monitor || !bounds) {
@@ -1730,37 +1954,64 @@ const verifyAndCorrectWindowPlacement = async ({
       : (monitor.workArea || monitor.bounds || null)
   );
   let adjustedBounds = { ...bounds };
+  let lastOuterRect = null;
+  let lastVisibleRect = null;
   for (let attempt = 0; attempt <= maxCorrections; attempt += 1) {
-    const rect = await getWindowRectByHandle(safeHandle);
-    const onTargetMonitor = isWindowOnTargetMonitor({ rect, monitor, bounds: adjustedBounds });
-    const closeToTargetBounds = isRectCloseToTargetBounds(rect, adjustedBounds, 6);
+    const placementRects = await getWindowPlacementRectsByHandle(safeHandle);
+    const outerRect = placementRects?.outerRect || null;
+    const visibleRect = placementRects?.visibleRect || outerRect;
+    lastOuterRect = outerRect;
+    lastVisibleRect = visibleRect;
+    const onTargetMonitor = isWindowOnTargetMonitor({ rect: visibleRect, monitor, bounds: adjustedBounds });
+    const closeToTargetBounds = isRectCloseToTargetBounds(visibleRect, adjustedBounds, 6);
     if (onTargetMonitor && closeToTargetBounds) {
       return { verified: true, corrected: attempt > 0 };
     }
     if (attempt >= maxCorrections) break;
 
-    if (rect && adjustedBounds.state === 'normal') {
+    if (outerRect && visibleRect && adjustedBounds.state === 'normal') {
+      const leftInset = Math.max(0, Number(visibleRect.left || 0) - Number(outerRect.left || 0));
+      const topInset = Math.max(0, Number(visibleRect.top || 0) - Number(outerRect.top || 0));
+      const rightInset = Math.max(
+        0,
+        (Number(outerRect.left || 0) + Number(outerRect.width || 0))
+        - (Number(visibleRect.left || 0) + Number(visibleRect.width || 0)),
+      );
+      const bottomInset = Math.max(
+        0,
+        (Number(outerRect.top || 0) + Number(outerRect.height || 0))
+        - (Number(visibleRect.top || 0) + Number(visibleRect.height || 0)),
+      );
+
       // Compensate for app-specific non-client frame differences (caption/shadow) that
-      // can cause top clipping and bottom gaps after a nominal SetWindowPos.
-      const correctedLeft = Number(bounds.left || 0) + (Number(bounds.left || 0) - Number(rect.left || 0));
-      const correctedTop = Number(bounds.top || 0) + (Number(bounds.top || 0) - Number(rect.top || 0));
-      const correctedWidth = Number(bounds.width || 0) + (Number(bounds.width || 0) - Number(rect.width || 0));
-      const correctedHeight = Number(bounds.height || 0) + (Number(bounds.height || 0) - Number(rect.height || 0));
+      // can cause visible gaps after a nominal SetWindowPos when comparing outer vs visible frame.
+      const correctedLeft = Number(adjustedBounds.left || 0) - leftInset;
+      const correctedTop = Number(adjustedBounds.top || 0) - topInset;
+      const correctedWidth = Number(adjustedBounds.width || 0) + leftInset + rightInset;
+      const correctedHeight = Number(adjustedBounds.height || 0) + topInset + bottomInset;
 
       const minWidth = 120;
       const minHeight = 120;
-      const maxWidth = target ? Number(target.width || correctedWidth) : Number(bounds.width || correctedWidth);
-      const maxHeight = target ? Number(target.height || correctedHeight) : Number(bounds.height || correctedHeight);
+      const maxWidth = target
+        ? Number((target.width || correctedWidth) + leftInset + rightInset)
+        : Number(correctedWidth);
+      const maxHeight = target
+        ? Number((target.height || correctedHeight) + topInset + bottomInset)
+        : Number(correctedHeight);
       const nextWidth = clamp(Math.round(correctedWidth), minWidth, Math.max(minWidth, Math.round(maxWidth)));
       const nextHeight = clamp(Math.round(correctedHeight), minHeight, Math.max(minHeight, Math.round(maxHeight)));
-      const minLeft = target ? Number(target.x || 0) : Number(bounds.left || 0);
-      const minTop = target ? Number(target.y || 0) : Number(bounds.top || 0);
+      const minLeft = target
+        ? Number((target.x || 0) - leftInset)
+        : Number(correctedLeft);
+      const minTop = target
+        ? Number((target.y || 0) - topInset)
+        : Number(correctedTop);
       const maxLeft = target
-        ? Number(target.x || 0) + Math.max(0, Number(target.width || 0) - nextWidth)
-        : Number(bounds.left || 0);
+        ? Number(target.x || 0) + Number(target.width || 0) + rightInset - nextWidth
+        : Number(correctedLeft);
       const maxTop = target
-        ? Number(target.y || 0) + Math.max(0, Number(target.height || 0) - nextHeight)
-        : Number(bounds.top || 0);
+        ? Number(target.y || 0) + Number(target.height || 0) + bottomInset - nextHeight
+        : Number(correctedTop);
 
       adjustedBounds = {
         ...adjustedBounds,
@@ -1777,15 +2028,37 @@ const verifyAndCorrectWindowPlacement = async ({
       aggressiveMaximize,
       positionOnlyBeforeMaximize,
       skipFrameChanged,
+      diagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'verify-and-correct-placement',
+        attemptIndex: attempt + 1,
+      },
     });
     await sleep(90);
   }
-
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'verify-and-correct-placement',
+      reason: 'verification-failed',
+      handle: safeHandle,
+      actualRect: lastVisibleRect || lastOuterRect || null,
+      actualOuterRect: lastOuterRect || null,
+      actualVisibleRect: lastVisibleRect || null,
+      targetBounds: adjustedBounds || null,
+      delta: describeBoundsDelta(lastVisibleRect || lastOuterRect, adjustedBounds),
+      monitor: describeMonitor(monitor),
+    });
+  }
   return { verified: false, corrected: true };
 };
 
-const getVisibleWindowInfos = (processName) => (
+const getVisibleWindowInfos = (processName, options = {}) => (
   new Promise((resolve) => {
+    const diagnostics = options?.diagnostics || null;
+    const diagnosticsContext = options?.diagnosticsContext || {};
+    const expectNonEmpty = options?.expectNonEmpty === true;
     const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
     if (!safeName) { resolve([]); return; }
 
@@ -1862,11 +2135,12 @@ $rows | ConvertTo-Json -Depth 5`;
       'powershell.exe',
       ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
       { windowsHide: true, timeout: 8000, maxBuffer: 1024 * 256 },
-      (_error, stdout) => {
+      (execError, stdout) => {
+        const output = String(stdout || '').trim();
         try {
-          const parsed = JSON.parse(String(stdout || '').trim() || '[]');
+          const parsed = JSON.parse(output || '[]');
           const rows = Array.isArray(parsed) ? parsed : [parsed];
-          resolve(rows.filter(Boolean).map((row) => ({
+          const normalizedRows = rows.filter(Boolean).map((row) => ({
             handle: String(row.handle || ''),
             width: Number(row.width || 0),
             height: Number(row.height || 0),
@@ -1877,8 +2151,30 @@ $rows | ConvertTo-Json -Depth 5`;
             cloaked: Boolean(row.cloaked),
             className: String(row.className || ''),
             titleLength: Number(row.titleLength || 0),
-          })).filter((row) => row.handle));
-        } catch {
+          })).filter((row) => row.handle);
+          if (expectNonEmpty && normalizedRows.length === 0 && diagnostics) {
+            diagnostics.failure({
+              ...diagnosticsContext,
+              strategy: 'get-visible-window-infos',
+              reason: 'no-visible-windows',
+              processName: safeName,
+              outputSnippet: output.slice(0, 200) || null,
+              error: execError ? String(execError?.message || execError) : null,
+            });
+          }
+          resolve(normalizedRows);
+        } catch (parseError) {
+          if (diagnostics) {
+            diagnostics.failure({
+              ...diagnosticsContext,
+              strategy: 'get-visible-window-infos',
+              reason: 'windows-info-parse-failed',
+              processName: safeName,
+              outputSnippet: output.slice(0, 200) || null,
+              error: String(parseError?.message || parseError || 'parse-error'),
+              commandError: execError ? String(execError?.message || execError) : null,
+            });
+          }
           resolve([]);
         }
       },
@@ -1941,10 +2237,19 @@ const placeChromiumByRankedWindows = async ({
   aggressiveMaximize,
   positionOnlyBeforeMaximize,
   skipFrameChanged = false,
+  diagnostics = null,
+  diagnosticsContext = {},
 }) => {
   const maxRounds = 26;
+  let lastRankedSample = [];
   for (let round = 0; round < maxRounds; round += 1) {
-    const rows = await getVisibleWindowInfos(processHintLc);
+    const rows = await getVisibleWindowInfos(processHintLc, {
+      diagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        attemptIndex: round + 1,
+      },
+    });
     if (rows.length === 0) {
       await sleep(120);
       continue;
@@ -1956,6 +2261,12 @@ const placeChromiumByRankedWindows = async ({
       (a, b) => scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
         - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc }),
     );
+    lastRankedSample = ranked
+      .slice(0, 3)
+      .map((row) => ({
+        ...row,
+        score: scoreWindowCandidate(row, { chromiumProcessHint: processHintLc }),
+      }));
     for (const row of ranked.slice(0, 12)) {
       const r = await moveSpecificWindowHandleToBounds({
         handle: row.handle,
@@ -1963,26 +2274,60 @@ const placeChromiumByRankedWindows = async ({
         aggressiveMaximize,
         positionOnlyBeforeMaximize,
         skipFrameChanged,
+        diagnostics,
+        diagnosticsContext: {
+          ...diagnosticsContext,
+          strategy: 'chromium-ranked-windows',
+          attemptIndex: round + 1,
+          candidateHandle: row.handle,
+        },
       });
       if (r.applied) return r;
     }
     await sleep(120);
   }
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'chromium-ranked-windows',
+      reason: 'ranked-window-placement-exhausted',
+      roundsAttempted: maxRounds,
+      rankedCandidates: summarizeWindowRows(lastRankedSample, 3),
+    });
+  }
   return { applied: false, handle: null };
 };
 
-const waitForWindowResponsive = async (processName, handle, maxWaitMs = 1800) => {
+const waitForWindowResponsive = async (processName, handle, maxWaitMs = 1800, options = {}) => {
+  const diagnostics = options?.diagnostics || null;
+  const diagnosticsContext = options?.diagnosticsContext || {};
   const safeHandle = String(handle || '').trim();
   if (!safeHandle) return false;
 
   const deadline = Date.now() + Math.max(0, Number(maxWaitMs || 0));
+  let lastRow = null;
   while (Date.now() <= deadline) {
-    const rows = await getVisibleWindowInfos(processName);
+    const rows = await getVisibleWindowInfos(processName, {
+      diagnostics,
+      diagnosticsContext,
+    });
     const row = rows.find((candidate) => String(candidate.handle) === safeHandle);
+    if (row) lastRow = row;
     if (row && row.enabled && !row.hung && !row.cloaked && row.area > 80_000) {
       return true;
     }
     await sleep(120);
+  }
+
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'wait-for-window-responsive',
+      reason: 'responsive-timeout',
+      handle: safeHandle,
+      maxWaitMs,
+      lastWindowState: summarizeWindowRows(lastRow ? [lastRow] : [], 1)[0] || null,
+    });
   }
 
   return false;
@@ -2250,7 +2595,8 @@ const launchProfileById = async (profileId) => {
   const skippedApps = [...modernLaunchData.skippedApps, ...legacyLaunchData.skippedApps];
   const failedApps = [];
   let launchedAppCount = 0;
-  const launchOrder = profile?.launchOrder === 'sequential' ? 'sequential' : 'all-at-once';
+  const requestedLaunchOrder = profile?.launchOrder === 'sequential' ? 'sequential' : 'all-at-once';
+  const launchOrder = 'sequential';
   const appLaunchDelays = (profile?.appLaunchDelays && typeof profile.appLaunchDelays === 'object')
     ? profile.appLaunchDelays
     : {};
@@ -2261,8 +2607,39 @@ const launchProfileById = async (profileId) => {
   }
 
   const { shell } = require('electron');
+  const profileDiagnostics = createLaunchDiagnostics({
+    profileId: normalizedProfileId,
+    launchState,
+  });
+  profileDiagnostics.start({
+    strategy: 'launch-profile',
+    reason: 'launch-profile-requested',
+    launchOrder,
+    appCount: appLaunches.length,
+    modernLaunchCount: modernLaunchData.launches.length,
+    legacyLaunchCount: legacyLaunchData.launches.length,
+    skippedAppCount: skippedApps.length,
+  });
+  profileDiagnostics.decision({
+    strategy: 'monitor-mapping',
+    reason: 'profile-monitor-map-created',
+    mappings: buildMonitorMappingDiagnostics(profile?.monitors, systemMonitors, monitorMap),
+  });
+  profileDiagnostics.decision({
+    strategy: 'process-hint-distribution',
+    reason: 'process-hint-counts',
+    counts: Array.from(processHintCounts.entries()).map(([processHintLc, count]) => ({
+      processHintLc,
+      count,
+    })),
+  });
 
   const runLaunch = async (launchItem) => {
+    const launchDiagnostics = createLaunchDiagnostics({
+      profileId: normalizedProfileId,
+      launchSequence: Number(launchItem?.launchSequence ?? -1),
+      appName: launchItem?.appName || 'unknown',
+    });
     try {
       const processHintLc = getPlacementProcessKey(launchItem);
       const processNameHint = processHintLc;
@@ -2272,8 +2649,29 @@ const launchProfileById = async (profileId) => {
       const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath)
         ? ['--new-window']
         : [];
+      launchDiagnostics.start({
+        processHintLc,
+        strategy: 'run-launch',
+        reason: 'app-launch-start',
+        launchTarget: launchItem.shortcutPath
+          ? 'shortcut'
+          : launchItem.launchUrl
+            ? 'url'
+            : 'executable',
+        launchOrder,
+        requestedLaunchOrder,
+        isDuplicateProcessLaunch,
+        isChromiumFamily,
+        monitor: describeMonitor(launchItem.monitor),
+      });
       const preLaunchWindowInfos = isDuplicateProcessLaunch
-        ? await getVisibleWindowInfos(processHintLc)
+        ? await getVisibleWindowInfos(processHintLc, {
+          diagnostics: launchDiagnostics,
+          diagnosticsContext: {
+            processHintLc,
+            strategy: 'duplicate-prelaunch-window-scan',
+          },
+        })
         : [];
       const preLaunchHandles = preLaunchWindowInfos.map((row) => row.handle);
 
@@ -2287,10 +2685,17 @@ const launchProfileById = async (profileId) => {
         launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
       }
       launchedAppCount += 1;
-      const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
-      console.log('[launch-profile] launch-bounds', {
-        appName: launchItem.appName,
-        process: processHintLc,
+      const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState, {
+        diagnostics: launchDiagnostics,
+        diagnosticsContext: {
+          processHintLc,
+          strategy: 'build-window-bounds',
+        },
+      });
+      launchDiagnostics.decision({
+        processHintLc,
+        strategy: 'build-window-bounds',
+        reason: bounds ? 'bounds-created' : 'bounds-unavailable',
         targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
         state: bounds?.state || null,
         bounds,
@@ -2302,7 +2707,6 @@ const launchProfileById = async (profileId) => {
         const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
         const shouldDelayChromiumMaximize = (
           isChromiumFamily
-          && isDuplicateProcessLaunch
           && bounds.state === 'maximized'
         );
         const placementBounds = shouldDelayChromiumMaximize
@@ -2310,6 +2714,15 @@ const launchProfileById = async (profileId) => {
           : bounds;
         const excludedHandles = preLaunchHandles;
         const chromiumNormalSoftPos = isChromiumFamily && placementBounds.state === 'normal';
+        launchDiagnostics.decision({
+          processHintLc,
+          strategy: 'placement-strategy',
+          reason: 'strategy-selected',
+          isDuplicateProcessLaunch,
+          isChromiumFamily,
+          shouldDelayChromiumMaximize,
+          placementState: placementBounds.state,
+        });
 
         if (isDuplicateProcessLaunch) {
           await sleep(240);
@@ -2321,7 +2734,14 @@ const launchProfileById = async (profileId) => {
         let newHandles = [];
 
         if (isDuplicateProcessLaunch) {
-          const postLaunchWindowInfos = await getVisibleWindowInfos(processHintLc);
+          const postLaunchWindowInfos = await getVisibleWindowInfos(processHintLc, {
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'duplicate-postlaunch-window-scan',
+            },
+            expectNonEmpty: true,
+          });
           const postLaunchHandles = postLaunchWindowInfos.map((row) => row.handle);
           const preHandleSet = new Set(preLaunchHandles);
           newHandles = postLaunchHandles.filter((h) => !preHandleSet.has(h));
@@ -2337,54 +2757,80 @@ const launchProfileById = async (profileId) => {
           for (const candidateRow of rankedNewWindows) {
             const newHandle = candidateRow.handle;
             if (isChromiumFamily) {
-              await waitForWindowResponsive(processHintLc, newHandle, 2200);
+              await waitForWindowResponsive(processHintLc, newHandle, 2200, {
+                diagnostics: launchDiagnostics,
+                diagnosticsContext: {
+                  processHintLc,
+                  strategy: 'duplicate-window-wait-responsive',
+                  candidateHandle: newHandle,
+                },
+              });
             }
+            launchDiagnostics.attempt({
+              processHintLc,
+              strategy: 'duplicate-ranked-new-window',
+              reason: 'trying-new-window-handle',
+              handle: newHandle,
+            });
             result = await moveSpecificWindowHandleToBounds({
               handle: newHandle,
               bounds: placementBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
               skipFrameChanged: chromiumNormalSoftPos,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'duplicate-ranked-new-window',
+                candidateHandle: newHandle,
+              },
             });
             if (result.applied) break;
           }
 
-          // Trace duplicate-window routing for any multi-window app.
-          console.log('[launch-profile] duplicate-window-placement', {
-            appName: launchItem.appName,
-            process: processHintLc,
-            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
-            targetState: bounds.state,
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'duplicate-window-discovery',
+            reason: result.applied ? 'duplicate-window-placement-applied' : 'duplicate-window-placement-not-applied',
             preHandles: preLaunchHandles,
             postHandles: postLaunchHandles,
             newHandles,
-            rankedNewWindowCandidates: rankedNewWindows.map((row) => ({
-              handle: row.handle,
-              enabled: row.enabled,
-              hung: row.hung,
-              tool: row.tool,
-              cloaked: row.cloaked,
-              className: row.className,
-              titleLength: row.titleLength,
-              area: row.area,
+            rankedNewWindowCandidates: summarizeWindowRows(rankedNewWindows.map((row) => ({
+              ...row,
               score: scoreWindowCandidate(row, { chromiumProcessHint: processHintLc }),
-            })),
+            })), 6),
             placedHandle: result.handle,
             applied: result.applied,
           });
         }
 
         if (!result.applied && isChromiumFamily) {
+          launchDiagnostics.attempt({
+            processHintLc,
+            strategy: 'chromium-ranked-windows',
+            reason: 'fallback-after-duplicate-path',
+          });
           result = await placeChromiumByRankedWindows({
             processHintLc,
             placementBounds,
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              placementState: placementBounds.state,
+            },
           });
         }
 
         if (!result.applied) {
+          launchDiagnostics.attempt({
+            processHintLc,
+            strategy: 'move-window-to-bounds',
+            reason: 'general-placement-attempt',
+            pid: launchedChild?.pid || 0,
+          });
           result = await moveWindowToBounds({
             pid: launchedChild?.pid || 0,
             bounds: placementBounds,
@@ -2394,11 +2840,23 @@ const launchProfileById = async (profileId) => {
             preferNameEnumeration: isDuplicateProcessLaunch,
             excludedWindowHandles: excludedHandles,
             skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'move-window-to-bounds-primary',
+              placementState: placementBounds.state,
+            },
           });
         }
 
         if (!result.applied && isDuplicateProcessLaunch) {
           await sleep(260);
+          launchDiagnostics.attempt({
+            processHintLc,
+            strategy: 'move-window-to-bounds',
+            reason: 'duplicate-retry-with-name-enumeration',
+            pid: launchedChild?.pid || 0,
+          });
           result = await moveWindowToBounds({
             pid: launchedChild?.pid || 0,
             bounds: placementBounds,
@@ -2408,24 +2866,50 @@ const launchProfileById = async (profileId) => {
             preferNameEnumeration: true,
             excludedWindowHandles: excludedHandles,
             skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'move-window-to-bounds-duplicate-retry',
+              placementState: placementBounds.state,
+            },
           });
         }
 
         if (!result.applied && isDuplicateProcessLaunch && newHandles.length > 0) {
           for (const newHandle of newHandles) {
+            launchDiagnostics.attempt({
+              processHintLc,
+              strategy: 'duplicate-known-new-handles',
+              reason: 'retry-new-handle-placement',
+              handle: newHandle,
+            });
             result = await moveSpecificWindowHandleToBounds({
               handle: newHandle,
               bounds: placementBounds,
               aggressiveMaximize,
               positionOnlyBeforeMaximize,
               skipFrameChanged: chromiumNormalSoftPos,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'duplicate-known-new-handles',
+                candidateHandle: newHandle,
+              },
             });
             if (result.applied) break;
           }
         }
 
+        launchDiagnostics.result({
+          processHintLc,
+          strategy: 'placement-final',
+          reason: result.applied ? 'placement-applied' : 'placement-not-applied',
+          applied: result.applied,
+          handle: result.handle || null,
+        });
+
         let placementVerified = false;
-        if (result.applied && result.handle && launchItem.monitor && bounds.state === 'normal') {
+        if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
           const verification = await verifyAndCorrectWindowPlacement({
             handle: result.handle,
             monitor: launchItem.monitor,
@@ -2435,14 +2919,19 @@ const launchProfileById = async (profileId) => {
             skipFrameChanged: chromiumNormalSoftPos,
             maxCorrections: isDuplicateProcessLaunch ? 2 : 3,
             initialCheckDelayMs: isDuplicateProcessLaunch ? 220 : 140,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'placement-verification',
+              placementState: placementBounds.state,
+            },
           });
           placementVerified = verification.verified;
 
-          console.log('[launch-profile] placement-verification', {
-            appName: launchItem.appName,
-            process: processHintLc,
-            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
-            targetState: bounds.state,
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'placement-verification',
+            reason: verification.verified ? 'placement-verified' : 'placement-not-verified',
             handle: result.handle,
             verified: verification.verified,
             corrected: verification.corrected,
@@ -2458,12 +2947,13 @@ const launchProfileById = async (profileId) => {
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'chromium-normal-soft-reassert',
+              candidateHandle: result.handle,
+            },
           });
-        }
-
-        if (result.applied && result.handle && shouldDelayChromiumMaximize) {
-          await waitForWindowResponsive(processHintLc, result.handle, 2200);
-          await maximizeWindowHandle(result.handle);
         }
 
         if (result.applied && result.handle && bounds.state === 'minimized') {
@@ -2488,10 +2978,16 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             skipFrameChanged: true,
             durationMs: 7600,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'minimized-stabilization',
+              placementState: bounds.state,
+            },
           });
         }
 
-        if (result.applied && bounds.state === 'normal' && !placementVerified && launchItem.monitor) {
+        if (result.applied && placementBounds.state === 'normal' && !placementVerified && launchItem.monitor) {
           const stabilizationDurationMs = isChromiumFamily ? 1600 : 5200;
           // Some apps resize/reframe after initial launch; keep correcting for a short window.
           const stabilized = await stabilizePlacementForSlowLaunch({
@@ -2504,18 +3000,77 @@ const launchProfileById = async (profileId) => {
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
             durationMs: stabilizationDurationMs,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'normal-stabilization',
+              placementState: placementBounds.state,
+            },
           });
 
-          console.log('[launch-profile] placement-stabilization', {
-            appName: launchItem.appName,
-            process: processHintLc,
-            targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'placement-stabilization',
+            reason: stabilized.verified ? 'stabilization-verified' : 'stabilization-not-verified',
             verified: stabilized.verified,
             handle: stabilized.handle,
           });
         }
+
+        if (result.applied && result.handle && shouldDelayChromiumMaximize) {
+          await waitForWindowResponsive(processHintLc, result.handle, 2200, {
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'chromium-delayed-maximize-wait',
+              candidateHandle: result.handle,
+            },
+          });
+          await maximizeWindowHandle(result.handle);
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'chromium-delayed-maximize',
+            reason: 'maximize-reapplied-after-normal-stabilization',
+            handle: result.handle,
+          });
+        }
+
+        if (result.applied && bounds.state === 'maximized' && launchItem.monitor) {
+          const maximizedStabilizationDurationMs = isChromiumFamily ? 2600 : 1800;
+          const maximizedStabilized = await stabilizePlacementForSlowLaunch({
+            processHintLc,
+            bounds,
+            monitor: launchItem.monitor,
+            initialHandle: result.handle,
+            excludedWindowHandles: preLaunchHandles,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            durationMs: maximizedStabilizationDurationMs,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'maximized-stabilization',
+              placementState: bounds.state,
+            },
+          });
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'placement-stabilization-maximized',
+            reason: maximizedStabilized.verified
+              ? 'maximized-stabilization-verified'
+              : 'maximized-stabilization-not-verified',
+            verified: maximizedStabilized.verified,
+            handle: maximizedStabilized.handle,
+          });
+        }
       }
     } catch (error) {
+      launchDiagnostics.failure({
+        strategy: 'run-launch',
+        reason: 'launch-item-failed',
+        error: String(error?.message || error || 'Failed to launch app'),
+      });
       failedApps.push({
         name: launchItem.appName,
         path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
@@ -2526,18 +3081,23 @@ const launchProfileById = async (profileId) => {
 
   const hasDuplicateProcessLaunches = Array.from(processHintCounts.values())
     .some((count) => count > 1);
+  profileDiagnostics.decision({
+    strategy: 'launch-execution-mode',
+    reason: requestedLaunchOrder === 'all-at-once'
+      ? 'forced-sequential-stability-mode'
+      : (hasDuplicateProcessLaunches ? 'forced-sequential-for-duplicates' : 'sequential-mode-selected'),
+    requestedLaunchOrder,
+    hasDuplicateProcessLaunches,
+    executionMode: launchOrder,
+  });
 
-  if (launchOrder === 'sequential' || hasDuplicateProcessLaunches) {
-    for (const launchItem of appLaunches) {
-      const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
-      const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
-      if (safeDelayMs > 0) {
-        await sleep(safeDelayMs);
-      }
-      await runLaunch(launchItem);
+  for (const launchItem of appLaunches) {
+    const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
+    const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
+    if (safeDelayMs > 0) {
+      await sleep(safeDelayMs);
     }
-  } else {
-    await Promise.all(appLaunches.map((launchItem) => runLaunch(launchItem)));
+    await runLaunch(launchItem);
   }
 
   const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
@@ -2568,6 +3128,14 @@ const launchProfileById = async (profileId) => {
   }
 
   if (launchedAppCount === 0 && launchedTabCount === 0) {
+    profileDiagnostics.failure({
+      strategy: 'launch-profile',
+      reason: 'no-launchable-targets',
+      launchedAppCount,
+      launchedTabCount,
+      requestedAppCount: appLaunches.length,
+      skippedAppCount: skippedApps.length,
+    });
     return {
       ok: false,
       error: 'No launchable apps or tabs found in this profile. Add an executable path in app details or recreate from installed apps.',
@@ -2580,6 +3148,15 @@ const launchProfileById = async (profileId) => {
     };
   }
 
+  profileDiagnostics.result({
+    strategy: 'launch-profile',
+    reason: failedApps.length === 0 ? 'launch-profile-complete' : 'launch-profile-complete-with-failures',
+    launchedAppCount,
+    launchedTabCount,
+    failedAppCount: failedApps.length,
+    skippedAppCount: skippedApps.length,
+    requestedAppCount: appLaunches.length,
+  });
   return {
     ok: failedApps.length === 0,
     profile,
