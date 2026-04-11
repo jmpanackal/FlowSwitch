@@ -1,3 +1,6 @@
+/**
+ * IPC-side guard before writing profiles: count/size limits, then per-field sanitizers (icons, URLs, launch fields).
+ */
 const {
   MAX_PROFILE_COUNT,
   MAX_PROFILE_ID_LENGTH,

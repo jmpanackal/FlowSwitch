@@ -12,7 +12,8 @@
     "test": "node --test src/main/utils/",
     "dev:frontend": "vite",
     "dev:electron": "electron .",
-    "dev": "npm-run-all -p dev:frontend dev:electron"
+    "dev": "npm-run-all -p dev:frontend dev:electron",
+    "dev:launch-trace": "node scripts/dev-with-launch-trace.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",

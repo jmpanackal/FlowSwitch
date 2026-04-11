@@ -1,3 +1,6 @@
+/**
+ * Small string helpers for http(s) allowlisting and bounded copies — used by profiles and browser tabs.
+ */
 const { MAX_URL_LENGTH } = require('./limits');
 
 const safeLimitedString = (value, maxLength) => {
