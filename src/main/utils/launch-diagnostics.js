@@ -29,30 +29,6 @@ const describeMonitor = (monitor) => {
         y: toNumberOrNull(monitor.layoutPosition.y),
       }
       : null,
-    bounds: monitor.bounds && typeof monitor.bounds === 'object'
-      ? {
-        x: toNumberOrNull(monitor.bounds.x),
-        y: toNumberOrNull(monitor.bounds.y),
-        width: toNumberOrNull(monitor.bounds.width),
-        height: toNumberOrNull(monitor.bounds.height),
-      }
-      : null,
-    workArea: monitor.workArea && typeof monitor.workArea === 'object'
-      ? {
-        x: toNumberOrNull(monitor.workArea.x),
-        y: toNumberOrNull(monitor.workArea.y),
-        width: toNumberOrNull(monitor.workArea.width),
-        height: toNumberOrNull(monitor.workArea.height),
-      }
-      : null,
-    workAreaPhysical: monitor.workAreaPhysical && typeof monitor.workAreaPhysical === 'object'
-      ? {
-        x: toNumberOrNull(monitor.workAreaPhysical.x),
-        y: toNumberOrNull(monitor.workAreaPhysical.y),
-        width: toNumberOrNull(monitor.workAreaPhysical.width),
-        height: toNumberOrNull(monitor.workAreaPhysical.height),
-      }
-      : null,
   };
 };
 

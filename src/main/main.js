@@ -239,6 +239,19 @@ const sanitizeProfilesPayload = (profiles) => {
     });
 };
 
+const unpackProfilesReadResult = (value) => {
+  if (Array.isArray(value)) {
+    return { profiles: value, storeError: null };
+  }
+  if (value && typeof value === 'object') {
+    return {
+      profiles: Array.isArray(value.profiles) ? value.profiles : [],
+      storeError: value.storeError || null,
+    };
+  }
+  return { profiles: [], storeError: null };
+};
+
 const normalizePathForWindows = (value) => (
   String(value || '')
     .replace(/\//g, '\\')
@@ -1089,6 +1102,53 @@ const trySnapLayoutPartitionBounds = ({
   return null;
 };
 
+const applySnapZoneOverlapCompensation = ({
+  bounds,
+  workArea,
+  monitor,
+  widthPct = 100,
+  heightPct = 100,
+}) => {
+  if (!bounds || !workArea) return bounds;
+  const dipWidth = Math.max(1, Number(workArea.width || 1));
+  const physicalWidth = Math.max(1, Number(monitor?.workAreaPhysical?.width || dipWidth));
+  const scaleFactor = physicalWidth / dipWidth;
+  const isHalfSplit = widthPct >= 44 && widthPct <= 56;
+  const isQuadrant = isHalfSplit && heightPct >= 44 && heightPct <= 56;
+  // FancyZones/Win11-style seam compensation: slightly stronger overlap for quadrant seams.
+  const targetOverlapPx = isQuadrant ? 8 : 6;
+  const overlapDip = clamp(Math.round(targetOverlapPx / Math.max(0.8, scaleFactor)), 2, 8);
+
+  const workLeft = Number(workArea.x || 0);
+  const workTop = Number(workArea.y || 0);
+  const workRight = workLeft + Math.max(0, Number(workArea.width || 0));
+  const workBottom = workTop + Math.max(0, Number(workArea.height || 0));
+  const zoneLeft = Number(bounds.left || 0);
+  const zoneTop = Number(bounds.top || 0);
+  const zoneRight = zoneLeft + Math.max(0, Number(bounds.width || 0));
+  const zoneBottom = zoneTop + Math.max(0, Number(bounds.height || 0));
+  const tol = 1;
+
+  // Expand only on internal edges to avoid pushing tiles off monitor outer bounds.
+  const leftExpand = Math.abs(zoneLeft - workLeft) <= tol ? 0 : overlapDip;
+  const topExpand = Math.abs(zoneTop - workTop) <= tol ? 0 : overlapDip;
+  const rightExpand = Math.abs(zoneRight - workRight) <= tol ? 0 : overlapDip;
+  const bottomExpand = Math.abs(zoneBottom - workBottom) <= tol ? 0 : overlapDip;
+
+  const left = zoneLeft - leftExpand;
+  const top = zoneTop - topExpand;
+  const width = Number(bounds.width || 0) + leftExpand + rightExpand;
+  const height = Number(bounds.height || 0) + topExpand + bottomExpand;
+
+  return {
+    ...bounds,
+    left,
+    top,
+    width,
+    height,
+  };
+};
+
 const buildWindowBoundsForApp = (app, monitor, launchState, options = {}) => {
   const diagnostics = options?.diagnostics || null;
   const diagnosticsContext = options?.diagnosticsContext || {};
@@ -1152,7 +1212,14 @@ const buildWindowBoundsForApp = (app, monitor, launchState, options = {}) => {
     shouldMinimize,
   });
   if (snapBounds) {
-    return finalizeBounds(snapBounds);
+    const compensatedSnapBounds = applySnapZoneOverlapCompensation({
+      bounds: snapBounds,
+      workArea,
+      monitor,
+      widthPct,
+      heightPct,
+    });
+    return finalizeBounds(compensatedSnapBounds);
   }
 
   // Convert from center/size percentages into edge percentages first, then round edges to pixels.
@@ -1674,6 +1741,14 @@ const stabilizePlacementForSlowLaunch = async ({
     if (bounds.state === 'normal' && monitor) {
       for (const row of candidates.slice(0, 6)) {
         lastHandle = row.handle || lastHandle;
+        const placementRects = await getWindowPlacementRectsByHandle(row.handle);
+        const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
+        const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
+        const close = isRectCloseToTargetBounds(measuredRect, bounds, 8);
+        if (onTarget && close) {
+          return { verified: true, handle: row.handle };
+        }
+
         await moveSpecificWindowHandleToBounds({
           handle: row.handle,
           bounds,
@@ -1687,20 +1762,18 @@ const stabilizePlacementForSlowLaunch = async ({
             candidateHandle: row.handle,
           },
         });
-
-        const placementRects = await getWindowPlacementRectsByHandle(row.handle);
-        const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
-        const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
-        const close = isRectCloseToTargetBounds(measuredRect, bounds, 8);
-        if (onTarget && close) {
-          return { verified: true, handle: row.handle };
-        }
       }
     }
 
     if (bounds.state === 'maximized' && monitor) {
       for (const row of candidates.slice(0, 6)) {
         lastHandle = row.handle || lastHandle;
+        const rect = await getWindowRectByHandle(row.handle);
+        const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
+        if (onTarget) {
+          return { verified: true, handle: row.handle };
+        }
+
         await moveSpecificWindowHandleToBounds({
           handle: row.handle,
           bounds,
@@ -1714,12 +1787,6 @@ const stabilizePlacementForSlowLaunch = async ({
             candidateHandle: row.handle,
           },
         });
-
-        const rect = await getWindowRectByHandle(row.handle);
-        const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
-        if (onTarget) {
-          return { verified: true, handle: row.handle };
-        }
       }
     }
 
@@ -1736,6 +1803,71 @@ const stabilizePlacementForSlowLaunch = async ({
     });
   }
   return { verified: false, handle: lastHandle };
+};
+
+const stabilizeKnownHandlePlacement = async ({
+  handle,
+  bounds,
+  monitor,
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+  skipFrameChanged = false,
+  durationMs = 1800,
+  diagnostics = null,
+  diagnosticsContext = {},
+}) => {
+  const safeHandle = String(handle || '').trim();
+  if (!safeHandle || !bounds || !monitor) {
+    return { verified: false, corrected: false, handle: safeHandle || null };
+  }
+
+  const deadline = Date.now() + Math.max(800, Number(durationMs || 0));
+  let corrected = false;
+  let lastRect = null;
+
+  while (Date.now() <= deadline) {
+    const placementRects = await getWindowPlacementRectsByHandle(safeHandle);
+    const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
+    if (measuredRect) {
+      lastRect = measuredRect;
+      const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
+      const closeEnough = bounds.state === 'normal'
+        ? isRectCloseToTargetBounds(measuredRect, bounds, 8)
+        : true;
+      if (onTarget && closeEnough) {
+        return { verified: true, corrected, handle: safeHandle };
+      }
+    }
+
+    await moveSpecificWindowHandleToBounds({
+      handle: safeHandle,
+      bounds,
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+      skipFrameChanged,
+      diagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'known-handle-stabilization',
+        candidateHandle: safeHandle,
+      },
+    });
+    corrected = true;
+    await sleep(180);
+  }
+
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'known-handle-stabilization',
+      reason: 'known-handle-stabilization-timeout',
+      handle: safeHandle,
+      corrected,
+      lastRect,
+    });
+  }
+
+  return { verified: false, corrected, handle: safeHandle };
 };
 
 const getWindowRectByHandle = (handle) => (
@@ -1953,23 +2085,44 @@ const verifyAndCorrectWindowPlacement = async ({
       ? monitor.workAreaPhysical
       : (monitor.workArea || monitor.bounds || null)
   );
-  let adjustedBounds = { ...bounds };
+  const desiredVisibleBounds = { ...bounds };
+  let correctedOuterBounds = { ...bounds };
   let lastOuterRect = null;
   let lastVisibleRect = null;
+  let previousMeasuredRect = null;
+  let stagnantMeasurementCount = 0;
   for (let attempt = 0; attempt <= maxCorrections; attempt += 1) {
     const placementRects = await getWindowPlacementRectsByHandle(safeHandle);
     const outerRect = placementRects?.outerRect || null;
     const visibleRect = placementRects?.visibleRect || outerRect;
     lastOuterRect = outerRect;
     lastVisibleRect = visibleRect;
-    const onTargetMonitor = isWindowOnTargetMonitor({ rect: visibleRect, monitor, bounds: adjustedBounds });
-    const closeToTargetBounds = isRectCloseToTargetBounds(visibleRect, adjustedBounds, 6);
+    const onTargetMonitor = isWindowOnTargetMonitor({
+      rect: visibleRect,
+      monitor,
+      bounds: desiredVisibleBounds,
+    });
+    const closeToTargetBounds = isRectCloseToTargetBounds(visibleRect, desiredVisibleBounds, 6);
     if (onTargetMonitor && closeToTargetBounds) {
       return { verified: true, corrected: attempt > 0 };
     }
     if (attempt >= maxCorrections) break;
 
-    if (outerRect && visibleRect && adjustedBounds.state === 'normal') {
+    if (previousMeasuredRect && visibleRect) {
+      const stagnant = (
+        Math.abs(Number(previousMeasuredRect.left || 0) - Number(visibleRect.left || 0)) <= 2
+        && Math.abs(Number(previousMeasuredRect.top || 0) - Number(visibleRect.top || 0)) <= 2
+        && Math.abs(Number(previousMeasuredRect.width || 0) - Number(visibleRect.width || 0)) <= 2
+        && Math.abs(Number(previousMeasuredRect.height || 0) - Number(visibleRect.height || 0)) <= 2
+      );
+      stagnantMeasurementCount = stagnant ? (stagnantMeasurementCount + 1) : 0;
+      if (stagnantMeasurementCount >= 1) {
+        break;
+      }
+    }
+    previousMeasuredRect = visibleRect ? { ...visibleRect } : previousMeasuredRect;
+
+    if (outerRect && visibleRect && desiredVisibleBounds.state === 'normal') {
       const leftInset = Math.max(0, Number(visibleRect.left || 0) - Number(outerRect.left || 0));
       const topInset = Math.max(0, Number(visibleRect.top || 0) - Number(outerRect.top || 0));
       const rightInset = Math.max(
@@ -1985,10 +2138,18 @@ const verifyAndCorrectWindowPlacement = async ({
 
       // Compensate for app-specific non-client frame differences (caption/shadow) that
       // can cause visible gaps after a nominal SetWindowPos when comparing outer vs visible frame.
-      const correctedLeft = Number(adjustedBounds.left || 0) - leftInset;
-      const correctedTop = Number(adjustedBounds.top || 0) - topInset;
-      const correctedWidth = Number(adjustedBounds.width || 0) + leftInset + rightInset;
-      const correctedHeight = Number(adjustedBounds.height || 0) + topInset + bottomInset;
+      const baseOuterLeft = Number(desiredVisibleBounds.left || 0) - leftInset;
+      const baseOuterTop = Number(desiredVisibleBounds.top || 0) - topInset;
+      const baseOuterWidth = Number(desiredVisibleBounds.width || 0) + leftInset + rightInset;
+      const baseOuterHeight = Number(desiredVisibleBounds.height || 0) + topInset + bottomInset;
+      const visibleLeftError = Number(desiredVisibleBounds.left || 0) - Number(visibleRect.left || 0);
+      const visibleTopError = Number(desiredVisibleBounds.top || 0) - Number(visibleRect.top || 0);
+      const visibleWidthError = Number(desiredVisibleBounds.width || 0) - Number(visibleRect.width || 0);
+      const visibleHeightError = Number(desiredVisibleBounds.height || 0) - Number(visibleRect.height || 0);
+      const correctedLeft = baseOuterLeft + visibleLeftError;
+      const correctedTop = baseOuterTop + visibleTopError;
+      const correctedWidth = baseOuterWidth + visibleWidthError;
+      const correctedHeight = baseOuterHeight + visibleHeightError;
 
       const minWidth = 120;
       const minHeight = 120;
@@ -2013,8 +2174,8 @@ const verifyAndCorrectWindowPlacement = async ({
         ? Number(target.y || 0) + Number(target.height || 0) + bottomInset - nextHeight
         : Number(correctedTop);
 
-      adjustedBounds = {
-        ...adjustedBounds,
+      correctedOuterBounds = {
+        ...correctedOuterBounds,
         left: clamp(Math.round(correctedLeft), Math.round(minLeft), Math.round(Math.max(minLeft, maxLeft))),
         top: clamp(Math.round(correctedTop), Math.round(minTop), Math.round(Math.max(minTop, maxTop))),
         width: nextWidth,
@@ -2024,7 +2185,7 @@ const verifyAndCorrectWindowPlacement = async ({
 
     await moveSpecificWindowHandleToBounds({
       handle: safeHandle,
-      bounds: adjustedBounds,
+      bounds: correctedOuterBounds,
       aggressiveMaximize,
       positionOnlyBeforeMaximize,
       skipFrameChanged,
@@ -2046,8 +2207,9 @@ const verifyAndCorrectWindowPlacement = async ({
       actualRect: lastVisibleRect || lastOuterRect || null,
       actualOuterRect: lastOuterRect || null,
       actualVisibleRect: lastVisibleRect || null,
-      targetBounds: adjustedBounds || null,
-      delta: describeBoundsDelta(lastVisibleRect || lastOuterRect, adjustedBounds),
+      targetBounds: desiredVisibleBounds || null,
+      attemptedOuterBounds: correctedOuterBounds || null,
+      delta: describeBoundsDelta(lastVisibleRect || lastOuterRect, desiredVisibleBounds),
       monitor: describeMonitor(monitor),
     });
   }
@@ -2543,7 +2705,16 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
 };
 
 const launchProfileById = async (profileId) => {
-  const profiles = readProfilesFromDisk();
+  const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
+  if (storeError) {
+    return {
+      ok: false,
+      error: String(storeError?.message || 'Could not load saved profiles.'),
+      code: String(storeError?.code || 'READ_FAILED'),
+      requestedProfileId: String(profileId || '').trim(),
+      availableProfileIds: [],
+    };
+  }
   const normalizedProfileId = String(profileId || '').trim();
   const profile = profiles.find(
     (candidate) => String(candidate?.id || '').trim() === normalizedProfileId,
@@ -2908,6 +3079,34 @@ const launchProfileById = async (profileId) => {
           handle: result.handle || null,
         });
 
+        if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
+          const knownHandleStabilized = await stabilizeKnownHandlePlacement({
+            handle: result.handle,
+            bounds: placementBounds,
+            monitor: launchItem.monitor,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            durationMs: isChromiumFamily ? 1600 : 2200,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'known-handle-stabilization',
+              placementState: placementBounds.state,
+            },
+          });
+          launchDiagnostics.result({
+            processHintLc,
+            strategy: 'known-handle-stabilization',
+            reason: knownHandleStabilized.verified
+              ? 'known-handle-stabilization-verified'
+              : 'known-handle-stabilization-not-verified',
+            verified: knownHandleStabilized.verified,
+            corrected: knownHandleStabilized.corrected,
+            handle: knownHandleStabilized.handle,
+          });
+        }
+
         let placementVerified = false;
         if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
           const verification = await verifyAndCorrectWindowPlacement({
@@ -3197,7 +3396,11 @@ handleTrustedIpc('get-system-monitors', async () => {
 
 handleTrustedIpc('profiles:list', async () => {
   try {
-    return readProfilesFromDisk();
+    const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
+    if (storeError) {
+      console.error('[profiles:list] Failed to read profiles from store:', storeError);
+    }
+    return profiles;
   } catch (error) {
     console.error('[profiles:list] Failed to list profiles:', error);
     return [];
