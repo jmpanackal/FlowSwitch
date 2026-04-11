@@ -1,3 +1,4 @@
+/** Central caps for profile payloads and string fields (IPC + disk). Keep in sync with renderer types. */
 module.exports = {
   MAX_PROFILE_COUNT: 200,
   MAX_PROFILE_ID_LENGTH: 128,

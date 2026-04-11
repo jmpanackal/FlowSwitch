@@ -45,6 +45,10 @@ interface SelectedApp {
   data: any;
 }
 
+/**
+ * Application shell: profile grid, monitor layout editor, app/content managers, and the custom
+ * cross-monitor drag system. Persistence is delegated to `useProfilesPersistence`; launch UX to `useLaunchFeedback`.
+ */
 export default function App() {
   const [selectedProfile, setSelectedProfile] =
     useState<string>("");

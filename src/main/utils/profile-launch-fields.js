@@ -1,3 +1,8 @@
+/**
+ * Validates and normalizes persisted profile fields used to start apps outside plain file paths:
+ * `launchUrl` (custom URL protocols only) and `shortcutPath` (.lnk on absolute Windows paths).
+ * Used by profile save paths and `sanitizeProfilesPayload`; does not touch executables.
+ */
 const path = require('path');
 const { MAX_URL_LENGTH, MAX_SHORTCUT_PATH_LENGTH } = require('./limits');
 const { safeLimitedString } = require('./url-safety');

@@ -36,102 +36,31 @@ const {
   getZoneHistoryStats,
   flushPendingZoneHistory,
 } = require('./services/zone-history-store');
+const {
+  reserveWindowHandle,
+  isWindowHandleAvailable,
+  clearGlobalWindowHandles,
+} = require('./services/window-handle-registry');
+const {
+  recordAppPlacement,
+  clearGlobalAppPlacements,
+} = require('./services/app-placement-tracker');
+const { launchTrace } = require('./utils/launch-trace');
 const { createAppShellSecurity } = require('./app-shell-security');
 
+/**
+ * Main-process composition root: window lifecycle, IPC wiring, profile launch orchestration,
+ * Win32 placement (PowerShell), and installed-app discovery.
+ *
+ * Shared concerns live in `services/` and `utils/`; this file integrates them.
+ * Verbose launch placement logs: set `FLOWSWITCH_LAUNCH_TRACE=1`.
+ */
 const {
   getAppEntryUrl,
   setupSessionSecurity,
   isTrustedRendererUrl,
   handleTrustedIpc,
 } = createAppShellSecurity({ app, session, ipcMain });
-
-// Global handle tracking to prevent cross-app window handle conflicts
-const globalUsedWindowHandles = new Set();
-const reserveWindowHandle = (handle) => {
-  const safeHandle = String(handle || '').trim();
-  if (safeHandle) {
-    globalUsedWindowHandles.add(safeHandle);
-    return true;
-  }
-  return false;
-};
-const releaseWindowHandle = (handle) => {
-  const safeHandle = String(handle || '').trim();
-  globalUsedWindowHandles.delete(safeHandle);
-};
-const isWindowHandleAvailable = (handle) => {
-  const safeHandle = String(handle || '').trim();
-  return safeHandle && !globalUsedWindowHandles.has(safeHandle);
-};
-const clearGlobalWindowHandles = () => {
-  globalUsedWindowHandles.clear();
-};
-
-// Global app bounds tracking for collision detection
-const globalPlacedAppBounds = new Map();
-const recordAppPlacement = (appName, bounds, monitor) => {
-  const safeBounds = {
-    left: Number(bounds.left || 0),
-    top: Number(bounds.top || 0),
-    width: Number(bounds.width || 0),
-    height: Number(bounds.height || 0),
-    monitor: monitor || bounds.monitor || null
-  };
-  globalPlacedAppBounds.set(appName, safeBounds);
-};
-const clearGlobalAppPlacements = () => {
-  globalPlacedAppBounds.clear();
-};
-const wouldOverlapExistingApp = (newBounds, excludeAppName = '', targetMonitorId = '') => {
-  const newLeft = Number(newBounds.left || 0);
-  const newTop = Number(newBounds.top || 0);
-  const newRight = newLeft + Number(newBounds.width || 0);
-  const newBottom = newTop + Number(newBounds.height || 0);
-  
-  for (const [appName, existingBounds] of globalPlacedAppBounds.entries()) {
-    if (appName === excludeAppName) continue;
-    
-    // STRICT: Only check collision if apps are on the same monitor
-    const existingMonitorId = existingBounds.monitor?.id || existingBounds.monitor?.name || '';
-    const newMonitorId = targetMonitorId || newBounds.monitor?.id || newBounds.monitor?.name || '';
-    
-    // Skip if we can't determine monitor, or if monitors are different
-    if (!existingMonitorId || !newMonitorId) continue;
-    if (existingMonitorId !== newMonitorId) continue;
-    
-    const existLeft = existingBounds.left;
-    const existTop = existingBounds.top;
-    const existRight = existLeft + existingBounds.width;
-    const existBottom = existTop + existingBounds.height;
-    
-    // Check for rectangle overlap
-    const overlapX = newLeft < existRight && newRight > existLeft;
-    const overlapY = newTop < existBottom && newBottom > existTop;
-    
-    if (overlapX && overlapY) {
-      const overlapWidth = Math.max(0, Math.min(newRight, existRight) - Math.max(newLeft, existLeft));
-      const overlapHeight = Math.max(0, Math.min(newBottom, existBottom) - Math.max(newTop, existTop));
-      const overlapArea = overlapWidth * overlapHeight;
-      
-      // Only report significant overlaps (> 100,000 px² - about 25% of a 1920x1080 window)
-      const newArea = (newRight - newLeft) * (newBottom - newTop);
-      const existingArea = (existRight - existLeft) * (existBottom - existTop);
-      const smallerArea = Math.min(newArea, existingArea);
-      const isSignificant = overlapArea > 100000;
-      
-      if (isSignificant) {
-        return {
-          wouldOverlap: true,
-          existingApp: appName,
-          existingBounds: existingBounds,
-          overlapArea: overlapArea
-        };
-      }
-    }
-  }
-  
-  return { wouldOverlap: false };
-};
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
 if (!gotSingleInstanceLock) {
@@ -727,18 +656,26 @@ const getRetrySchedule = (operationType) => {
  * Delayed Window Detection: Waits for a process to create its main window handle.
  * Generic: works the same way for all apps
  * @param {string} processHint - Process name to search for
- * @param {number} timeoutMs - Maximum time to wait for window
+ * @param {number|object} [timeoutMsOrOpts] - Max wait in ms, or reserved options object (ignored today)
+ * @param {number} [explicitTimeoutMs] - When the middle argument is an options bag, pass timeout here
  * @returns {Promise<Object|null>} Window info when found, null if timeout
  */
-const waitForProcessWindow = async (processHint, timeoutMs = 30000) => {
+const waitForProcessWindow = async (processHint, timeoutMsOrOpts = 30000, explicitTimeoutMs) => {
   const safeProcess = String(processHint || '').toLowerCase().trim();
   if (!safeProcess) return null;
+
+  let timeoutMs = 30000;
+  if (typeof explicitTimeoutMs === 'number' && Number.isFinite(explicitTimeoutMs)) {
+    timeoutMs = explicitTimeoutMs;
+  } else if (typeof timeoutMsOrOpts === 'number' && Number.isFinite(timeoutMsOrOpts)) {
+    timeoutMs = timeoutMsOrOpts;
+  }
 
   const startTime = Date.now();
   const pollInterval = 200; // Generic polling interval
   const maxWait = Math.max(5000, Math.min(timeoutMs, 60000));
 
-  console.log('[waitForProcessWindow] starting', {
+  launchTrace('[waitForProcessWindow] starting', {
     process: safeProcess,
     maxWaitMs: maxWait,
     pollInterval,
@@ -756,7 +693,7 @@ const waitForProcessWindow = async (processHint, timeoutMs = 30000) => {
 
       const best = scored[0];
       if (best) {
-        console.log('[waitForProcessWindow] window-found', {
+        launchTrace('[waitForProcessWindow] window-found', {
           process: safeProcess,
           elapsedMs: Date.now() - startTime,
           handle: best.handle,
@@ -770,7 +707,7 @@ const waitForProcessWindow = async (processHint, timeoutMs = 30000) => {
     await sleep(pollInterval);
   }
 
-  console.log('[waitForProcessWindow] timeout', {
+  launchTrace('[waitForProcessWindow] timeout', {
     process: safeProcess,
     elapsedMs: Date.now() - startTime,
   });
@@ -1541,7 +1478,7 @@ const ensureMinimizedAfterLaunch = async ({
   if (!bounds || bounds.state !== 'minimized') return false;
 
   const safeProcess = String(processNameHint || '').toLowerCase().trim();
-  console.log('[ensureMinimizedAfterLaunch] starting', {
+  launchTrace('[ensureMinimizedAfterLaunch] starting', {
     process: safeProcess,
     initialHandle: handle,
   });
@@ -1553,7 +1490,7 @@ const ensureMinimizedAfterLaunch = async ({
 
     // Log window enumeration results for debugging
     const windowInfos = await getVisibleWindowInfos(safeProcess);
-    console.log('[ensureMinimizedAfterLaunch] window-enumeration', {
+    launchTrace('[ensureMinimizedAfterLaunch] window-enumeration', {
       process: safeProcess,
       delayMs,
       foundWindows: windowInfos.length,
@@ -1567,7 +1504,7 @@ const ensureMinimizedAfterLaunch = async ({
 
     if (handle) {
       const byHandle = await minimizeWindowHandle(handle);
-      console.log('[ensureMinimizedAfterLaunch] minimize-by-handle', {
+      launchTrace('[ensureMinimizedAfterLaunch] minimize-by-handle', {
         process: safeProcess,
         handle,
         success: byHandle,
@@ -1586,7 +1523,7 @@ const ensureMinimizedAfterLaunch = async ({
       excludedWindowHandles: [],
       skipFrameChanged: true,
     });
-    console.log('[ensureMinimizedAfterLaunch] minimize-by-name', {
+    launchTrace('[ensureMinimizedAfterLaunch] minimize-by-name', {
       process: safeProcess,
       success: byName?.applied,
       appliedHandle: byName?.handle,
@@ -1595,7 +1532,7 @@ const ensureMinimizedAfterLaunch = async ({
     if (minimized) break;
   }
 
-  console.log('[ensureMinimizedAfterLaunch] complete', {
+  launchTrace('[ensureMinimizedAfterLaunch] complete', {
     process: safeProcess,
     minimized,
   });
@@ -1657,7 +1594,7 @@ const stabilizePlacementForSlowLaunch = async ({
 
         // Skip if window doesn't belong to target process
         if (rowProcessName && !rowProcessName.includes(targetProcessLower) && !targetProcessLower.includes(rowProcessName)) {
-          console.log('[stabilizePlacement] skip-minimize-wrong-process', {
+          launchTrace('[stabilizePlacement] skip-minimize-wrong-process', {
             targetProcess: targetProcessLower,
             actualProcess: rowProcessName,
             handle: handleStr,
@@ -1667,7 +1604,7 @@ const stabilizePlacementForSlowLaunch = async ({
         }
 
         lastHandle = row.handle || lastHandle;
-        console.log('[stabilizePlacement] applying-minimize', {
+        launchTrace('[stabilizePlacement] applying-minimize', {
           process: targetProcessLower,
           handle: handleStr,
           className,
@@ -2499,7 +2436,7 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
 
 const launchProfileById = async (profileId) => {
   const profileStartTime = Date.now();
-  console.log('[launch-profile] START', { profileId, timestamp: profileStartTime });
+  launchTrace('[launch-profile] START', { profileId, timestamp: profileStartTime });
   
   // Clear global tracking for new profile launch
   clearGlobalWindowHandles();
@@ -2607,7 +2544,7 @@ const launchProfileById = async (profileId) => {
       launchedAppCount += 1;
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState);
       const boundsComputedTime = Date.now();
-      console.log('[launch-profile] launch-bounds', {
+      launchTrace('[launch-profile] launch-bounds', {
         appName: launchItem.appName,
         process: processHintLc,
         targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
@@ -2642,7 +2579,7 @@ const launchProfileById = async (profileId) => {
         // Delayed Window Detection: for first launches where window might not exist yet
         // We detect 'slow' apps at runtime by whether window appears within timeout
         if (!isDuplicateProcessLaunch) {
-          console.log('[launch-profile] waiting-for-window', {
+          launchTrace('[launch-profile] waiting-for-window', {
             appName: launchItem.appName,
             process: processHintLc,
             reason: 'first-launch-detection',
@@ -2658,7 +2595,7 @@ const launchProfileById = async (profileId) => {
           );
 
           if (detectedWindow?.handle) {
-            console.log('[launch-profile] window-detected', {
+            launchTrace('[launch-profile] window-detected', {
               appName: launchItem.appName,
               process: processHintLc,
               handle: detectedWindow.handle,
@@ -2679,7 +2616,7 @@ const launchProfileById = async (profileId) => {
               }
             }
           } else {
-            console.log('[launch-profile] window-detection-timeout', {
+            launchTrace('[launch-profile] window-detection-timeout', {
               appName: launchItem.appName,
               process: processHintLc,
               willAttemptFallback: true,
@@ -2690,14 +2627,14 @@ const launchProfileById = async (profileId) => {
         // Fallback for minimized apps when window detection failed
         // Use getAllWindowInfos to find hidden/minimized windows (not just visible ones)
         if (!result.applied && bounds.state === 'minimized') {
-          console.log('[launch-profile] minimize-fallback', {
+          launchTrace('[launch-profile] minimize-fallback', {
             appName: launchItem.appName,
             process: processHintLc,
             reason: 'window-detection-failed-searching-all-windows',
           });
           
           // Brief wait for main window to appear (generic for all apps)
-          console.log('[launch-profile] minimize-fallback-delay', {
+          launchTrace('[launch-profile] minimize-fallback-delay', {
             appName: launchItem.appName,
             delayMs: 2000,
             reason: 'waiting-for-main-window',
@@ -2710,7 +2647,7 @@ const launchProfileById = async (profileId) => {
           // Sort by area (largest first) to prioritize main window over popups
           allWindows = allWindows.sort((a, b) => (b.area || 0) - (a.area || 0));
           
-          console.log('[launch-profile] minimize-fallback-found', {
+          launchTrace('[launch-profile] minimize-fallback-found', {
             appName: launchItem.appName,
             process: processHintLc,
             windowCount: allWindows.length,
@@ -2721,7 +2658,7 @@ const launchProfileById = async (profileId) => {
           for (const windowInfo of allWindows.slice(0, 5)) {
             if (!isWindowHandleAvailable(windowInfo.handle)) continue;
             
-            console.log('[launch-profile] minimize-fallback-attempt', {
+            launchTrace('[launch-profile] minimize-fallback-attempt', {
               appName: launchItem.appName,
               process: processHintLc,
               handle: windowInfo.handle,
@@ -2739,7 +2676,7 @@ const launchProfileById = async (profileId) => {
             if (minimizeResult.applied) {
               result = minimizeResult;
               reserveWindowHandle(windowInfo.handle);
-              console.log('[launch-profile] minimize-fallback-success', {
+              launchTrace('[launch-profile] minimize-fallback-success', {
                 appName: launchItem.appName,
                 process: processHintLc,
                 handle: windowInfo.handle,
@@ -2773,7 +2710,7 @@ const launchProfileById = async (profileId) => {
             
             // Skip if handle is already reserved by another app
             if (!isWindowHandleAvailable(newHandle)) {
-              console.log('[launch-profile] handle-reserved-skipping', {
+              launchTrace('[launch-profile] handle-reserved-skipping', {
                 appName: launchItem.appName,
                 process: processHintLc,
                 handle: newHandle,
@@ -2797,7 +2734,7 @@ const launchProfileById = async (profileId) => {
           }
 
           // Trace duplicate-window routing for any multi-window app.
-          console.log('[launch-profile] duplicate-window-placement', {
+          launchTrace('[launch-profile] duplicate-window-placement', {
             appName: launchItem.appName,
             process: processHintLc,
             targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
@@ -2879,7 +2816,7 @@ const launchProfileById = async (profileId) => {
           
           // Check if handle is already reserved by another app
           if (!isWindowHandleAvailable(result.handle)) {
-            console.log('[launch-profile] placement-verification-skipped', {
+            launchTrace('[launch-profile] placement-verification-skipped', {
               appName: launchItem.appName,
               process: processHintLc,
               reason: 'handle-already-reserved-by-another-app',
@@ -2901,7 +2838,7 @@ const launchProfileById = async (profileId) => {
             });
             placementVerified = verification.verified;
 
-            console.log('[launch-profile] placement-verification', {
+            launchTrace('[launch-profile] placement-verification', {
               appName: launchItem.appName,
               process: processHintLc,
               targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
@@ -2913,7 +2850,7 @@ const launchProfileById = async (profileId) => {
             
             // Force move for apps that didn't verify (generic retry)
             if (!verification.verified && result.handle) {
-              console.log('[launch-profile] force-move-retry', {
+              launchTrace('[launch-profile] force-move-retry', {
                 appName: launchItem.appName,
                 reason: 'placement-did-not-verify',
                 attempts: 3,
@@ -2944,7 +2881,7 @@ const launchProfileById = async (profileId) => {
                 
                 if (reverify.verified) {
                   placementVerified = true;
-                  console.log('[launch-profile] force-move-success', {
+                  launchTrace('[launch-profile] force-move-success', {
                     appName: launchItem.appName,
                     attempt: i + 1,
                     handle: result.handle,
@@ -2965,7 +2902,7 @@ const launchProfileById = async (profileId) => {
               });
             }
           } else {
-            console.log('[launch-profile] placement-verification-skipped', {
+            launchTrace('[launch-profile] placement-verification-skipped', {
               appName: launchItem.appName,
               process: processHintLc,
               reason: 'handle-does-not-belong-to-process',
@@ -3035,7 +2972,7 @@ const launchProfileById = async (profileId) => {
             adaptiveMode: false, // Generic mode for all apps
           });
 
-          console.log('[launch-profile] placement-stabilization', {
+          launchTrace('[launch-profile] placement-stabilization', {
             appName: launchItem.appName,
             process: processHintLc,
             targetMonitor: launchItem.monitor?.name || launchItem.monitor?.id || 'unknown',
@@ -3056,7 +2993,7 @@ const launchProfileById = async (profileId) => {
       }
       const appEndTime = Date.now();
       const processKey = getPlacementProcessKey(launchItem);
-      console.log('[launch-profile] app-complete', {
+      launchTrace('[launch-profile] app-complete', {
         appName: launchItem.appName,
         process: processKey,
         totalMs: appEndTime - appStartTime,
@@ -3071,7 +3008,7 @@ const launchProfileById = async (profileId) => {
         path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
         error: String(error?.message || error || 'Failed to launch app'),
       });
-      console.log('[launch-profile] app-failed', {
+      launchTrace('[launch-profile] app-failed', {
         appName: launchItem.appName,
         process: processKey,
         totalMs: appEndTime - appStartTime,
@@ -3145,7 +3082,7 @@ const launchProfileById = async (profileId) => {
 
   const profileEndTime = Date.now();
   const totalDurationMs = profileEndTime - profileStartTime;
-  console.log('[launch-profile] COMPLETE', {
+  launchTrace('[launch-profile] COMPLETE', {
     profileId,
     totalDurationMs,
     launchedAppCount,

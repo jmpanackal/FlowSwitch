@@ -1,3 +1,6 @@
+/**
+ * Persists last-known zone (tile) placements per app+monitor under userData, with debounced disk writes.
+ */
 const fs = require('fs');
 const path = require('path');
 const { app } = require('electron');
