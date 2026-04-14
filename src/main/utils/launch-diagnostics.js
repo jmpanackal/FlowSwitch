@@ -1,4 +1,6 @@
 const LAUNCH_PROFILE_TAG = '[launch-profile]';
+const fs = require('fs');
+const path = require('path');
 
 const toNumberOrNull = (value) => {
   const parsed = Number(value);
@@ -16,6 +18,29 @@ const sanitizePayload = (payload) => (
     : {}
 );
 
+const shouldEmitVerboseConsole = () => process.env.FLOWSWITCH_LAUNCH_TRACE === '1';
+const shouldEmitCompactConsole = () => process.env.FLOWSWITCH_LAUNCH_CONSOLE_COMPACT === '1';
+
+const getLaunchLogFilePath = () => {
+  const configured = String(process.env.FLOWSWITCH_LAUNCH_LOG_FILE || '').trim();
+  if (!configured) return null;
+  return path.resolve(configured);
+};
+
+const appendLaunchLogLine = (entry) => {
+  const outputPath = getLaunchLogFilePath();
+  if (!outputPath) return;
+  try {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    fs.appendFileSync(outputPath, `${JSON.stringify(entry)}\n`, 'utf8');
+  } catch (error) {
+    console.error('[launch-profile] failed to write diagnostics log file:', {
+      message: String(error?.message || error),
+      outputPath,
+    });
+  }
+};
+
 const describeMonitor = (monitor) => {
   if (!monitor || typeof monitor !== 'object') return null;
   return {
@@ -27,30 +52,6 @@ const describeMonitor = (monitor) => {
       ? {
         x: toNumberOrNull(monitor.layoutPosition.x),
         y: toNumberOrNull(monitor.layoutPosition.y),
-      }
-      : null,
-    bounds: monitor.bounds && typeof monitor.bounds === 'object'
-      ? {
-        x: toNumberOrNull(monitor.bounds.x),
-        y: toNumberOrNull(monitor.bounds.y),
-        width: toNumberOrNull(monitor.bounds.width),
-        height: toNumberOrNull(monitor.bounds.height),
-      }
-      : null,
-    workArea: monitor.workArea && typeof monitor.workArea === 'object'
-      ? {
-        x: toNumberOrNull(monitor.workArea.x),
-        y: toNumberOrNull(monitor.workArea.y),
-        width: toNumberOrNull(monitor.workArea.width),
-        height: toNumberOrNull(monitor.workArea.height),
-      }
-      : null,
-    workAreaPhysical: monitor.workAreaPhysical && typeof monitor.workAreaPhysical === 'object'
-      ? {
-        x: toNumberOrNull(monitor.workAreaPhysical.x),
-        y: toNumberOrNull(monitor.workAreaPhysical.y),
-        width: toNumberOrNull(monitor.workAreaPhysical.width),
-        height: toNumberOrNull(monitor.workAreaPhysical.height),
       }
       : null,
   };
@@ -101,12 +102,20 @@ const createLaunchDiagnostics = (context = {}) => {
 
   const emit = (event, payload = {}) => {
     const safeEvent = String(event || '').trim() || 'event';
-    console.log(`${LAUNCH_PROFILE_TAG} ${safeEvent}`, {
+    const entry = {
       event: safeEvent,
       timestamp: Date.now(),
       ...baseContext,
       ...sanitizePayload(payload),
-    });
+    };
+    appendLaunchLogLine(entry);
+
+    const verboseConsole = shouldEmitVerboseConsole();
+    const compactConsole = shouldEmitCompactConsole();
+    const shouldPrintCompactEvent = safeEvent === 'failure' || safeEvent === 'result';
+    if (!verboseConsole && compactConsole && !shouldPrintCompactEvent) return;
+
+    console.log(`${LAUNCH_PROFILE_TAG} ${safeEvent}`, entry);
   };
 
   return {
