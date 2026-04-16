@@ -5,6 +5,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electron', {
   // Launch profile actions in main process (apps + tabs)
   launchProfile: (profileId) => ipcRenderer.invoke('launch-profile', profileId),
+  getLaunchProfileStatus: (profileId) => ipcRenderer.invoke('launch-profile-status', profileId),
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)
   getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),

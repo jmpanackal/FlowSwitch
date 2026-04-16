@@ -24,6 +24,44 @@ declare global {
           name: string;
           reason: string;
         }>;
+        pendingConfirmations?: Array<{
+          name: string;
+          path: string;
+          reason: string;
+          processHintLc?: string;
+          blockerHandle?: string | null;
+          status?: "waiting" | "resolved" | "failed";
+          handle?: string;
+          resolvedAt?: number;
+        }>;
+        pendingConfirmationCount?: number;
+        unresolvedPendingConfirmationCount?: number;
+      }>;
+      getLaunchProfileStatus: (profileId: string) => Promise<{
+        ok: boolean;
+        error?: string;
+        status?: {
+          profileId: string;
+          state: "idle" | "in-progress" | "awaiting-confirmations" | "complete" | "failed" | string;
+          launchedAppCount: number;
+          launchedTabCount: number;
+          failedAppCount: number;
+          skippedAppCount: number;
+          pendingConfirmationCount: number;
+          unresolvedPendingConfirmationCount: number;
+          requestedAppCount: number;
+          pendingConfirmations: Array<{
+            name: string;
+            path: string;
+            reason: string;
+            processHintLc?: string;
+            blockerHandle?: string | null;
+            status?: "waiting" | "resolved" | "failed";
+            handle?: string;
+            resolvedAt?: number;
+          }>;
+          updatedAt: number;
+        } | null;
       }>;
       getInstalledApps: () => Promise<{
         name: string;
