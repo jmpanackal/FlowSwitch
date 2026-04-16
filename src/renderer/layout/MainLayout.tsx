@@ -68,6 +68,8 @@ export default function App() {
   const { launchFeedback, setLaunchFeedback, launchFeedbackTimeoutRef } =
     useLaunchFeedback();
   const launchStatusPollRef = useRef<number | null>(null);
+  const launchStatusPollTokenRef = useRef(0);
+  const activeLaunchRunRef = useRef<{ profileId: string; runId: string } | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [
     selectedProfileForSettings,
@@ -82,11 +84,20 @@ export default function App() {
     useState<SelectedApp | null>(null);
 
   const stopLaunchStatusPolling = useCallback(() => {
+    launchStatusPollTokenRef.current += 1;
     if (launchStatusPollRef.current) {
       window.clearInterval(launchStatusPollRef.current);
       launchStatusPollRef.current = null;
     }
   }, []);
+  const isCurrentLaunchContext = useCallback(
+    (profileId: string, runId: string, pollToken: number) => (
+      launchStatusPollTokenRef.current === pollToken
+      && activeLaunchRunRef.current?.profileId === profileId
+      && activeLaunchRunRef.current?.runId === runId
+    ),
+    [],
+  );
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
   const [showProfileDropdown, setShowProfileDropdown] =
@@ -1314,7 +1325,9 @@ export default function App() {
 
   const handleLaunch = async () => {
     if (!currentProfile?.id || !window.electron?.launchProfile) return;
+    const launchProfileId = currentProfile.id;
     stopLaunchStatusPolling();
+    activeLaunchRunRef.current = null;
 
     if (launchFeedbackTimeoutRef.current) {
       window.clearTimeout(launchFeedbackTimeoutRef.current);
@@ -1354,8 +1367,15 @@ export default function App() {
       }
 
       const launchResult = await window.electron.launchProfile(
-        currentProfile.id,
+        launchProfileId,
       );
+      const launchRunId = String(launchResult?.runId || "").trim();
+      if (launchRunId) {
+        activeLaunchRunRef.current = {
+          profileId: launchProfileId,
+          runId: launchRunId,
+        };
+      }
       const launchedApps = Number(launchResult?.launchedAppCount || 0);
       const launchedTabs = Number(launchResult?.launchedTabCount || 0);
       const failedCount = Array.isArray(launchResult?.failedApps)
@@ -1387,7 +1407,8 @@ export default function App() {
         if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
         if (skippedCount > 0) summaryParts.push(`${skippedCount} skipped`);
         if (unresolvedPendingCount > 0) {
-          persistLaunchFeedback = true;
+          const canPollLaunchStatus = Boolean(launchRunId);
+          persistLaunchFeedback = canPollLaunchStatus;
           const pendingList = pendingNames.length > 0
             ? ` (${pendingNames.join(", ")}${unresolvedPendingCount > pendingNames.length ? ", ..." : ""})`
             : "";
@@ -1396,12 +1417,16 @@ export default function App() {
             status: "warning",
             message: `Launch in progress: ${summaryText}. Waiting for ${unresolvedPendingCount} confirmation${unresolvedPendingCount === 1 ? "" : "s"}${pendingList}.`,
           });
-          if (window.electron?.getLaunchProfileStatus) {
+          if (canPollLaunchStatus) {
+            const pollToken = launchStatusPollTokenRef.current;
             launchStatusPollRef.current = window.setInterval(async () => {
+              if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
               try {
-                const statusResult = await window.electron.getLaunchProfileStatus(currentProfile.id);
+                const statusResult = await window.electron.getLaunchProfileStatus(launchProfileId);
+                if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
                 const status = statusResult?.status;
                 if (!statusResult?.ok || !status) return;
+                if (String(status.runId || "").trim() !== launchRunId) return;
                 const unresolvedCount = Number(status.unresolvedPendingConfirmationCount || 0);
                 const pollingPendingNames = Array.isArray(status.pendingConfirmations)
                   ? status.pendingConfirmations
@@ -1414,6 +1439,7 @@ export default function App() {
                   : [];
                 if (unresolvedCount <= 0) {
                   stopLaunchStatusPolling();
+                  activeLaunchRunRef.current = null;
                   setLaunchFeedback({
                     status: "success",
                     message: `Launch complete: ${summaryText}.`,
@@ -1449,6 +1475,7 @@ export default function App() {
           });
         }
       } else {
+        activeLaunchRunRef.current = null;
         const errorMessage = launchResult?.error
           || "Could not launch this profile. Check app executable paths in app details.";
         setLaunchFeedback({
@@ -1461,6 +1488,7 @@ export default function App() {
         );
       }
     } catch (error) {
+      activeLaunchRunRef.current = null;
       console.error("Failed to launch profile:", error);
       const errorMessage =
         error instanceof Error && error.message
@@ -1473,6 +1501,7 @@ export default function App() {
     } finally {
       setIsLaunching(false);
       if (!persistLaunchFeedback) {
+        activeLaunchRunRef.current = null;
         launchFeedbackTimeoutRef.current = window.setTimeout(() => {
           setLaunchFeedback({
             status: "idle",

@@ -33,7 +33,6 @@ Priority legend:
 - Current focus phase: **Phase 2 - Reliability Hardening**
 - Current blockers:
   - Steam/launcher-child post-confirmation placement consistency
-  - Full runId + stale-status isolation completion
   - Tracker migration parity and cutover validation
 
 ## Milestones
@@ -50,18 +49,23 @@ Priority legend:
 ## Workstreams
 
 ### A) Run Lifecycle and Status Truth
-- [ ] (P0, owner: agent) Implement strict runId isolation in all status paths (`not_started`)  
+- [x] (P0, owner: agent) Implement strict runId isolation in all status paths (`done`)  
   depends_on: none  
   done_when: status API + renderer ignore mismatched runId in all launch states
-- [ ] (P0, owner: agent) Enforce stale-status rejection in renderer and IPC consumers (`not_started`)  
+- [x] (P0, owner: agent) Enforce stale-status rejection in renderer and IPC consumers (`done`)  
   depends_on: runId isolation  
   done_when: stale updates never mutate active UI state in tests
-- [ ] (P0, owner: agent) Implement cancel/relaunch policy (`replace`) end-to-end (`not_started`)  
+- [x] (P0, owner: agent) Implement cancel/relaunch policy (`replace`) end-to-end (`done`)  
   depends_on: runId isolation  
   done_when: new run supersedes old run without pending-state leakage
 - [ ] (P1, owner: agent) Add degraded-mode handling for status-store write failures (`not_started`)  
   depends_on: lifecycle status model  
   done_when: `statusDegraded=true` path validated with non-fatal renderer warning
+
+Progress note (2026-04-16):
+- Added run-scoped status store (`runId`) and active-run guards in main process.
+- Added stale snapshot rejection in renderer polling by `runId` + poll token.
+- Added replace semantics where new launch supersedes prior run and stale async writes are ignored.
 
 ### B) Classifier and Candidate Selection
 - [ ] (P0, owner: agent) Extract classifier from `main.js` to dedicated module (`not_started`)  
@@ -107,6 +111,11 @@ Priority legend:
 - [ ] (P0, owner: agent) Enforce run-budget terminal semantics and authoritative timeout event (`not_started`)  
   depends_on: lifecycle status truth  
   done_when: `run-budget-exhausted` emitted once and terminal state is deterministic
+
+Progress note (2026-04-16, confirmation-routing hotfix):
+- Tightened process hint expansion to avoid unrelated token matches (for example `OBS Studio` pulling in `code`).
+- Updated ready-gate blocker logic so windows that qualify as strong main-placement candidates are not treated as hard blockers.
+- Added regression tests for overlap disambiguation vs true modal blockers in `src/main/utils/window-ready-gate.test.js`.
 
 ### E) Global Tracker Migration
 - [ ] (P1, owner: agent) Implement global tracker abstraction with scoped subscriptions (`not_started`)  

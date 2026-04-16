@@ -21,6 +21,7 @@ const {
   describeMonitor,
   summarizeWindowRows,
 } = require('./utils/launch-diagnostics');
+const { createLaunchStatusStore } = require('./utils/launch-status-store');
 const {
   hiddenProcessNamePatterns,
   hiddenWindowTitlePatterns,
@@ -60,22 +61,7 @@ const MAX_URL_LENGTH = 2048;
 const MAX_SHORTCUT_PATH_LENGTH = 4096;
 const DEFAULT_AUTOMATION_SETTLE_MS = 1800;
 const DEFAULT_AUTOMATION_START_DELAY_MS = 900;
-const launchStatusByProfileId = new Map();
-
-const clonePendingConfirmations = (pendingConfirmations) => (
-  (Array.isArray(pendingConfirmations) ? pendingConfirmations : []).map((item) => ({
-    name: String(item?.name || ''),
-    path: String(item?.path || ''),
-    reason: String(item?.reason || ''),
-    processHintLc: item?.processHintLc ? String(item.processHintLc) : undefined,
-    blockerHandle: item?.blockerHandle ? String(item.blockerHandle) : null,
-    status: ['waiting', 'resolved', 'failed'].includes(String(item?.status || '').toLowerCase())
-      ? String(item.status).toLowerCase()
-      : 'waiting',
-    handle: item?.handle ? String(item.handle) : undefined,
-    resolvedAt: Number.isFinite(Number(item?.resolvedAt)) ? Number(item.resolvedAt) : undefined,
-  }))
-);
+const launchStatusStore = createLaunchStatusStore();
 
 const parseBooleanEnv = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -2969,10 +2955,6 @@ const buildCompanionProcessHints = async ({
   const base = String(baseProcessHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
   if (!base) return [];
   const hints = new Set([base]);
-  const appTokens = String(appNameHint || '')
-    .toLowerCase()
-    .split(/[^a-z0-9]+/g)
-    .filter((token) => token.length >= 4);
   let processRows = [];
   try {
     processRows = await getRunningWindowProcesses();
@@ -2988,10 +2970,7 @@ const buildCompanionProcessHints = async ({
       || base.startsWith(name)
       || (base.length >= minimumMatchLength && name.includes(base))
     );
-    const rowTitle = String(row?.title || '').trim().toLowerCase();
-    const rowPath = String(row?.executablePath || '').trim().toLowerCase();
-    const appNameRelated = appTokens.some((token) => rowTitle.includes(token) || rowPath.includes(token));
-    if (related || appNameRelated) hints.add(name);
+    if (related) hints.add(name);
   }
   const result = Array.from(hints);
   if (diagnostics && result.length > 1) {
@@ -3389,27 +3368,9 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
   };
 };
 
-const publishLaunchProfileStatus = (profileId, status) => {
-  const safeProfileId = String(profileId || '').trim();
-  if (!safeProfileId || !status || typeof status !== 'object') return;
-  const pendingConfirmations = clonePendingConfirmations(status.pendingConfirmations);
-  const unresolvedPendingConfirmationCount = pendingConfirmations
-    .filter((item) => item.status !== 'resolved')
-    .length;
-  launchStatusByProfileId.set(safeProfileId, {
-    profileId: safeProfileId,
-    state: String(status.state || 'idle'),
-    launchedAppCount: Number(status.launchedAppCount || 0),
-    launchedTabCount: Number(status.launchedTabCount || 0),
-    failedAppCount: Number(status.failedAppCount || 0),
-    skippedAppCount: Number(status.skippedAppCount || 0),
-    pendingConfirmationCount: pendingConfirmations.length,
-    unresolvedPendingConfirmationCount,
-    requestedAppCount: Number(status.requestedAppCount || 0),
-    pendingConfirmations,
-    updatedAt: Date.now(),
-  });
-};
+const publishLaunchProfileStatus = (profileId, runId, status) => (
+  launchStatusStore.publishStatus(profileId, runId, status)
+);
 
 const launchProfileById = async (profileId) => {
   const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
@@ -3436,6 +3397,18 @@ const launchProfileById = async (profileId) => {
         .filter(Boolean),
     };
   }
+  const runSession = launchStatusStore.startRun(normalizedProfileId);
+  const activeRunId = String(runSession?.runId || '').trim();
+  if (!activeRunId) {
+    return {
+      ok: false,
+      error: 'Could not initialize launch run state.',
+      profile,
+      requestedProfileId: normalizedProfileId,
+    };
+  }
+  const replacedRunId = runSession?.replacedRunId || null;
+  const isCurrentRunActive = () => launchStatusStore.isActiveRun(normalizedProfileId, activeRunId);
 
   const launchState = profile?.launchMaximized
     ? 'maximized'
@@ -3491,12 +3464,13 @@ const launchProfileById = async (profileId) => {
   const profileDiagnostics = createLaunchDiagnostics({
     profileId: normalizedProfileId,
     launchState,
+    runId: activeRunId,
   });
   const publishCurrentLaunchStatus = (state = 'in-progress') => {
-    publishLaunchProfileStatus(normalizedProfileId, {
+    publishLaunchProfileStatus(normalizedProfileId, activeRunId, {
       state,
       launchedAppCount,
-      launchedTabCount: 0,
+      launchedTabCount,
       failedAppCount: failedApps.length,
       skippedAppCount: skippedApps.length,
       requestedAppCount: appLaunches.length,
@@ -3528,10 +3502,12 @@ const launchProfileById = async (profileId) => {
   });
 
   const runLaunch = async (launchItem) => {
+    if (!isCurrentRunActive()) return;
     const launchDiagnostics = createLaunchDiagnostics({
       profileId: normalizedProfileId,
       launchSequence: Number(launchItem?.launchSequence ?? -1),
       appName: launchItem?.appName || 'unknown',
+      runId: activeRunId,
     });
     try {
       const processHintLc = getPlacementProcessKey(launchItem);
@@ -3747,6 +3723,7 @@ const launchProfileById = async (profileId) => {
               placementState: placementBounds.state,
             },
           }).then((resumeResult) => {
+            if (!isCurrentRunActive()) return;
             const status = String(resumeResult?.status || '').trim().toLowerCase();
             const mappedStatus = (
               status === 'resolved'
@@ -3762,6 +3739,7 @@ const launchProfileById = async (profileId) => {
             }
             publishCurrentLaunchStatus('awaiting-confirmations');
           }).catch(() => {
+            if (!isCurrentRunActive()) return;
             pendingEntry.status = 'failed';
             publishCurrentLaunchStatus('awaiting-confirmations');
           });
@@ -4192,6 +4170,7 @@ const launchProfileById = async (profileId) => {
   });
 
   for (const launchItem of appLaunches) {
+    if (!isCurrentRunActive()) break;
     const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
     const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
     if (safeDelayMs > 0) {
@@ -4203,6 +4182,7 @@ const launchProfileById = async (profileId) => {
   const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
   const launchedUrls = new Set();
   for (const tab of browserTabs) {
+    if (!isCurrentRunActive()) break;
     const url = normalizeSafeUrl(tab?.url);
     if (!url || launchedUrls.has(url)) continue;
     launchedUrls.add(url);
@@ -4216,6 +4196,7 @@ const launchProfileById = async (profileId) => {
   }
 
   for (const url of legacyLaunchData.browserUrls) {
+    if (!isCurrentRunActive()) break;
     const safeUrl = normalizeSafeUrl(url);
     if (!safeUrl || launchedUrls.has(safeUrl)) continue;
     launchedUrls.add(safeUrl);
@@ -4238,9 +4219,12 @@ const launchProfileById = async (profileId) => {
       skippedAppCount: skippedApps.length,
     });
     publishCurrentLaunchStatus('failed');
+    launchStatusStore.sealRun(normalizedProfileId, activeRunId, 'failed');
     return {
       ok: false,
       error: 'No launchable apps or tabs found in this profile. Add an executable path in app details or recreate from installed apps.',
+      runId: activeRunId,
+      replacedRunId,
       profile,
       launchedAppCount,
       launchedTabCount,
@@ -4272,8 +4256,17 @@ const launchProfileById = async (profileId) => {
       ? 'awaiting-confirmations'
       : (failedApps.length === 0 ? 'complete' : 'failed'),
   );
+  if (unresolvedPendingConfirmations.length === 0) {
+    launchStatusStore.sealRun(
+      normalizedProfileId,
+      activeRunId,
+      failedApps.length === 0 ? 'complete' : 'failed',
+    );
+  }
   return {
     ok: failedApps.length === 0,
+    runId: activeRunId,
+    replacedRunId,
     profile,
     launchedAppCount,
     launchedTabCount,
@@ -4470,14 +4463,11 @@ handleTrustedIpc('launch-profile', async (_event, profileId) => {
 handleTrustedIpc('launch-profile-status', async (_event, profileId) => {
   const safeProfileId = String(profileId || '').trim();
   if (!safeProfileId) return { ok: false, error: 'Invalid profile id' };
-  const status = launchStatusByProfileId.get(safeProfileId);
+  const status = launchStatusStore.getStatus(safeProfileId);
   if (!status) return { ok: true, status: null };
   return {
     ok: true,
-    status: {
-      ...status,
-      pendingConfirmations: clonePendingConfirmations(status.pendingConfirmations),
-    },
+    status,
   };
 });
 
