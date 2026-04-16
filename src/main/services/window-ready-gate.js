@@ -49,8 +49,8 @@ const isLikelyModalBlockerWindow = (row, expectedBounds = null) => {
   const clearlySmallerThanTarget = (
     expectedWidth > 0
     && expectedHeight > 0
-    && width <= Math.floor(expectedWidth * 0.9)
-    && height <= Math.floor(expectedHeight * 0.9)
+    && width <= Math.floor(expectedWidth * 0.78)
+    && height <= Math.floor(expectedHeight * 0.78)
   );
   if (MODAL_DIALOG_CLASSES.has(className)) return true;
   if (hasOwner && titleLength > 0 && clearlySmallerThanTarget) return true;
@@ -62,10 +62,17 @@ const isLikelyModalBlockerWindow = (row, expectedBounds = null) => {
 const isLikelyMainPlacementWindow = (row, expectedBounds = null) => {
   if (!row || row.cloaked || row.hung || row.tool || !row.enabled) return false;
   if (isLikelyModalBlockerWindow(row, expectedBounds)) return false;
+  return isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds);
+};
+
+const isLikelyMainPlacementWindowIgnoringBlocker = (row, expectedBounds = null) => {
+  if (!row || row.cloaked || row.hung || row.tool || !row.enabled) return false;
   const width = Number(row.width || 0);
   const height = Number(row.height || 0);
-  const minExpectedWidth = Math.max(320, Math.floor(Number(expectedBounds?.width || 0) * 0.52));
-  const minExpectedHeight = Math.max(220, Math.floor(Number(expectedBounds?.height || 0) * 0.52));
+  const expectsMaximized = String(expectedBounds?.state || '').toLowerCase() === 'maximized';
+  const sizeRatio = expectsMaximized ? 0.36 : 0.52;
+  const minExpectedWidth = Math.max(320, Math.floor(Number(expectedBounds?.width || 0) * sizeRatio));
+  const minExpectedHeight = Math.max(220, Math.floor(Number(expectedBounds?.height || 0) * sizeRatio));
   return width >= minExpectedWidth && height >= minExpectedHeight;
 };
 
@@ -99,6 +106,7 @@ const waitForMainWindowReadyOrBlocker = async ({
   let blockerStableCount = 0;
   let stableHandle = null;
   let stableCount = 0;
+  let lastRows = [];
 
   while (Date.now() <= deadline) {
     const windowsByHint = await Promise.all(
@@ -124,9 +132,24 @@ const waitForMainWindowReadyOrBlocker = async ({
       }
     }
 
+    const strictCandidates = rows
+      .filter((row) => isLikelyMainPlacementWindow(row, expectedBounds))
+      .sort((a, b) => scoreWindowCandidate(b, safeProcess || normalizedHints[0])
+        - scoreWindowCandidate(a, safeProcess || normalizedHints[0]));
+    const relaxedCandidates = rows
+      .filter((row) => isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds))
+      .sort((a, b) => scoreWindowCandidate(b, safeProcess || normalizedHints[0])
+        - scoreWindowCandidate(a, safeProcess || normalizedHints[0]));
+    const candidateHandleSet = new Set(
+      relaxedCandidates.map((row) => String(row?.handle || '').trim()).filter(Boolean),
+    );
+    lastRows = rows;
     const blockers = rows.filter((row) => isLikelyModalBlockerWindow(row, expectedBounds));
-    if (blockers.length > 0) {
-      const rankedBlockers = [...blockers].sort((a, b) => Number(b.area || 0) - Number(a.area || 0));
+    const blockingOnlyRows = blockers.filter(
+      (row) => !candidateHandleSet.has(String(row?.handle || '').trim()),
+    );
+    if (blockingOnlyRows.length > 0) {
+      const rankedBlockers = [...blockingOnlyRows].sort((a, b) => Number(b.area || 0) - Number(a.area || 0));
       const blocker = rankedBlockers[0];
       const blockerHandle = String(blocker?.handle || '').trim() || null;
       const blockerTitle = String(blocker?.title || '').trim();
@@ -153,8 +176,8 @@ const waitForMainWindowReadyOrBlocker = async ({
           reason: 'modal-window-blocking-placement',
           processHintLc: safeProcess || normalizedHints[0],
           processHints: normalizedHints,
-          blockerCount: blockers.length,
-          blockerSample: summarizeWindowRows(blockers, 3),
+          blockerCount: blockingOnlyRows.length,
+          blockerSample: summarizeWindowRows(blockingOnlyRows, 3),
           blockerKind: isLikelyLoadingModal ? 'loading' : 'confirmation',
         });
         blockerReported = true;
@@ -167,7 +190,7 @@ const waitForMainWindowReadyOrBlocker = async ({
           blocked: true,
           blockerKind: 'confirmation',
           blockerHandle,
-          blockerSample: summarizeWindowRows(blockers, 3),
+          blockerSample: summarizeWindowRows(blockingOnlyRows, 3),
           handle: null,
         };
       }
@@ -180,11 +203,9 @@ const waitForMainWindowReadyOrBlocker = async ({
     blockerFirstSeenAt = 0;
     lastBlockerHandle = null;
     blockerStableCount = 0;
-
-    const candidates = rows
-      .filter((row) => isLikelyMainPlacementWindow(row, expectedBounds))
-      .sort((a, b) => scoreWindowCandidate(b, safeProcess || normalizedHints[0])
-        - scoreWindowCandidate(a, safeProcess || normalizedHints[0]));
+    const candidates = (blockers.length > 0 && blockingOnlyRows.length === 0)
+      ? relaxedCandidates
+      : strictCandidates;
     if (candidates.length === 0) {
       stableHandle = null;
       stableCount = 0;
@@ -212,7 +233,32 @@ const waitForMainWindowReadyOrBlocker = async ({
     await sleep(pollMs);
   }
 
+  const timeoutInteractiveRows = lastRows.filter((row) => (
+    !row?.cloaked
+    && !row?.hung
+    && !row?.tool
+    && row?.enabled
+    && Number(row?.titleLength || 0) > 0
+    && Number(row?.width || 0) >= 280
+    && Number(row?.height || 0) >= 140
+    && Number(row?.area || 0) >= 80_000
+  ));
+  const blockedByTimeoutInteractive = timeoutInteractiveRows.length > 0;
   if (diagnostics) {
+    if (!blockerReported && timeoutInteractiveRows.length > 0) {
+      diagnostics.decision({
+        ...diagnosticsContext,
+        strategy: 'launch-blocker-detected',
+        reason: 'timeout-interactive-window-blocking-placement',
+        processHintLc: safeProcess || normalizedHints[0],
+        processHints: normalizedHints,
+        blockerCount: timeoutInteractiveRows.length,
+        blockerSample: summarizeWindowRows(timeoutInteractiveRows, 3),
+        blockerKind: 'confirmation',
+      });
+      blockerReported = true;
+      lastBlockerKind = 'confirmation';
+    }
     diagnostics.failure({
       ...diagnosticsContext,
       strategy: 'window-ready-gate',
@@ -225,8 +271,8 @@ const waitForMainWindowReadyOrBlocker = async ({
   return {
     ready: false,
     timedOut: true,
-    blocked: blockerReported,
-    blockerKind: blockerReported ? (lastBlockerKind || 'loading') : null,
+    blocked: blockerReported || blockedByTimeoutInteractive,
+    blockerKind: (blockerReported || blockedByTimeoutInteractive) ? (lastBlockerKind || 'confirmation') : null,
     handle: null,
   };
 };

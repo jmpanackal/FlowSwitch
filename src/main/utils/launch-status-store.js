@@ -1,0 +1,137 @@
+const normalizePendingStatus = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'resolved') return 'resolved';
+  if (normalized === 'failed') return 'failed';
+  return 'waiting';
+};
+
+const clonePendingConfirmations = (pendingConfirmations) => (
+  (Array.isArray(pendingConfirmations) ? pendingConfirmations : []).map((item) => ({
+    name: String(item?.name || ''),
+    path: String(item?.path || ''),
+    reason: String(item?.reason || ''),
+    processHintLc: item?.processHintLc ? String(item.processHintLc) : undefined,
+    blockerHandle: item?.blockerHandle ? String(item.blockerHandle) : null,
+    status: normalizePendingStatus(item?.status),
+    handle: item?.handle ? String(item.handle) : undefined,
+    resolvedAt: Number.isFinite(Number(item?.resolvedAt)) ? Number(item.resolvedAt) : undefined,
+  }))
+);
+
+const createRunIdFactory = ({ now }) => {
+  let sequence = 0;
+  return () => {
+    sequence += 1;
+    return `run-${now()}-${sequence}`;
+  };
+};
+
+const createLaunchStatusStore = (options = {}) => {
+  const now = typeof options.now === 'function' ? options.now : () => Date.now();
+  const nextRunId = typeof options.createRunId === 'function'
+    ? options.createRunId
+    : createRunIdFactory({ now });
+  const clonePending = typeof options.clonePendingConfirmations === 'function'
+    ? options.clonePendingConfirmations
+    : clonePendingConfirmations;
+  const statusByProfileId = new Map();
+  const activeRunByProfileId = new Map();
+
+  const startRun = (profileId) => {
+    const safeProfileId = String(profileId || '').trim();
+    if (!safeProfileId) return null;
+    const previousActiveRunId = activeRunByProfileId.get(safeProfileId)?.runId || null;
+    const runId = String(nextRunId(safeProfileId) || '').trim();
+    if (!runId) return null;
+    activeRunByProfileId.set(safeProfileId, {
+      runId,
+      startedAt: now(),
+    });
+    return {
+      profileId: safeProfileId,
+      runId,
+      replacedRunId: previousActiveRunId,
+    };
+  };
+
+  const isActiveRun = (profileId, runId) => {
+    const safeProfileId = String(profileId || '').trim();
+    const safeRunId = String(runId || '').trim();
+    if (!safeProfileId || !safeRunId) return false;
+    return activeRunByProfileId.get(safeProfileId)?.runId === safeRunId;
+  };
+
+  const publishStatus = (profileId, runId, status) => {
+    const safeProfileId = String(profileId || '').trim();
+    const safeRunId = String(runId || '').trim();
+    if (!safeProfileId || !safeRunId || !status || typeof status !== 'object') {
+      return { published: false, reason: 'invalid-arguments' };
+    }
+    if (!isActiveRun(safeProfileId, safeRunId)) {
+      return { published: false, reason: 'inactive-run' };
+    }
+    const pendingConfirmations = clonePending(status.pendingConfirmations);
+    const unresolvedPendingConfirmationCount = pendingConfirmations
+      .filter((item) => item.status !== 'resolved')
+      .length;
+    const nextStatus = {
+      profileId: safeProfileId,
+      runId: safeRunId,
+      state: String(status.state || 'idle'),
+      launchedAppCount: Number(status.launchedAppCount || 0),
+      launchedTabCount: Number(status.launchedTabCount || 0),
+      failedAppCount: Number(status.failedAppCount || 0),
+      skippedAppCount: Number(status.skippedAppCount || 0),
+      pendingConfirmationCount: pendingConfirmations.length,
+      unresolvedPendingConfirmationCount,
+      requestedAppCount: Number(status.requestedAppCount || 0),
+      pendingConfirmations,
+      updatedAt: now(),
+    };
+    statusByProfileId.set(safeProfileId, nextStatus);
+    return { published: true, status: { ...nextStatus, pendingConfirmations: clonePending(nextStatus.pendingConfirmations) } };
+  };
+
+  const getStatus = (profileId) => {
+    const safeProfileId = String(profileId || '').trim();
+    if (!safeProfileId) return null;
+    const status = statusByProfileId.get(safeProfileId);
+    if (!status) return null;
+    return {
+      ...status,
+      pendingConfirmations: clonePending(status.pendingConfirmations),
+    };
+  };
+
+  const sealRun = (profileId, runId, state = null) => {
+    const safeProfileId = String(profileId || '').trim();
+    const safeRunId = String(runId || '').trim();
+    if (!safeProfileId || !safeRunId) return false;
+    if (!isActiveRun(safeProfileId, safeRunId)) return false;
+    activeRunByProfileId.delete(safeProfileId);
+    if (state) {
+      const currentStatus = statusByProfileId.get(safeProfileId);
+      if (currentStatus && currentStatus.runId === safeRunId) {
+        statusByProfileId.set(safeProfileId, {
+          ...currentStatus,
+          state: String(state),
+          updatedAt: now(),
+        });
+      }
+    }
+    return true;
+  };
+
+  return {
+    startRun,
+    isActiveRun,
+    publishStatus,
+    getStatus,
+    sealRun,
+  };
+};
+
+module.exports = {
+  clonePendingConfirmations,
+  createLaunchStatusStore,
+};

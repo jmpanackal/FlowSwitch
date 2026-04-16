@@ -9,6 +9,8 @@ declare global {
       launchProfile: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;
+        runId?: string;
+        replacedRunId?: string | null;
         storeErrorCode?: string;
         requestedProfileId?: string;
         profile?: Profile;
@@ -42,6 +44,7 @@ declare global {
         error?: string;
         status?: {
           profileId: string;
+          runId: string;
           state: "idle" | "in-progress" | "awaiting-confirmations" | "complete" | "failed" | string;
           launchedAppCount: number;
           launchedTabCount: number;
