@@ -26,6 +26,7 @@ const {
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
 } = require('./services/windows-process-service');
+const { waitForMainWindowReadyOrBlocker } = require('./services/window-ready-gate');
 const { captureAllMonitorsScreenshot } = require('./utils/windows-desktop-screenshot');
 
 const gotSingleInstanceLock = app.requestSingleInstanceLock();
@@ -59,6 +60,22 @@ const MAX_URL_LENGTH = 2048;
 const MAX_SHORTCUT_PATH_LENGTH = 4096;
 const DEFAULT_AUTOMATION_SETTLE_MS = 1800;
 const DEFAULT_AUTOMATION_START_DELAY_MS = 900;
+const launchStatusByProfileId = new Map();
+
+const clonePendingConfirmations = (pendingConfirmations) => (
+  (Array.isArray(pendingConfirmations) ? pendingConfirmations : []).map((item) => ({
+    name: String(item?.name || ''),
+    path: String(item?.path || ''),
+    reason: String(item?.reason || ''),
+    processHintLc: item?.processHintLc ? String(item.processHintLc) : undefined,
+    blockerHandle: item?.blockerHandle ? String(item.blockerHandle) : null,
+    status: ['waiting', 'resolved', 'failed'].includes(String(item?.status || '').toLowerCase())
+      ? String(item.status).toLowerCase()
+      : 'waiting',
+    handle: item?.handle ? String(item.handle) : undefined,
+    resolvedAt: Number.isFinite(Number(item?.resolvedAt)) ? Number(item.resolvedAt) : undefined,
+  }))
+);
 
 const parseBooleanEnv = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -2399,6 +2416,53 @@ Write-Output $sb.ToString()`;
   })
 );
 
+const getMonitorPlacementRect = (monitor) => (
+  (process.platform === 'win32' && monitor?.workAreaPhysical)
+    ? monitor.workAreaPhysical
+    : (monitor?.workArea || monitor?.bounds || null)
+);
+
+const centerWindowHandleOnMonitor = async ({
+  handle,
+  monitor,
+  processHintLc = '',
+  diagnostics = null,
+  diagnosticsContext = {},
+}) => {
+  const target = getMonitorPlacementRect(monitor);
+  const safeHandle = String(handle || '').trim();
+  if (!target || !safeHandle) return { applied: false };
+  const rects = await getWindowPlacementRectsByHandle(safeHandle);
+  const measured = rects?.visibleRect || rects?.outerRect || null;
+  const width = clamp(
+    Math.round(Number(measured?.width || (Number(target.width || 0) * 0.46))),
+    320,
+    Math.max(320, Math.round(Number(target.width || 0) * 0.95)),
+  );
+  const height = clamp(
+    Math.round(Number(measured?.height || (Number(target.height || 0) * 0.42))),
+    220,
+    Math.max(220, Math.round(Number(target.height || 0) * 0.9)),
+  );
+  const left = Math.round(Number(target.x || 0) + ((Number(target.width || 0) - width) / 2));
+  const top = Math.round(Number(target.y || 0) + ((Number(target.height || 0) - height) / 2));
+  return moveSpecificWindowHandleToBounds({
+    handle: safeHandle,
+    bounds: { left, top, width, height, state: 'normal' },
+    processHintLc,
+    aggressiveMaximize: false,
+    positionOnlyBeforeMaximize: false,
+    skipFrameChanged: true,
+    frameCompensationMode: 'none',
+    diagnostics,
+    diagnosticsContext: {
+      ...diagnosticsContext,
+      strategy: 'center-modal-on-monitor',
+      candidateHandle: safeHandle,
+    },
+  });
+};
+
 const isWindowOnTargetMonitor = ({ rect, monitor }) => {
   if (!rect || !monitor) return false;
   // GetWindowRect is physical px; compare to workAreaPhysical on Windows (DIP workArea would mismatch).
@@ -2791,131 +2855,6 @@ const scoreWindowCandidate = (row, options = {}) => {
   return score + area;
 };
 
-const MODAL_DIALOG_CLASSES = new Set(['#32770']);
-
-const isLikelyModalBlockerWindow = (row, expectedBounds = null) => {
-  if (!row || row.cloaked || row.hung || !row.enabled) return false;
-  const className = String(row.className || '').toLowerCase();
-  const titleLength = Number(row.titleLength || 0);
-  const hasOwner = Boolean(row.hasOwner);
-  const topMost = Boolean(row.topMost);
-  const width = Number(row.width || 0);
-  const height = Number(row.height || 0);
-  const expectedWidth = Math.max(1, Number(expectedBounds?.width || 0));
-  const expectedHeight = Math.max(1, Number(expectedBounds?.height || 0));
-  const clearlySmallerThanTarget = (
-    expectedWidth > 0
-    && expectedHeight > 0
-    && width <= Math.floor(expectedWidth * 0.9)
-    && height <= Math.floor(expectedHeight * 0.9)
-  );
-  if (MODAL_DIALOG_CLASSES.has(className)) return true;
-  if (hasOwner && titleLength > 0 && clearlySmallerThanTarget) return true;
-  if (topMost && hasOwner && titleLength > 0) return true;
-  return false;
-};
-
-const isLikelyMainPlacementWindow = (row, expectedBounds = null) => {
-  if (!row || row.cloaked || row.hung || row.tool || !row.enabled) return false;
-  if (isLikelyModalBlockerWindow(row, expectedBounds)) return false;
-  const width = Number(row.width || 0);
-  const height = Number(row.height || 0);
-  const minExpectedWidth = Math.max(320, Math.floor(Number(expectedBounds?.width || 0) * 0.52));
-  const minExpectedHeight = Math.max(220, Math.floor(Number(expectedBounds?.height || 0) * 0.52));
-  return width >= minExpectedWidth && height >= minExpectedHeight;
-};
-
-const waitForMainWindowReadyOrBlocker = async ({
-  processHintLc,
-  expectedBounds = null,
-  timeoutMs = 30000,
-  pollMs = 260,
-  diagnostics = null,
-  diagnosticsContext = {},
-}) => {
-  const safeProcess = String(processHintLc || '').trim().toLowerCase();
-  if (!safeProcess) return { ready: false, timedOut: false, blocked: false, handle: null };
-  const deadline = Date.now() + Math.max(2000, Number(timeoutMs || 0));
-  let blockerReported = false;
-  let stableHandle = null;
-  let stableCount = 0;
-
-  while (Date.now() <= deadline) {
-    const rows = await getVisibleWindowInfos(safeProcess, {
-      diagnostics,
-      diagnosticsContext: {
-        ...diagnosticsContext,
-        strategy: 'window-ready-gate-scan',
-      },
-    });
-
-    const blockers = rows.filter((row) => isLikelyModalBlockerWindow(row, expectedBounds));
-    if (blockers.length > 0) {
-      if (!blockerReported && diagnostics) {
-        diagnostics.decision({
-          ...diagnosticsContext,
-          strategy: 'launch-blocker-detected',
-          reason: 'modal-window-blocking-placement',
-          processHintLc: safeProcess,
-          blockerCount: blockers.length,
-          blockerSample: summarizeWindowRows(blockers, 3),
-        });
-        blockerReported = true;
-      }
-      stableHandle = null;
-      stableCount = 0;
-      await sleep(pollMs);
-      continue;
-    }
-
-    const candidates = rows
-      .filter((row) => isLikelyMainPlacementWindow(row, expectedBounds))
-      .sort((a, b) => scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
-        - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess }));
-    if (candidates.length === 0) {
-      stableHandle = null;
-      stableCount = 0;
-      await sleep(pollMs);
-      continue;
-    }
-
-    const topCandidate = candidates[0];
-    if (stableHandle && stableHandle === topCandidate.handle) {
-      stableCount += 1;
-    } else {
-      stableHandle = topCandidate.handle;
-      stableCount = 1;
-    }
-
-    if (stableCount >= 2) {
-      return {
-        ready: true,
-        timedOut: false,
-        blocked: false,
-        handle: stableHandle,
-        candidateSample: summarizeWindowRows(candidates, 3),
-      };
-    }
-    await sleep(pollMs);
-  }
-
-  if (diagnostics) {
-    diagnostics.failure({
-      ...diagnosticsContext,
-      strategy: 'window-ready-gate',
-      reason: blockerReported ? 'modal-blocker-timeout' : 'main-window-timeout',
-      processHintLc: safeProcess,
-      timeoutMs: Math.max(2000, Number(timeoutMs || 0)),
-    });
-  }
-  return {
-    ready: false,
-    timedOut: true,
-    blocked: blockerReported,
-    handle: null,
-  };
-};
-
 /**
  * Prefer Chromium top-level HWNDs (Chrome_WidgetWin_1) with largest area; avoids narrow strips / blank surfaces.
  */
@@ -3019,6 +2958,226 @@ const waitForWindowResponsive = async (processName, handle, maxWaitMs = 1800, op
   }
 
   return false;
+};
+
+const buildCompanionProcessHints = async ({
+  baseProcessHintLc,
+  appNameHint = '',
+  diagnostics = null,
+  diagnosticsContext = {},
+}) => {
+  const base = String(baseProcessHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+  if (!base) return [];
+  const hints = new Set([base]);
+  const appTokens = String(appNameHint || '')
+    .toLowerCase()
+    .split(/[^a-z0-9]+/g)
+    .filter((token) => token.length >= 4);
+  let processRows = [];
+  try {
+    processRows = await getRunningWindowProcesses();
+  } catch {
+    processRows = [];
+  }
+  const minimumMatchLength = Math.max(4, Math.min(10, base.length));
+  for (const row of processRows) {
+    const name = String(row?.name || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (!name || name === base) continue;
+    const related = (
+      name.startsWith(base)
+      || base.startsWith(name)
+      || (base.length >= minimumMatchLength && name.includes(base))
+    );
+    const rowTitle = String(row?.title || '').trim().toLowerCase();
+    const rowPath = String(row?.executablePath || '').trim().toLowerCase();
+    const appNameRelated = appTokens.some((token) => rowTitle.includes(token) || rowPath.includes(token));
+    if (related || appNameRelated) hints.add(name);
+  }
+  const result = Array.from(hints);
+  if (diagnostics && result.length > 1) {
+    diagnostics.decision({
+      ...diagnosticsContext,
+      strategy: 'process-hint-expansion',
+      reason: 'companion-hints-discovered',
+      baseProcessHintLc: base,
+      processHints: result,
+    });
+  }
+  return result;
+};
+
+const resumePlacementAfterConfirmationModal = async ({
+  processHintLc,
+  processHints = [],
+  placementBounds,
+  monitor,
+  aggressiveMaximize = false,
+  positionOnlyBeforeMaximize = false,
+  skipFrameChanged = false,
+  launchDiagnostics,
+  diagnosticsContext = {},
+}) => {
+  const resumeDeadline = Date.now() + 120000;
+  let resumeGate = null;
+  while (Date.now() <= resumeDeadline) {
+    const remainingMs = Math.max(2200, resumeDeadline - Date.now());
+    resumeGate = await waitForMainWindowReadyOrBlocker({
+      processHintLc,
+      processHints,
+      expectedBounds: placementBounds,
+      timeoutMs: remainingMs,
+      pollMs: 320,
+      diagnostics: launchDiagnostics,
+      listWindows: getVisibleWindowInfos,
+      sleep,
+      summarizeWindowRows,
+      scoreWindowCandidate: (row, hint) => (
+        scoreWindowCandidate(row, { chromiumProcessHint: hint })
+      ),
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-gate',
+      },
+    });
+    if (resumeGate.ready && resumeGate.handle) break;
+    if (resumeGate.blocked && resumeGate.blockerKind === 'confirmation') {
+      await sleep(420);
+      continue;
+    }
+    break;
+  }
+  if (!resumeGate.ready || !resumeGate.handle) {
+    if (launchDiagnostics) {
+      launchDiagnostics.failure({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: 'post-modal-main-window-not-ready',
+        blocked: Boolean(resumeGate.blocked),
+        timedOut: Boolean(resumeGate.timedOut),
+      });
+    }
+    return {
+      resolved: false,
+      status: (resumeGate.blocked && resumeGate.blockerKind === 'confirmation') ? 'waiting' : 'timeout',
+      handle: null,
+    };
+  }
+
+  const placed = await moveSpecificWindowHandleToBounds({
+    handle: resumeGate.handle,
+    bounds: placementBounds,
+    processHintLc,
+    aggressiveMaximize,
+    positionOnlyBeforeMaximize,
+    skipFrameChanged,
+    diagnostics: launchDiagnostics,
+    diagnosticsContext: {
+      ...diagnosticsContext,
+      strategy: 'post-modal-resume-placement',
+      candidateHandle: resumeGate.handle,
+    },
+  });
+  if (!placed.applied) {
+    if (launchDiagnostics) {
+      launchDiagnostics.failure({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: 'post-modal-placement-not-applied',
+        handle: resumeGate.handle,
+      });
+    }
+    return {
+      resolved: false,
+      status: 'placement-failed',
+      handle: resumeGate.handle,
+    };
+  }
+
+  if (placementBounds.state === 'normal' && monitor) {
+    const verification = await verifyAndCorrectWindowPlacement({
+      handle: resumeGate.handle,
+      monitor,
+      bounds: placementBounds,
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+      skipFrameChanged,
+      maxCorrections: 2,
+      initialCheckDelayMs: 120,
+      diagnostics: launchDiagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-verification',
+      },
+    });
+    if (launchDiagnostics) {
+      launchDiagnostics.result({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: verification.verified ? 'post-modal-placement-verified' : 'post-modal-placement-not-verified',
+        verified: Boolean(verification.verified),
+        corrected: Boolean(verification.corrected),
+        handle: resumeGate.handle,
+      });
+    }
+    if (!verification.verified) {
+      return {
+        resolved: false,
+        status: 'placement-failed',
+        handle: resumeGate.handle,
+      };
+    }
+  }
+
+  if (placementBounds.state === 'maximized' && monitor) {
+    const stabilizationHints = Array.from(new Set(
+      [processHintLc, ...(Array.isArray(processHints) ? processHints : [])]
+        .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+        .filter(Boolean),
+    ));
+    let stabilized = { verified: false, handle: resumeGate.handle };
+    for (const hint of stabilizationHints) {
+      stabilized = await stabilizePlacementForSlowLaunch({
+        processHintLc: hint,
+        bounds: placementBounds,
+        monitor,
+        initialHandle: stabilized.handle || resumeGate.handle,
+        aggressiveMaximize,
+        positionOnlyBeforeMaximize,
+        skipFrameChanged,
+        durationMs: 2200,
+        diagnostics: launchDiagnostics,
+        diagnosticsContext: {
+          ...diagnosticsContext,
+          processHintLc: hint,
+          strategy: 'post-modal-resume-stabilize',
+        },
+      });
+      if (stabilized.verified) break;
+    }
+    if (launchDiagnostics) {
+      launchDiagnostics.result({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: stabilized.verified
+          ? 'post-modal-maximized-stabilized'
+          : 'post-modal-maximized-not-stabilized',
+        verified: Boolean(stabilized.verified),
+        handle: stabilized.handle || resumeGate.handle,
+      });
+    }
+    if (!stabilized.verified) {
+      return {
+        resolved: false,
+        status: 'placement-failed',
+        handle: stabilized.handle || resumeGate.handle,
+      };
+    }
+  }
+  return {
+    resolved: true,
+    status: 'resolved',
+    handle: resumeGate.handle,
+  };
 };
 
 const launchExecutable = (executablePath, args = []) => (
@@ -3230,6 +3389,28 @@ const gatherLegacyActionLaunches = (profile, monitorMap) => {
   };
 };
 
+const publishLaunchProfileStatus = (profileId, status) => {
+  const safeProfileId = String(profileId || '').trim();
+  if (!safeProfileId || !status || typeof status !== 'object') return;
+  const pendingConfirmations = clonePendingConfirmations(status.pendingConfirmations);
+  const unresolvedPendingConfirmationCount = pendingConfirmations
+    .filter((item) => item.status !== 'resolved')
+    .length;
+  launchStatusByProfileId.set(safeProfileId, {
+    profileId: safeProfileId,
+    state: String(status.state || 'idle'),
+    launchedAppCount: Number(status.launchedAppCount || 0),
+    launchedTabCount: Number(status.launchedTabCount || 0),
+    failedAppCount: Number(status.failedAppCount || 0),
+    skippedAppCount: Number(status.skippedAppCount || 0),
+    pendingConfirmationCount: pendingConfirmations.length,
+    unresolvedPendingConfirmationCount,
+    requestedAppCount: Number(status.requestedAppCount || 0),
+    pendingConfirmations,
+    updatedAt: Date.now(),
+  });
+};
+
 const launchProfileById = async (profileId) => {
   const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
   if (storeError) {
@@ -3291,8 +3472,10 @@ const launchProfileById = async (profileId) => {
     });
   const skippedApps = [...modernLaunchData.skippedApps, ...legacyLaunchData.skippedApps];
   const failedApps = [];
+  const pendingConfirmations = [];
   const placementRecords = [];
   let launchedAppCount = 0;
+  let launchedTabCount = 0;
   const requestedLaunchOrder = profile?.launchOrder === 'sequential' ? 'sequential' : 'all-at-once';
   const launchOrder = 'sequential';
   const appLaunchDelays = (profile?.appLaunchDelays && typeof profile.appLaunchDelays === 'object')
@@ -3309,6 +3492,17 @@ const launchProfileById = async (profileId) => {
     profileId: normalizedProfileId,
     launchState,
   });
+  const publishCurrentLaunchStatus = (state = 'in-progress') => {
+    publishLaunchProfileStatus(normalizedProfileId, {
+      state,
+      launchedAppCount,
+      launchedTabCount: 0,
+      failedAppCount: failedApps.length,
+      skippedAppCount: skippedApps.length,
+      requestedAppCount: appLaunches.length,
+      pendingConfirmations,
+    });
+  };
   profileDiagnostics.start({
     strategy: 'launch-profile',
     reason: 'launch-profile-requested',
@@ -3318,6 +3512,7 @@ const launchProfileById = async (profileId) => {
     legacyLaunchCount: legacyLaunchData.launches.length,
     skippedAppCount: skippedApps.length,
   });
+  publishCurrentLaunchStatus('in-progress');
   profileDiagnostics.decision({
     strategy: 'monitor-mapping',
     reason: 'profile-monitor-map-created',
@@ -3383,6 +3578,7 @@ const launchProfileById = async (profileId) => {
         launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
       }
       launchedAppCount += 1;
+      publishCurrentLaunchStatus('in-progress');
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState, {
         diagnostics: launchDiagnostics,
         diagnosticsContext: {
@@ -3429,32 +3625,145 @@ const launchProfileById = async (profileId) => {
           await sleep(200);
         }
 
-        const readyGateTimeoutMs = placementBounds.state === 'maximized' ? 65000 : 45000;
-        const readyGate = await waitForMainWindowReadyOrBlocker({
+        const initialProcessHints = await buildCompanionProcessHints({
+          baseProcessHintLc: processHintLc,
+          appNameHint: launchItem.appName,
+          diagnostics: launchDiagnostics,
+          diagnosticsContext: {
+            processHintLc,
+            strategy: 'window-ready-gate',
+            appName: launchItem.appName,
+          },
+        });
+        const readyGateTimeoutMs = placementBounds.state === 'maximized'
+          ? (launchItem.shortcutPath ? 14000 : 11000)
+          : 9000;
+        let activeProcessHints = initialProcessHints;
+        let readyGate = await waitForMainWindowReadyOrBlocker({
           processHintLc,
+          processHints: activeProcessHints,
           expectedBounds: placementBounds,
           timeoutMs: readyGateTimeoutMs,
           pollMs: 260,
           diagnostics: launchDiagnostics,
+          listWindows: getVisibleWindowInfos,
+          sleep,
+          summarizeWindowRows,
+          scoreWindowCandidate: (row, hint) => (
+            scoreWindowCandidate(row, { chromiumProcessHint: hint })
+          ),
           diagnosticsContext: {
             processHintLc,
             strategy: 'window-ready-gate',
             placementState: placementBounds.state,
           },
         });
-        if (!readyGate.ready && readyGate.blocked) {
-          const blockerMessage = 'App is waiting on a modal prompt; complete it and relaunch profile.';
-          launchDiagnostics.failure({
+        if (!readyGate.ready && !readyGate.blocked) {
+          const expandedHints = await buildCompanionProcessHints({
+            baseProcessHintLc: processHintLc,
+            appNameHint: launchItem.appName,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'window-ready-gate-retry',
+              appName: launchItem.appName,
+            },
+          });
+          if (expandedHints.length > initialProcessHints.length) {
+            activeProcessHints = expandedHints;
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'window-ready-gate-retry',
+              reason: 'retrying-with-expanded-process-hints',
+              initialProcessHints,
+              expandedProcessHints: expandedHints,
+            });
+            readyGate = await waitForMainWindowReadyOrBlocker({
+              processHintLc,
+              processHints: activeProcessHints,
+              expectedBounds: placementBounds,
+              timeoutMs: Math.max(5000, Math.floor(readyGateTimeoutMs * 0.7)),
+              pollMs: 240,
+              diagnostics: launchDiagnostics,
+              listWindows: getVisibleWindowInfos,
+              sleep,
+              summarizeWindowRows,
+              scoreWindowCandidate: (row, hint) => (
+                scoreWindowCandidate(row, { chromiumProcessHint: hint })
+              ),
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'window-ready-gate-retry',
+                placementState: placementBounds.state,
+              },
+            });
+          }
+        }
+        if (!readyGate.ready && readyGate.blocked && readyGate.blockerKind === 'confirmation') {
+          if (readyGate.blockerHandle && launchItem.monitor) {
+            await centerWindowHandleOnMonitor({
+              handle: readyGate.blockerHandle,
+              monitor: launchItem.monitor,
+              processHintLc,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'window-ready-gate',
+                reason: 'confirmation-modal-centered',
+                placementState: placementBounds.state,
+              },
+            });
+          }
+          launchDiagnostics.result({
             processHintLc,
             strategy: 'window-ready-gate',
-            reason: 'modal-blocker-timeout',
-            message: blockerMessage,
+            reason: 'confirmation-modal-awaiting-user',
+            blockerHandle: readyGate.blockerHandle || null,
             timeoutMs: readyGateTimeoutMs,
           });
-          failedApps.push({
+          const pendingEntry = {
             name: launchItem.appName,
             path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
-            error: blockerMessage,
+            reason: 'Awaiting user confirmation modal before main window can be placed.',
+            processHintLc,
+            blockerHandle: readyGate.blockerHandle || null,
+            status: 'waiting',
+          };
+          pendingConfirmations.push(pendingEntry);
+          publishCurrentLaunchStatus('awaiting-confirmations');
+          void resumePlacementAfterConfirmationModal({
+            processHintLc,
+            processHints: activeProcessHints,
+            placementBounds,
+            monitor: launchItem.monitor,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'post-modal-resume',
+              appName: launchItem.appName,
+              placementState: placementBounds.state,
+            },
+          }).then((resumeResult) => {
+            const status = String(resumeResult?.status || '').trim().toLowerCase();
+            const mappedStatus = (
+              status === 'resolved'
+                ? 'resolved'
+                : status === 'waiting'
+                  ? 'waiting'
+                  : 'failed'
+            );
+            pendingEntry.status = mappedStatus;
+            if (resumeResult?.handle) pendingEntry.handle = String(resumeResult.handle);
+            if (mappedStatus === 'resolved') {
+              pendingEntry.resolvedAt = Date.now();
+            }
+            publishCurrentLaunchStatus('awaiting-confirmations');
+          }).catch(() => {
+            pendingEntry.status = 'failed';
+            publishCurrentLaunchStatus('awaiting-confirmations');
           });
           return;
         }
@@ -3866,6 +4175,7 @@ const launchProfileById = async (profileId) => {
         path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
         error: String(error?.message || error || 'Failed to launch app'),
       });
+      publishCurrentLaunchStatus('in-progress');
     }
   };
 
@@ -3892,7 +4202,6 @@ const launchProfileById = async (profileId) => {
 
   const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
   const launchedUrls = new Set();
-  let launchedTabCount = 0;
   for (const tab of browserTabs) {
     const url = normalizeSafeUrl(tab?.url);
     if (!url || launchedUrls.has(url)) continue;
@@ -3900,6 +4209,7 @@ const launchProfileById = async (profileId) => {
     try {
       await shell.openExternal(url);
       launchedTabCount += 1;
+      publishCurrentLaunchStatus('in-progress');
     } catch {
       // Keep profile launch resilient if one tab URL fails.
     }
@@ -3912,6 +4222,7 @@ const launchProfileById = async (profileId) => {
     try {
       await shell.openExternal(safeUrl);
       launchedTabCount += 1;
+      publishCurrentLaunchStatus('in-progress');
     } catch {
       // Keep profile launch resilient if one tab URL fails.
     }
@@ -3926,6 +4237,7 @@ const launchProfileById = async (profileId) => {
       requestedAppCount: appLaunches.length,
       skippedAppCount: skippedApps.length,
     });
+    publishCurrentLaunchStatus('failed');
     return {
       ok: false,
       error: 'No launchable apps or tabs found in this profile. Add an executable path in app details or recreate from installed apps.',
@@ -3934,20 +4246,32 @@ const launchProfileById = async (profileId) => {
       launchedTabCount,
       failedApps,
       skippedApps,
+      pendingConfirmations,
       requestedAppCount: appLaunches.length,
       placementRecords,
     };
   }
 
+  const unresolvedPendingConfirmations = pendingConfirmations
+    .filter((item) => String(item?.status || '').toLowerCase() !== 'resolved');
   profileDiagnostics.result({
     strategy: 'launch-profile',
-    reason: failedApps.length === 0 ? 'launch-profile-complete' : 'launch-profile-complete-with-failures',
+    reason: unresolvedPendingConfirmations.length > 0
+      ? 'launch-profile-awaiting-confirmations'
+      : (failedApps.length === 0 ? 'launch-profile-complete' : 'launch-profile-complete-with-failures'),
     launchedAppCount,
     launchedTabCount,
     failedAppCount: failedApps.length,
     skippedAppCount: skippedApps.length,
+    pendingConfirmationCount: pendingConfirmations.length,
+    unresolvedPendingConfirmationCount: unresolvedPendingConfirmations.length,
     requestedAppCount: appLaunches.length,
   });
+  publishCurrentLaunchStatus(
+    unresolvedPendingConfirmations.length > 0
+      ? 'awaiting-confirmations'
+      : (failedApps.length === 0 ? 'complete' : 'failed'),
+  );
   return {
     ok: failedApps.length === 0,
     profile,
@@ -3955,6 +4279,9 @@ const launchProfileById = async (profileId) => {
     launchedTabCount,
     failedApps,
     skippedApps,
+    pendingConfirmations,
+    pendingConfirmationCount: pendingConfirmations.length,
+    unresolvedPendingConfirmationCount: unresolvedPendingConfirmations.length,
     requestedAppCount: appLaunches.length,
     placementRecords,
   };
@@ -4138,6 +4465,20 @@ handleTrustedIpc('launch-profile', async (_event, profileId) => {
     console.error('Failed to load or launch profile:', err);
     return { ok: false, error: 'Failed to load profile' };
   }
+});
+
+handleTrustedIpc('launch-profile-status', async (_event, profileId) => {
+  const safeProfileId = String(profileId || '').trim();
+  if (!safeProfileId) return { ok: false, error: 'Invalid profile id' };
+  const status = launchStatusByProfileId.get(safeProfileId);
+  if (!status) return { ok: true, status: null };
+  return {
+    ok: true,
+    status: {
+      ...status,
+      pendingConfirmations: clonePendingConfirmations(status.pendingConfirmations),
+    },
+  };
 });
 
 handleTrustedIpc('get-installed-apps', async () => {

@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from "react";
 
 export type LaunchFeedbackState = {
-  status: "idle" | "in-progress" | "success" | "error";
+  status: "idle" | "in-progress" | "success" | "warning" | "error";
   message: string;
 };
 

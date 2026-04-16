@@ -29,6 +29,7 @@ import {
   X,
   ChevronDown,
   Check,
+  AlertTriangle,
 } from "lucide-react";
 import { DragState, DragSourceType } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
@@ -66,6 +67,7 @@ export default function App() {
   const [isLaunching, setIsLaunching] = useState(false);
   const { launchFeedback, setLaunchFeedback, launchFeedbackTimeoutRef } =
     useLaunchFeedback();
+  const launchStatusPollRef = useRef<number | null>(null);
   const [isEditMode, setIsEditMode] = useState(false);
   const [
     selectedProfileForSettings,
@@ -78,6 +80,13 @@ export default function App() {
   >("profiles");
   const [selectedApp, setSelectedApp] =
     useState<SelectedApp | null>(null);
+
+  const stopLaunchStatusPolling = useCallback(() => {
+    if (launchStatusPollRef.current) {
+      window.clearInterval(launchStatusPollRef.current);
+      launchStatusPollRef.current = null;
+    }
+  }, []);
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
   const [showProfileDropdown, setShowProfileDropdown] =
@@ -1299,8 +1308,13 @@ export default function App() {
     );
   };
 
+  useEffect(() => () => {
+    stopLaunchStatusPolling();
+  }, [stopLaunchStatusPolling]);
+
   const handleLaunch = async () => {
     if (!currentProfile?.id || !window.electron?.launchProfile) return;
+    stopLaunchStatusPolling();
 
     if (launchFeedbackTimeoutRef.current) {
       window.clearTimeout(launchFeedbackTimeoutRef.current);
@@ -1313,6 +1327,7 @@ export default function App() {
       message: "Launching profile...",
     });
 
+    let persistLaunchFeedback = false;
     try {
       if (window.electron?.saveProfiles) {
         const serializableProfiles = toSerializableProfiles(
@@ -1349,6 +1364,20 @@ export default function App() {
       const skippedCount = Array.isArray(launchResult?.skippedApps)
         ? launchResult.skippedApps.length
         : 0;
+      const unresolvedPendingCount = Number(
+        launchResult?.unresolvedPendingConfirmationCount
+          || (Array.isArray(launchResult?.pendingConfirmations)
+            ? launchResult.pendingConfirmations.filter(
+              (item) => String(item?.status || "waiting").toLowerCase() !== "resolved",
+            ).length
+            : 0),
+      );
+      const pendingNames = Array.isArray(launchResult?.pendingConfirmations)
+        ? launchResult.pendingConfirmations
+          .map((item) => String(item?.name || "").trim())
+          .filter(Boolean)
+          .slice(0, 3)
+        : [];
 
       if (launchResult?.ok) {
         const summaryParts = [
@@ -1357,10 +1386,68 @@ export default function App() {
         ];
         if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
         if (skippedCount > 0) summaryParts.push(`${skippedCount} skipped`);
-        setLaunchFeedback({
-          status: "success",
-          message: `Launch complete: ${summaryParts.join(", ")}.`,
-        });
+        if (unresolvedPendingCount > 0) {
+          persistLaunchFeedback = true;
+          const pendingList = pendingNames.length > 0
+            ? ` (${pendingNames.join(", ")}${unresolvedPendingCount > pendingNames.length ? ", ..." : ""})`
+            : "";
+          const summaryText = summaryParts.join(", ");
+          setLaunchFeedback({
+            status: "warning",
+            message: `Launch in progress: ${summaryText}. Waiting for ${unresolvedPendingCount} confirmation${unresolvedPendingCount === 1 ? "" : "s"}${pendingList}.`,
+          });
+          if (window.electron?.getLaunchProfileStatus) {
+            launchStatusPollRef.current = window.setInterval(async () => {
+              try {
+                const statusResult = await window.electron.getLaunchProfileStatus(currentProfile.id);
+                const status = statusResult?.status;
+                if (!statusResult?.ok || !status) return;
+                const unresolvedCount = Number(status.unresolvedPendingConfirmationCount || 0);
+                const pollingPendingNames = Array.isArray(status.pendingConfirmations)
+                  ? status.pendingConfirmations
+                    .filter(
+                      (item) => String(item?.status || "waiting").toLowerCase() !== "resolved",
+                    )
+                    .map((item) => String(item?.name || "").trim())
+                    .filter(Boolean)
+                    .slice(0, 3)
+                  : [];
+                if (unresolvedCount <= 0) {
+                  stopLaunchStatusPolling();
+                  setLaunchFeedback({
+                    status: "success",
+                    message: `Launch complete: ${summaryText}.`,
+                  });
+                  if (launchFeedbackTimeoutRef.current) {
+                    window.clearTimeout(launchFeedbackTimeoutRef.current);
+                  }
+                  launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+                    setLaunchFeedback({
+                      status: "idle",
+                      message: "",
+                    });
+                    launchFeedbackTimeoutRef.current = null;
+                  }, 7000);
+                  return;
+                }
+                const namesList = pollingPendingNames.length > 0
+                  ? ` (${pollingPendingNames.join(", ")}${unresolvedCount > pollingPendingNames.length ? ", ..." : ""})`
+                  : "";
+                setLaunchFeedback({
+                  status: "warning",
+                  message: `Launch in progress: ${summaryText}. Waiting for ${unresolvedCount} confirmation${unresolvedCount === 1 ? "" : "s"}${namesList}.`,
+                });
+              } catch {
+                // Keep UI resilient; next poll tick can recover.
+              }
+            }, 1300);
+          }
+        } else {
+          setLaunchFeedback({
+            status: "success",
+            message: `Launch complete: ${summaryParts.join(", ")}.`,
+          });
+        }
       } else {
         const errorMessage = launchResult?.error
           || "Could not launch this profile. Check app executable paths in app details.";
@@ -1385,13 +1472,15 @@ export default function App() {
       });
     } finally {
       setIsLaunching(false);
-      launchFeedbackTimeoutRef.current = window.setTimeout(() => {
-        setLaunchFeedback({
-          status: "idle",
-          message: "",
-        });
-        launchFeedbackTimeoutRef.current = null;
-      }, 7000);
+      if (!persistLaunchFeedback) {
+        launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+          setLaunchFeedback({
+            status: "idle",
+            message: "",
+          });
+          launchFeedbackTimeoutRef.current = null;
+        }, 7000);
+      }
     }
   };
 
@@ -2915,6 +3004,8 @@ export default function App() {
                       className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
                         launchFeedback.status === "success"
                           ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
+                          : launchFeedback.status === "warning"
+                            ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
                           : launchFeedback.status === "error"
                             ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
                             : "border-flow-border-accent bg-flow-surface-elevated text-flow-text-secondary"
@@ -2922,6 +3013,8 @@ export default function App() {
                     >
                       {launchFeedback.status === "success" ? (
                         <Check className="w-3.5 h-3.5" />
+                      ) : launchFeedback.status === "warning" ? (
+                        <AlertTriangle className="w-3.5 h-3.5" />
                       ) : launchFeedback.status === "error" ? (
                         <X className="w-3.5 h-3.5" />
                       ) : (
