@@ -37,6 +37,7 @@ import type { FlowProfile } from "../../types/flow-profile";
 import { useProfilesPersistence } from "./hooks/useProfilesPersistence";
 import { useLaunchFeedback } from "./hooks/useLaunchFeedback";
 import { useProfileLaunch } from "./hooks/useProfileLaunch";
+import { useNativeAppDragBridge } from "./hooks/useNativeAppDragBridge";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
@@ -109,73 +110,12 @@ export default function App() {
   const dragStateRef = useRef<DragState>(dragState);
   dragStateRef.current = dragState;
 
-  useEffect(() => {
-    const handleNativeDragStart = (event: Event) => {
-      const custom = event as CustomEvent<any>;
-      const detail = custom.detail;
-      const nativeDragData = detail?.dragData ?? detail;
-      const startPos = detail?.startPos ?? null;
-
-      if (!nativeDragData) return;
-      if (!isEditMode) {
-        setIsEditMode(true);
-      }
-
-      // Only enable the overlay/zone highlighting for app drags.
-      if (nativeDragData.type !== "app") return;
-
-      const initialPos = startPos ?? { x: 0, y: 0 };
-      setDragState({
-        isDragging: true,
-        dragData: nativeDragData,
-        startPosition: initialPos,
-        currentPosition: initialPos,
-        sourceType: "monitor",
-        sourceId: String(nativeDragData.monitorId || nativeDragData.sourceMonitorId || ""),
-        dragPreview: null,
-      });
-    };
-
-    const handleNativeDragEnd = () => {
-      // Only clear if we were in a native-drag-driven state (no mouse listeners).
-      if (!dragStateRef.current.isDragging) return;
-      if (!dragStateRef.current.dragData) return;
-      if (dragStateRef.current.dragData.type !== "app") return;
-
-      setDragState({
-        isDragging: false,
-        dragData: null,
-        startPosition: { x: 0, y: 0 },
-        currentPosition: { x: 0, y: 0 },
-        sourceType: null,
-        sourceId: null,
-        dragPreview: null,
-      });
-    };
-
-    const handleDragOver = (e: DragEvent) => {
-      if (!dragStateRef.current.isDragging) return;
-      if (!dragStateRef.current.dragData) return;
-      if (dragStateRef.current.dragData.type !== "app") return;
-
-      // Keep drop targets active and update overlay/zone position.
-      e.preventDefault();
-      setDragState((prev) => ({
-        ...prev,
-        currentPosition: { x: e.clientX, y: e.clientY },
-      }));
-    };
-
-    document.addEventListener("flowswitch:dragstart", handleNativeDragStart as EventListener);
-    document.addEventListener("flowswitch:dragend", handleNativeDragEnd as EventListener);
-    document.addEventListener("dragover", handleDragOver);
-
-    return () => {
-      document.removeEventListener("flowswitch:dragstart", handleNativeDragStart as EventListener);
-      document.removeEventListener("flowswitch:dragend", handleNativeDragEnd as EventListener);
-      document.removeEventListener("dragover", handleDragOver);
-    };
-  }, [isEditMode]);
+  useNativeAppDragBridge({
+    dragStateRef,
+    setDragState,
+    setIsEditMode,
+    isEditMode,
+  });
 
   const currentProfile = profiles.find(
     (p) => p.id === selectedProfile,
