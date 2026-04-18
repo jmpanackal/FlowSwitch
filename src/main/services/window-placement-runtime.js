@@ -438,7 +438,7 @@ const createWindowPlacementRuntime = (deps) => {
       return found;
     }
   }
-  "@
+"@
   try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
   try { [void][Win32]::SetProcessDPIAware() } catch {}
   $excludedSet = New-Object 'System.Collections.Generic.HashSet[string]'
@@ -639,7 +639,7 @@ const createWindowPlacementRuntime = (deps) => {
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr after, int X, int Y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
   }
-  "@
+"@
   try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
   try { [void][Win32]::SetProcessDPIAware() } catch {}
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
@@ -718,7 +718,7 @@ const createWindowPlacementRuntime = (deps) => {
   public static class Win32 {
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
   }
-  "@
+"@
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
   if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
   [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
@@ -759,7 +759,7 @@ const createWindowPlacementRuntime = (deps) => {
     [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
     [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
   }
-  "@
+"@
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
   if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
   if ([Win32]::IsIconic($h)) {
@@ -842,7 +842,7 @@ const createWindowPlacementRuntime = (deps) => {
   public static class Win32 {
     [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
   }
-  "@
+"@
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
   if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
   [void][Win32]::ShowWindowAsync($h, 6) # SW_MINIMIZE
@@ -1209,7 +1209,7 @@ const createWindowPlacementRuntime = (deps) => {
     public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
   }
-  "@
+"@
   try { [void][Win32Rect]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
   try { [void][Win32Rect]::SetProcessDPIAware() } catch {}
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
@@ -1274,7 +1274,7 @@ const createWindowPlacementRuntime = (deps) => {
     [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
     [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out RECT pvAttribute, int cbAttribute);
   }
-  "@
+"@
   try { [void][Win32PlacementRect]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
   try { [void][Win32PlacementRect]::SetProcessDPIAware() } catch {}
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
@@ -1362,7 +1362,7 @@ const createWindowPlacementRuntime = (deps) => {
   public static class Win32ClassName {
     [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
   }
-  "@
+"@
   $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
   if ($h -eq [IntPtr]::Zero) { Write-Output ""; exit 0 }
   $sb = New-Object System.Text.StringBuilder 256
@@ -1435,7 +1435,7 @@ const createWindowPlacementRuntime = (deps) => {
   public static class Win32 {
     [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
   }
-  "@
+"@
   $fg = [Win32]::GetForegroundWindow()
   if ($fg -eq [IntPtr]::Zero) {
     Write-Output ""
@@ -1544,7 +1544,7 @@ const createWindowPlacementRuntime = (deps) => {
       return r;
     }
   }
-  "@
+"@
   try { [void][WinEnum]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
   try { [void][WinEnum]::SetProcessDPIAware() } catch {}
   $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
