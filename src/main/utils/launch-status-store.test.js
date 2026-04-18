@@ -36,7 +36,14 @@ test('publishStatus rejects inactive run and accepts active run', () => {
     skippedAppCount: 0,
     requestedAppCount: 3,
     pendingConfirmations: [
-      { name: 'Steam', path: 'C:\\Steam\\steam.exe', reason: 'Confirm', status: 'waiting' },
+      {
+        name: 'Steam',
+        path: 'C:\\Steam\\steam.exe',
+        reason: 'Confirm',
+        mode: 'reused_existing_window',
+        reasonCode: 'reused_existing_window',
+        status: 'waiting',
+      },
     ],
   });
 
@@ -44,6 +51,8 @@ test('publishStatus rejects inactive run and accepts active run', () => {
   assert.equal(activeWrite.status.runId, secondRun.runId);
   assert.equal(activeWrite.status.pendingConfirmationCount, 1);
   assert.equal(activeWrite.status.unresolvedPendingConfirmationCount, 1);
+  assert.equal(activeWrite.status.pendingConfirmations[0]?.mode, 'reused_existing_window');
+  assert.equal(activeWrite.status.pendingConfirmations[0]?.reasonCode, 'reused_existing_window');
 });
 
 test('sealRun prevents late async status writes from same run', () => {

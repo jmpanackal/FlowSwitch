@@ -29,27 +29,40 @@ const {
 } = require('./services/windows-process-service');
 const { waitForMainWindowReadyOrBlocker } = require('./services/window-ready-gate');
 const { captureAllMonitorsScreenshot } = require('./utils/windows-desktop-screenshot');
+const {
+  isWithinAcceptableStateTolerance,
+  planLaunchSlots,
+  scoreReuseCandidate,
+  shouldTriggerAmbiguityFallback,
+} = require('./utils/launch-target-mode');
 
-const gotSingleInstanceLock = app.requestSingleInstanceLock();
-if (!gotSingleInstanceLock) {
-  app.quit();
-  process.exit(0);
-}
-
-// GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
-// which leads to renderer blackscreens. Force software rendering path.
-app.disableHardwareAcceleration();
-app.commandLine.appendSwitch('disable-gpu');
-app.commandLine.appendSwitch('disable-gpu-compositing');
-app.commandLine.appendSwitch('in-process-gpu');
-app.commandLine.appendSwitch('use-angle', 'swiftshader');
-app.commandLine.appendSwitch('use-gl', 'swiftshader');
-app.commandLine.appendSwitch('disable-direct-composition');
-app.commandLine.appendSwitch('disable-d3d11');
-app.commandLine.appendSwitch(
-  'disable-features',
-  'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas',
+const shouldBootstrapElectronMain = (
+  Boolean(app)
+  && typeof app.requestSingleInstanceLock === 'function'
 );
+
+if (shouldBootstrapElectronMain) {
+  const gotSingleInstanceLock = app.requestSingleInstanceLock();
+  if (!gotSingleInstanceLock) {
+    app.quit();
+    process.exit(0);
+  }
+
+  // GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
+  // which leads to renderer blackscreens. Force software rendering path.
+  app.disableHardwareAcceleration();
+  app.commandLine.appendSwitch('disable-gpu');
+  app.commandLine.appendSwitch('disable-gpu-compositing');
+  app.commandLine.appendSwitch('in-process-gpu');
+  app.commandLine.appendSwitch('use-angle', 'swiftshader');
+  app.commandLine.appendSwitch('use-gl', 'swiftshader');
+  app.commandLine.appendSwitch('disable-direct-composition');
+  app.commandLine.appendSwitch('disable-d3d11');
+  app.commandLine.appendSwitch(
+    'disable-features',
+    'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas',
+  );
+}
 
 const iconDataUrlCache = new Map();
 const DEV_SERVER_URL = 'http://localhost:5173';
@@ -62,6 +75,33 @@ const MAX_SHORTCUT_PATH_LENGTH = 4096;
 const DEFAULT_AUTOMATION_SETTLE_MS = 1800;
 const DEFAULT_AUTOMATION_START_DELAY_MS = 900;
 const launchStatusStore = createLaunchStatusStore();
+
+const getLatestLaunchDiagnosticsLogPath = () => (
+  path.join(app.getPath('userData'), 'logs', 'launch-latest.jsonl')
+);
+
+const initializeLatestLaunchDiagnosticsLog = ({ profileId, runId }) => {
+  const outputPath = getLatestLaunchDiagnosticsLogPath();
+  try {
+    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+    const header = {
+      event: 'run-log-reset',
+      timestamp: Date.now(),
+      profileId: String(profileId || '').trim() || null,
+      runId: String(runId || '').trim() || null,
+      note: 'This file is overwritten at the start of every profile launch run.',
+    };
+    fs.writeFileSync(outputPath, `${JSON.stringify(header)}\n`, 'utf8');
+    process.env.FLOWSWITCH_LAUNCH_LOG_FILE = outputPath;
+    return outputPath;
+  } catch (error) {
+    console.error('[launch-profile] failed to initialize latest diagnostics log file:', {
+      message: String(error?.message || error),
+      outputPath,
+    });
+    return null;
+  }
+};
 
 const parseBooleanEnv = (value) => {
   const normalized = String(value || '').trim().toLowerCase();
@@ -927,24 +967,26 @@ const createWindow = () => {
 };
 
 
-app.whenReady().then(() => {
-  setupSessionSecurity();
-  Menu.setApplicationMenu(null);
-  createWindow();
-  void runLaunchAutomationIfRequested();
+if (shouldBootstrapElectronMain) {
+  app.whenReady().then(() => {
+    setupSessionSecurity();
+    Menu.setApplicationMenu(null);
+    createWindow();
+    void runLaunchAutomationIfRequested();
 
-  // On macOS, re-create a window when the dock icon is clicked and no windows are open
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    // On macOS, re-create a window when the dock icon is clicked and no windows are open
+    app.on('activate', () => {
+      if (BrowserWindow.getAllWindows().length === 0) createWindow();
+    });
   });
-});
 
-app.on('second-instance', () => {
-  const existingWindow = BrowserWindow.getAllWindows()[0];
-  if (!existingWindow) return;
-  if (existingWindow.isMinimized()) existingWindow.restore();
-  existingWindow.focus();
-});
+  app.on('second-instance', () => {
+    const existingWindow = BrowserWindow.getAllWindows()[0];
+    if (!existingWindow) return;
+    if (existingWindow.isMinimized()) existingWindow.restore();
+    existingWindow.focus();
+  });
+}
 
 const buildSystemMonitorSnapshot = () => {
   const { screen } = require('electron');
@@ -1560,13 +1602,8 @@ const moveWindowToBounds = ({
     const top = Number(commandBounds.top || 0);
     const width = Math.max(120, Number(commandBounds.width || 800));
     const height = Math.max(120, Number(commandBounds.height || 600));
-    const isMaximizedPlacement = String(commandBounds.state || '').toLowerCase() === 'maximized';
-    const minCandidateWidth = isMaximizedPlacement
-      ? 320
-      : Math.max(240, Math.floor(width * 0.55));
-    const minCandidateHeight = isMaximizedPlacement
-      ? 220
-      : Math.max(180, Math.floor(height * 0.55));
+    const minCandidateWidth = 320;
+    const minCandidateHeight = 220;
     const forceMaximize = commandBounds.state === 'maximized';
     // SWP_FRAMECHANGED (0x0020) can confuse Chromium's compositor during early resize; optional skip.
     const basePosFlags = 0x0044;
@@ -1655,13 +1692,25 @@ foreach ($tok in ("${excludedCsv.replace(/"/g, '`"')}" -split ',')) {
 function Apply-Placement {
   param([IntPtr]$Handle)
   if ($Handle -eq [IntPtr]::Zero) { return $false }
-  if (${windowState} -eq 5) {
-    # If the app restores as maximized from previous session, drop to normal first.
+  if (${windowState} -eq 5 -or ${windowState} -eq 3) {
+    # If the app restores as maximized/fullscreen on a previous monitor, drop to normal first
+    # before attempting cross-monitor placement.
     [void][Win32]::ShowWindowAsync($Handle, 9) # SW_RESTORE
-    Start-Sleep -Milliseconds 45
+    Start-Sleep -Milliseconds 70
   }
   [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
   [void][Win32]::ShowWindowAsync($Handle, ${windowState})
+  if (${windowState} -eq 3) {
+    # Re-anchor once more: some apps relaunch fullscreen on an old monitor, then ignore
+    # the first move while maximized. A second restore->move->maximize pass stabilizes
+    # placement on the target monitor and avoids ghost/off-screen compositor surfaces.
+    Start-Sleep -Milliseconds 95
+    [void][Win32]::ShowWindowAsync($Handle, 9)
+    Start-Sleep -Milliseconds 85
+    [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
+    Start-Sleep -Milliseconds 65
+    [void][Win32]::ShowWindowAsync($Handle, 3)
+  }
   if (${(forceMaximize && aggressiveMaximize) ? '$true' : '$false'}) {
     # Re-assert maximize a few times because Chromium can recreate/restore windows right after launch.
     [void][Win32]::SetWindowPos($Handle, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, 0x0044)
@@ -1837,13 +1886,23 @@ try { [void][Win32]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
 try { [void][Win32]::SetProcessDPIAware() } catch {}
 $h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
 if ($h -eq [IntPtr]::Zero) { Write-Output "no-window|"; exit 0 }
-if (${windowState} -eq 5) {
-  # Prevent persisted maximized state from overriding explicit normal bounds.
+if (${windowState} -eq 5 -or ${windowState} -eq 3) {
+  # Prevent persisted maximized/fullscreen state from overriding explicit move bounds.
   [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
-  Start-Sleep -Milliseconds 45
+  Start-Sleep -Milliseconds 70
 }
 [void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
 [void][Win32]::ShowWindowAsync($h, ${windowState})
+if (${windowState} -eq 3) {
+  # Re-anchor maximized windows once more for apps that respawn fullscreen on the previous
+  # monitor and ignore the first cross-monitor move while maximized.
+  Start-Sleep -Milliseconds 95
+  [void][Win32]::ShowWindowAsync($h, 9)
+  Start-Sleep -Milliseconds 85
+  [void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, ${setPosFlags})
+  Start-Sleep -Milliseconds 65
+  [void][Win32]::ShowWindowAsync($h, 3)
+}
 if (${(commandBounds.state === 'maximized' && aggressiveMaximize) ? '$true' : '$false'}) {
   [void][Win32]::SetWindowPos($h, [IntPtr]::Zero, ${Math.floor(left)}, ${Math.floor(top)}, ${Math.floor(width)}, ${Math.floor(height)}, 0x0044)
   for ($mx = 0; $mx -lt 3; $mx++) {
@@ -1919,6 +1978,96 @@ Write-Output "ok"`;
     );
   })
 );
+
+const bringWindowHandleToFront = async (handle, options = {}) => {
+  const safeHandle = String(handle || '').trim();
+  if (!safeHandle || process.platform !== 'win32') return false;
+  const diagnostics = options?.diagnostics || null;
+  const diagnosticsContext = options?.diagnosticsContext || {};
+  const maxAttempts = Math.max(1, Number(options?.maxAttempts || 3));
+
+  const nudgeToFront = (mode = 'aggressive') => (
+    new Promise((resolve) => {
+      const showThenFocus = mode === 'show-then-focus';
+      const aggressive = mode === 'aggressive';
+      const psScript = `
+Add-Type -TypeDefinition @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int cmd);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool BringWindowToTop(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
+}
+"@
+$h = [IntPtr]::new([int64]"${safeHandle.replace(/"/g, '`"')}")
+if ($h -eq [IntPtr]::Zero) { Write-Output "no"; exit 0 }
+if ([Win32]::IsIconic($h)) {
+  [void][Win32]::ShowWindowAsync($h, 9) # SW_RESTORE
+  Start-Sleep -Milliseconds 60
+}
+[void][Win32]::SetForegroundWindow($h)
+if (${showThenFocus ? '$true' : '$false'}) {
+  [void][Win32]::ShowWindowAsync($h, 5) # SW_SHOW
+  Start-Sleep -Milliseconds 30
+  [void][Win32]::SetForegroundWindow($h)
+}
+if (${aggressive ? '$true' : '$false'}) {
+  [void][Win32]::ShowWindowAsync($h, 5) # SW_SHOW
+  [void][Win32]::BringWindowToTop($h)
+  [void][Win32]::SetWindowPos($h, [IntPtr]::new(-1), 0, 0, 0, 0, 0x0003) # TOPMOST, no move/size
+  Start-Sleep -Milliseconds 35
+  [void][Win32]::SetWindowPos($h, [IntPtr]::new(-2), 0, 0, 0, 0, 0x0003) # NOTOPMOST
+  [void][Win32]::SetForegroundWindow($h)
+}
+Write-Output "ok"`;
+
+      execFile(
+        'powershell.exe',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+        { windowsHide: true, timeout: 3500, maxBuffer: 1024 * 64 },
+        () => resolve(),
+      );
+    })
+  );
+
+  for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+    const mode = attempt === 1
+      ? 'focus-only'
+      : attempt === 2
+        ? 'show-then-focus'
+        : 'aggressive';
+    await nudgeToFront(mode);
+    await sleep(120);
+    const foregroundHandle = await getForegroundWindowHandle();
+    if (foregroundHandle === safeHandle) {
+      if (diagnostics) {
+        diagnostics.result({
+          ...diagnosticsContext,
+          strategy: 'reuse-existing-foreground',
+          reason: 'foreground-applied',
+          handle: safeHandle,
+          attempts: attempt,
+          mode,
+        });
+      }
+      return true;
+    }
+  }
+
+  if (diagnostics) {
+    diagnostics.failure({
+      ...diagnosticsContext,
+      strategy: 'reuse-existing-foreground',
+      reason: 'foreground-not-applied',
+      handle: safeHandle,
+      attempts: maxAttempts,
+    });
+  }
+  return false;
+};
 
 const minimizeWindowHandle = (handle) => (
   new Promise((resolve) => {
@@ -2002,6 +2151,23 @@ const stabilizePlacementForSlowLaunch = async ({
   diagnostics = null,
   diagnosticsContext = {},
 }) => {
+  const isMeaningfulRectForBounds = (rect, targetBounds) => {
+    if (!rect || !targetBounds) return false;
+    const rectWidth = Number(rect.width || 0);
+    const rectHeight = Number(rect.height || 0);
+    const targetWidth = Math.max(1, Number(targetBounds.width || 0));
+    const targetHeight = Math.max(1, Number(targetBounds.height || 0));
+    const areaRatio = (rectWidth * rectHeight) / (targetWidth * targetHeight);
+    const widthRatio = rectWidth / targetWidth;
+    const heightRatio = rectHeight / targetHeight;
+    return (
+      areaRatio >= 0.38
+      && widthRatio >= 0.55
+      && heightRatio >= 0.45
+      && (widthRatio >= 0.72 || heightRatio >= 0.72)
+    );
+  };
+
   const safeProcess = String(processHintLc || '').trim().toLowerCase();
   if (!safeProcess || !bounds) {
     return { verified: false, handle: initialHandle ? String(initialHandle) : null };
@@ -2016,6 +2182,8 @@ const stabilizePlacementForSlowLaunch = async ({
   const deadline = Date.now() + Math.max(1200, Number(durationMs || 0));
   let lastHandle = forcedHandle;
   let lastCandidates = [];
+  let verifiedHandle = null;
+  let verifiedHandleStableCount = 0;
 
   while (Date.now() <= deadline) {
     const rows = await getVisibleWindowInfos(safeProcess, {
@@ -2024,7 +2192,19 @@ const stabilizePlacementForSlowLaunch = async ({
     });
     const candidates = rows
       .filter((row) => row?.handle)
+      .filter((row) => !row?.isMinimized)
+      .filter((row) => (bounds.state !== 'maximized' ? true : (!row?.hasOwner && !row?.topMost)))
       .filter((row) => row.handle === forcedHandle || !excluded.has(row.handle))
+      .filter((row) => {
+        if (bounds.state !== 'maximized') return true;
+        return isMeaningfulRectForBounds(
+          {
+            width: Number(row?.width || 0),
+            height: Number(row?.height || 0),
+          },
+          bounds,
+        );
+      })
       .sort((a, b) => (
         scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
         - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess })
@@ -2067,7 +2247,21 @@ const stabilizePlacementForSlowLaunch = async ({
         const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
         const close = isRectCloseToTargetBounds(measuredRect, bounds, 8);
         if (onTarget && close) {
-          return { verified: true, handle: row.handle };
+          if (verifiedHandle === row.handle) {
+            verifiedHandleStableCount += 1;
+          } else {
+            verifiedHandle = row.handle;
+            verifiedHandleStableCount = 1;
+          }
+          if (verifiedHandleStableCount >= 2) {
+            return { verified: true, handle: row.handle };
+          }
+          // Already on-target and close for this poll; avoid corrective move thrash while
+          // waiting for the second stable confirmation poll.
+          continue;
+        } else if (verifiedHandle === row.handle) {
+          verifiedHandle = null;
+          verifiedHandleStableCount = 0;
         }
 
         await moveSpecificWindowHandleToBounds({
@@ -2089,10 +2283,36 @@ const stabilizePlacementForSlowLaunch = async ({
     if (bounds.state === 'maximized' && monitor) {
       for (const row of candidates.slice(0, 6)) {
         lastHandle = row.handle || lastHandle;
-        const rect = await getWindowRectByHandle(row.handle);
+        const placementRects = await getWindowPlacementRectsByHandle(row.handle);
+        const rect = placementRects?.visibleRect || placementRects?.outerRect || await getWindowRectByHandle(row.handle);
         const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
-        if (onTarget) {
-          return { verified: true, handle: row.handle };
+        const meaningful = isMeaningfulRectForBounds(rect, bounds);
+        if (onTarget && meaningful) {
+          if (verifiedHandle === row.handle) {
+            verifiedHandleStableCount += 1;
+          } else {
+            verifiedHandle = row.handle;
+            verifiedHandleStableCount = 1;
+          }
+          if (verifiedHandleStableCount >= 2) {
+            return { verified: true, handle: row.handle };
+          }
+          // Already maximized-like and on target for this poll; do not reapply placement while
+          // waiting for second consecutive stable confirmation.
+          continue;
+        }
+        if (onTarget && !meaningful && diagnostics) {
+          diagnostics.decision({
+            ...diagnosticsContext,
+            strategy: 'stabilize-maximized',
+            reason: 'candidate-rejected-underfilled-bounds',
+            candidateHandle: row.handle,
+            measuredRect: rect,
+          });
+        }
+        if ((!onTarget || !meaningful) && verifiedHandle === row.handle) {
+          verifiedHandle = null;
+          verifiedHandleStableCount = 0;
         }
 
         await moveSpecificWindowHandleToBounds({
@@ -2459,16 +2679,31 @@ const isWindowOnTargetMonitor = ({ rect, monitor }) => {
   );
   if (!target) return false;
 
-  const centerX = rect.left + (rect.width / 2);
-  const centerY = rect.top + (rect.height / 2);
-  const centerOnTarget = (
-    centerX >= target.x
-    && centerX <= (target.x + target.width)
-    && centerY >= target.y
-    && centerY <= (target.y + target.height)
-  );
-  if (!centerOnTarget) return false;
-  return true;
+  const rx = Number(rect.left || 0);
+  const ry = Number(rect.top || 0);
+  const rw = Math.max(0, Number(rect.width || 0));
+  const rh = Math.max(0, Number(rect.height || 0));
+  const rectArea = rw * rh;
+  if (rectArea <= 0) return false;
+
+  const tx = Number(target.x ?? target.left ?? 0);
+  const ty = Number(target.y ?? target.top ?? 0);
+  const tw = Math.max(0, Number(target.width || 0));
+  const th = Math.max(0, Number(target.height || 0));
+  if (tw <= 0 || th <= 0) return false;
+
+  const ix1 = Math.max(rx, tx);
+  const iy1 = Math.max(ry, ty);
+  const ix2 = Math.min(rx + rw, tx + tw);
+  const iy2 = Math.min(ry + rh, ty + th);
+  if (ix2 <= ix1 || iy2 <= iy1) return false;
+  const intersectionArea = (ix2 - ix1) * (iy2 - iy1);
+  const overlapFraction = intersectionArea / rectArea;
+  // A center-point test alone mis-classifies large windows that span adjacent monitors: the
+  // centroid can fall inside the target work area while most of the surface (and the user's
+  // attention) remains on another display. That led to reuse + "within tolerance" skipping
+  // placement so the app looked like it "did not launch" on the requested monitor.
+  return overlapFraction >= 0.45;
 };
 
 const isRectCloseToTargetBounds = (rect, bounds, tolerancePx = 6) => {
@@ -2482,10 +2717,44 @@ const isRectCloseToTargetBounds = (rect, bounds, tolerancePx = 6) => {
   return dl <= tol && dt <= tol && dw <= tol && dh <= tol;
 };
 
+const getForegroundWindowHandle = () => (
+  new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve(null);
+      return;
+    }
+
+    const psScript = `
+Add-Type @"
+using System;
+using System.Runtime.InteropServices;
+public static class Win32 {
+  [DllImport("user32.dll")] public static extern IntPtr GetForegroundWindow();
+}
+"@
+$fg = [Win32]::GetForegroundWindow()
+if ($fg -eq [IntPtr]::Zero) {
+  Write-Output ""
+} else {
+  Write-Output ([string]([int64]$fg))
+}`;
+
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 3500, maxBuffer: 1024 * 64 },
+      (_error, stdout) => {
+        const handle = String(stdout || '').trim();
+        resolve(handle || null);
+      },
+    );
+  })
+);
+
 const getVerificationTolerancePx = (processHintLc) => (
   isChromiumFamilyProcessKey(String(processHintLc || '').trim().toLowerCase())
     ? 6
-    : 8
+    : 5
 );
 
 const verifyAndCorrectWindowPlacement = async ({
@@ -2659,6 +2928,7 @@ const getVisibleWindowInfos = (processName, options = {}) => (
     const diagnostics = options?.diagnostics || null;
     const diagnosticsContext = options?.diagnosticsContext || {};
     const expectNonEmpty = options?.expectNonEmpty === true;
+    const includeNonVisible = options?.includeNonVisible === true;
     const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
     if (!safeName) { resolve([]); return; }
 
@@ -2677,6 +2947,7 @@ public static class WinEnum {
   [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWinProc cb, IntPtr lp);
   [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
   [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
   [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
@@ -2686,17 +2957,17 @@ public static class WinEnum {
   [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
   [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
   [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
-  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids) {
+  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids, bool includeNonVisible) {
     var r = new List<Dictionary<string, object>>();
     EnumWindows((h, l) => {
-      if (!IsWindowVisible(h)) return true;
+      if (!includeNonVisible && !IsWindowVisible(h)) return true;
       uint p; GetWindowThreadProcessId(h, out p);
       if (!pids.Contains(p)) return true;
       RECT rect;
       if (!GetWindowRect(h, out rect)) return true;
       int width = rect.Right - rect.Left;
       int height = rect.Bottom - rect.Top;
-      if (width <= 80 || height <= 80) return true;
+      if (!includeNonVisible && (width <= 80 || height <= 80)) return true;
       long exStyle = GetWindowLongPtr(h, -20).ToInt64();
       bool isToolWindow = (exStyle & 0x00000080L) != 0; // WS_EX_TOOLWINDOW
       int cloaked = 0;
@@ -2715,6 +2986,7 @@ public static class WinEnum {
       row["height"] = height;
       row["area"] = width * height;
       row["enabled"] = IsWindowEnabled(h);
+      row["isMinimized"] = IsIconic(h);
       row["hung"] = IsHungAppWindow(h);
       row["tool"] = isToolWindow;
       row["cloaked"] = cloaked != 0;
@@ -2723,6 +2995,7 @@ public static class WinEnum {
       row["titleLength"] = titleLen;
       row["hasOwner"] = hasOwner;
       row["topMost"] = topMost;
+      row["isWindowVisible"] = IsWindowVisible(h);
       r.Add(row);
       return true;
     }, IntPtr.Zero);
@@ -2738,7 +3011,8 @@ try {
   foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
 } catch {}
 if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
-$rows = [WinEnum]::FindVisibleWindows($pids)
+$includeNonVisible = ${includeNonVisible ? '$true' : '$false'}
+$rows = [WinEnum]::FindVisibleWindows($pids, $includeNonVisible)
 $rows | ConvertTo-Json -Depth 5`;
 
     execFile(
@@ -2756,6 +3030,7 @@ $rows | ConvertTo-Json -Depth 5`;
             height: Number(row.height || 0),
             area: Number(row.area || 0),
             enabled: Boolean(row.enabled),
+            isMinimized: Boolean(row.isMinimized),
             hung: Boolean(row.hung),
             tool: Boolean(row.tool),
             cloaked: Boolean(row.cloaked),
@@ -2764,6 +3039,7 @@ $rows | ConvertTo-Json -Depth 5`;
             titleLength: Number(row.titleLength || 0),
             hasOwner: Boolean(row.hasOwner),
             topMost: Boolean(row.topMost),
+            isWindowVisible: Boolean(row.isWindowVisible),
           })).filter((row) => row.handle);
           if (expectNonEmpty && normalizedRows.length === 0 && diagnostics) {
             diagnostics.failure({
@@ -2796,10 +3072,16 @@ $rows | ConvertTo-Json -Depth 5`;
 );
 
 const CHROMIUM_TOPLEVEL_CLASSES = ['chrome_widgetwin_1'];
+const CHROMIUM_NONPRIMARY_CLASSES = ['chrome_widgetwin_0'];
 
 const isChromiumTopLevelWindowRow = (row) => {
   const cn = String(row?.className || '').toLowerCase();
   return CHROMIUM_TOPLEVEL_CLASSES.some((c) => cn.includes(c));
+};
+
+const isChromiumNonPrimaryWindowRow = (row) => {
+  const cn = String(row?.className || '').toLowerCase();
+  return CHROMIUM_NONPRIMARY_CLASSES.some((c) => cn.includes(c));
 };
 
 const CHROMIUM_FAMILY_PLACEMENT_KEYS = new Set(['chrome', 'msedge', 'brave', 'vivaldi', 'opera', 'arc']);
@@ -2807,6 +3089,18 @@ const CHROMIUM_FAMILY_PLACEMENT_KEYS = new Set(['chrome', 'msedge', 'brave', 'vi
 const isChromiumFamilyProcessKey = (key) => (
   CHROMIUM_FAMILY_PLACEMENT_KEYS.has(String(key || '').trim().toLowerCase().replace(/\.exe$/i, ''))
 );
+
+const isLikelyAuxiliaryWindowClass = (className) => {
+  const safeClassName = String(className || '').trim().toLowerCase();
+  if (!safeClassName) return false;
+  return (
+    safeClassName.includes('trayiconmessagewindow')
+    || safeClassName.includes('screenchangeobserverwindow')
+    || safeClassName.includes('notifyicon')
+    || safeClassName.includes('tooltip')
+    || safeClassName.includes('toast')
+  );
+};
 
 const scoreWindowCandidate = (row, options = {}) => {
   const chromiumHint = String(options.chromiumProcessHint || '').toLowerCase();
@@ -2819,6 +3113,7 @@ const scoreWindowCandidate = (row, options = {}) => {
   let score = 0;
 
   if (row?.enabled) score += 1_000_000_000;
+  if (!row?.isMinimized) score += 350_000_000;
   if (!row?.hung) score += 250_000_000;
   if (!row?.tool) score += 100_000_000;
   if (!row?.cloaked) score += 50_000_000;
@@ -2831,6 +3126,9 @@ const scoreWindowCandidate = (row, options = {}) => {
   if (isChromiumFamily) {
     if (CHROMIUM_TOPLEVEL_CLASSES.some((c) => className.includes(c))) {
       score += 220_000_000;
+    }
+    if (CHROMIUM_NONPRIMARY_CLASSES.some((c) => className.includes(c))) {
+      score -= 320_000_000;
     }
     // Brave/Chrome may expose a narrow vertical strip or helper; prefer the wide main frame.
     if (w > 0 && h > 0 && w < 420 && h > 360) {
@@ -2988,6 +3286,7 @@ const buildCompanionProcessHints = async ({
 const resumePlacementAfterConfirmationModal = async ({
   processHintLc,
   processHints = [],
+  blockedHandles = [],
   placementBounds,
   monitor,
   aggressiveMaximize = false,
@@ -2996,7 +3295,269 @@ const resumePlacementAfterConfirmationModal = async ({
   launchDiagnostics,
   diagnosticsContext = {},
 }) => {
+  const blockedHandleSet = new Set(
+    (Array.isArray(blockedHandles) ? blockedHandles : [])
+      .map((handle) => String(handle || '').trim())
+      .filter(Boolean),
+  );
+  const blockerPresenceHandleSet = new Set(blockedHandleSet);
+
+  const isMeaningfulRectForBounds = (rect, targetBounds) => {
+    if (!rect || !targetBounds) return false;
+    const rectWidth = Number(rect.width || 0);
+    const rectHeight = Number(rect.height || 0);
+    const targetWidth = Math.max(1, Number(targetBounds.width || 0));
+    const targetHeight = Math.max(1, Number(targetBounds.height || 0));
+    const areaRatio = (rectWidth * rectHeight) / (targetWidth * targetHeight);
+    const widthRatio = rectWidth / targetWidth;
+    const heightRatio = rectHeight / targetHeight;
+    return (
+      areaRatio >= 0.38
+      && widthRatio >= 0.55
+      && heightRatio >= 0.45
+      && (widthRatio >= 0.72 || heightRatio >= 0.72)
+    );
+  };
+
+  const normalizedRootHint = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+  // Many apps host their real main window under a companion process (e.g. Steam's main client
+  // runs in `steamwebhelper.exe`, not `steam.exe`). Expanded hints are REQUIRED for enumeration
+  // so we can actually see/find the main window. Companion-process auxiliary windows that were
+  // visible pre-dismissal are filtered out via the blocked-era quarantine, not via hint scope.
+  const normalizedScanHints = Array.from(new Set(
+    [processHintLc, ...(Array.isArray(processHints) ? processHints : [])]
+      .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+      .filter(Boolean),
+  ));
+  const collectResumeCandidates = async (_ignoredExpandedHints = [], options = {}) => {
+    const includeBlocked = options?.includeBlocked === true;
+    const rowsByHint = await Promise.all(
+      normalizedScanHints.map((hint) => getVisibleWindowInfos(hint, {
+        diagnostics: launchDiagnostics,
+        diagnosticsContext: {
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-candidate-scan',
+          processHintLc: hint,
+        },
+      })),
+    );
+    const seenHandles = new Set();
+    const allRows = [];
+    for (const rows of rowsByHint) {
+      for (const row of (Array.isArray(rows) ? rows : [])) {
+        const handle = String(row?.handle || '').trim();
+        if (!handle || seenHandles.has(handle)) continue;
+        if (!includeBlocked && blockedHandleSet.has(handle)) continue;
+        seenHandles.add(handle);
+        allRows.push(row);
+      }
+    }
+    return allRows
+      .filter((row) => (
+        !row?.cloaked
+        && !row?.hung
+        && !row?.tool
+        && !row?.isMinimized
+        && (placementBounds.state !== 'maximized' || (!row?.hasOwner && !row?.topMost))
+        && row?.enabled
+        && Number(row?.width || 0) >= 280
+        && Number(row?.height || 0) >= 140
+      ))
+      .sort((a, b) => {
+        const scoreA = scoreWindowCandidate(a, { chromiumProcessHint: processHintLc });
+        const scoreB = scoreWindowCandidate(b, { chromiumProcessHint: processHintLc });
+        if (scoreA !== scoreB) return scoreB - scoreA;
+        const areaA = Number(a?.area || (Number(a?.width || 0) * Number(a?.height || 0)));
+        const areaB = Number(b?.area || (Number(b?.width || 0) * Number(b?.height || 0)));
+        if (areaA !== areaB) return areaB - areaA;
+        return String(a?.handle || '').localeCompare(String(b?.handle || ''));
+      });
+  };
+
+  const placeHandleFirstWithFallback = async (primaryHandle) => {
+    const orderedHandles = [];
+    const primary = String(primaryHandle || '').trim();
+    if (primary && !blockedHandleSet.has(primary)) orderedHandles.push(primary);
+    const fallbackRows = await collectResumeCandidates();
+    for (const row of fallbackRows) {
+      const handle = String(row?.handle || '').trim();
+      if (!handle || orderedHandles.includes(handle)) continue;
+      orderedHandles.push(handle);
+    }
+    let lastAttempt = { applied: false, handle: null };
+    for (const candidateHandle of orderedHandles) {
+      lastAttempt = await moveSpecificWindowHandleToBounds({
+        handle: candidateHandle,
+        bounds: placementBounds,
+        processHintLc,
+        aggressiveMaximize,
+        positionOnlyBeforeMaximize,
+        skipFrameChanged,
+        diagnostics: launchDiagnostics,
+        diagnosticsContext: {
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-placement',
+          candidateHandle,
+          handleSource: candidateHandle === primary ? 'ready-gate' : 'fallback-candidate',
+        },
+      });
+      if (lastAttempt.applied) {
+        return {
+          ...lastAttempt,
+          fallbackUsed: candidateHandle !== primary,
+        };
+      }
+    }
+    return {
+      ...lastAttempt,
+      fallbackUsed: orderedHandles.length > 1,
+    };
+  };
+
+  const settlePostModalMaximizedWinner = async (initialHandle) => {
+    const settleDeadline = Date.now() + 2800;
+    let stableCount = 0;
+    let selectedHandle = String(initialHandle || '').trim() || null;
+    while (Date.now() <= settleDeadline) {
+      const candidates = await collectResumeCandidates();
+      if (candidates.length === 0) {
+        stableCount = 0;
+        await sleep(220);
+        continue;
+      }
+      const topCandidate = candidates[0];
+      const topHandle = String(topCandidate?.handle || '').trim() || null;
+      if (!topHandle) {
+        stableCount = 0;
+        await sleep(220);
+        continue;
+      }
+      if (!selectedHandle || selectedHandle !== topHandle) {
+        const reelectAttempt = await moveSpecificWindowHandleToBounds({
+          handle: topHandle,
+          bounds: placementBounds,
+          processHintLc,
+          aggressiveMaximize,
+          positionOnlyBeforeMaximize,
+          skipFrameChanged,
+          diagnostics: launchDiagnostics,
+          diagnosticsContext: {
+            ...diagnosticsContext,
+            strategy: 'post-modal-resume-reelect-placement',
+            candidateHandle: topHandle,
+          },
+        });
+        if (reelectAttempt.applied) {
+          selectedHandle = String(reelectAttempt.handle || topHandle).trim() || topHandle;
+          stableCount = 0;
+          if (launchDiagnostics) {
+            launchDiagnostics.decision({
+              ...diagnosticsContext,
+              strategy: 'post-modal-resume-reelect',
+              reason: 'switched-to-top-candidate',
+              handle: selectedHandle,
+            });
+          }
+        }
+      }
+
+      const measuredRects = selectedHandle
+        ? await getWindowPlacementRectsByHandle(selectedHandle)
+        : null;
+      const measuredRect = measuredRects?.visibleRect || measuredRects?.outerRect || null;
+      const onTarget = isWindowOnTargetMonitor({
+        rect: measuredRect,
+        monitor,
+        bounds: placementBounds,
+      });
+      const meaningful = isMeaningfulRectForBounds(measuredRect, placementBounds);
+      if (selectedHandle && selectedHandle === topHandle && onTarget && meaningful) {
+        stableCount += 1;
+        if (stableCount >= 2) {
+          return {
+            verified: true,
+            handle: selectedHandle,
+          };
+        }
+      } else {
+        stableCount = 0;
+      }
+      await sleep(220);
+    }
+    return {
+      verified: false,
+      handle: selectedHandle,
+    };
+  };
+
   const resumeDeadline = Date.now() + 120000;
+
+  // Phase 1: actively wait for the confirmation blocker to be dismissed. While the blocker is
+  // still visible, every observed candidate is added to quarantine so pre-dismissal companion/
+  // transient windows cannot later win as the "main" post-confirmation window.
+  const awaitBlockerDismissal = async () => {
+    let quarantinedDuringWait = 0;
+    let lastScanHadBlocker = true;
+    while (Date.now() <= resumeDeadline) {
+      const rows = await collectResumeCandidates([], { includeBlocked: true });
+      const visibleHandles = new Set(
+        rows
+          .map((row) => String(row?.handle || '').trim())
+          .filter(Boolean),
+      );
+      const blockerStillVisible = Array.from(blockerPresenceHandleSet).some((handle) => (
+        visibleHandles.has(handle)
+      ));
+      if (blockerStillVisible) {
+        for (const row of rows) {
+          const handle = String(row?.handle || '').trim();
+          if (!handle || blockedHandleSet.has(handle)) continue;
+          blockedHandleSet.add(handle);
+          quarantinedDuringWait += 1;
+        }
+        lastScanHadBlocker = true;
+        await sleep(360);
+        continue;
+      }
+      if (launchDiagnostics) {
+        launchDiagnostics.decision({
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-gate',
+          reason: lastScanHadBlocker
+            ? 'blocker-dismissed'
+            : 'blocker-not-visible-at-resume-start',
+          quarantinedDuringWait,
+          blockedHandleCount: blockedHandleSet.size,
+        });
+      }
+      return { dismissed: true, quarantinedDuringWait };
+    }
+    return { dismissed: false, quarantinedDuringWait };
+  };
+
+  const dismissalOutcome = await awaitBlockerDismissal();
+  if (!dismissalOutcome.dismissed) {
+    if (launchDiagnostics) {
+      launchDiagnostics.failure({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: 'confirmation-dismissal-timeout',
+      });
+    }
+    return {
+      resolved: false,
+      status: 'waiting',
+      handle: null,
+    };
+  }
+  // Mandatory settle delay after blocker dismissal. This gives the host application time to
+  // destroy pre-confirmation windows and spawn its real main window before we attempt winner
+  // selection, avoiding latching onto transient or companion-process windows (e.g. steamwebhelper
+  // overlay / friends list) that were visible pre-dismissal.
+  await sleep(1500);
+
+  // Phase 2: run resume gate with expanded hints for discovery, but still exclude quarantined
+  // pre-dismissal handles from eligibility.
   let resumeGate = null;
   while (Date.now() <= resumeDeadline) {
     const remainingMs = Math.max(2200, resumeDeadline - Date.now());
@@ -3013,13 +3574,50 @@ const resumePlacementAfterConfirmationModal = async ({
       scoreWindowCandidate: (row, hint) => (
         scoreWindowCandidate(row, { chromiumProcessHint: hint })
       ),
+      excludeHandles: blockedHandleSet,
       diagnosticsContext: {
         ...diagnosticsContext,
         strategy: 'post-modal-resume-gate',
       },
     });
+    for (const blockedHandle of (Array.isArray(resumeGate?.blockerHandles) ? resumeGate.blockerHandles : [])) {
+      const safeBlockedHandle = String(blockedHandle || '').trim();
+      if (safeBlockedHandle) blockedHandleSet.add(safeBlockedHandle);
+    }
+    if (resumeGate?.blockerHandle) {
+      const safeBlockerHandle = String(resumeGate.blockerHandle || '').trim();
+      if (safeBlockerHandle) blockedHandleSet.add(safeBlockerHandle);
+    }
+    if (resumeGate.ready && resumeGate.handle && blockedHandleSet.has(String(resumeGate.handle || '').trim())) {
+      if (launchDiagnostics) {
+        launchDiagnostics.decision({
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-gate',
+          reason: 'ready-handle-quarantined',
+          handle: resumeGate.handle,
+        });
+      }
+      await sleep(260);
+      continue;
+    }
     if (resumeGate.ready && resumeGate.handle) break;
     if (resumeGate.blocked && resumeGate.blockerKind === 'confirmation') {
+      const blockedEraRows = await collectResumeCandidates([], { includeBlocked: true });
+      let quarantinedCount = 0;
+      for (const row of blockedEraRows) {
+        const handle = String(row?.handle || '').trim();
+        if (!handle || blockedHandleSet.has(handle)) continue;
+        blockedHandleSet.add(handle);
+        quarantinedCount += 1;
+      }
+      if (quarantinedCount > 0 && launchDiagnostics) {
+        launchDiagnostics.decision({
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-gate',
+          reason: 'blocked-era-candidates-quarantined',
+          quarantinedCount,
+        });
+      }
       await sleep(420);
       continue;
     }
@@ -3042,20 +3640,9 @@ const resumePlacementAfterConfirmationModal = async ({
     };
   }
 
-  const placed = await moveSpecificWindowHandleToBounds({
-    handle: resumeGate.handle,
-    bounds: placementBounds,
-    processHintLc,
-    aggressiveMaximize,
-    positionOnlyBeforeMaximize,
-    skipFrameChanged,
-    diagnostics: launchDiagnostics,
-    diagnosticsContext: {
-      ...diagnosticsContext,
-      strategy: 'post-modal-resume-placement',
-      candidateHandle: resumeGate.handle,
-    },
-  });
+  const placed = await placeHandleFirstWithFallback(resumeGate.handle);
+  const resolvedHandle = String(placed?.handle || resumeGate.handle || '').trim() || null;
+  let finalResolvedHandle = resolvedHandle;
   if (!placed.applied) {
     if (launchDiagnostics) {
       launchDiagnostics.failure({
@@ -3068,13 +3655,21 @@ const resumePlacementAfterConfirmationModal = async ({
     return {
       resolved: false,
       status: 'placement-failed',
-      handle: resumeGate.handle,
+      handle: resolvedHandle,
     };
+  }
+  if (placed.fallbackUsed && launchDiagnostics) {
+    launchDiagnostics.decision({
+      ...diagnosticsContext,
+      strategy: 'post-modal-resume-placement',
+      reason: 'handle-first-fallback-applied',
+      handle: resolvedHandle,
+    });
   }
 
   if (placementBounds.state === 'normal' && monitor) {
     const verification = await verifyAndCorrectWindowPlacement({
-      handle: resumeGate.handle,
+      handle: resolvedHandle,
       monitor,
       bounds: placementBounds,
       aggressiveMaximize,
@@ -3095,31 +3690,30 @@ const resumePlacementAfterConfirmationModal = async ({
         reason: verification.verified ? 'post-modal-placement-verified' : 'post-modal-placement-not-verified',
         verified: Boolean(verification.verified),
         corrected: Boolean(verification.corrected),
-        handle: resumeGate.handle,
+        handle: resolvedHandle,
       });
     }
     if (!verification.verified) {
       return {
         resolved: false,
         status: 'placement-failed',
-        handle: resumeGate.handle,
+        handle: resolvedHandle,
       };
     }
   }
 
   if (placementBounds.state === 'maximized' && monitor) {
-    const stabilizationHints = Array.from(new Set(
-      [processHintLc, ...(Array.isArray(processHints) ? processHints : [])]
-        .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
-        .filter(Boolean),
-    ));
-    let stabilized = { verified: false, handle: resumeGate.handle };
-    for (const hint of stabilizationHints) {
+    // Stabilize across the same expanded hint set used for enumeration. Companion-process
+    // windows that were pre-dismissal (splash/overlay/friends/chooser) are already excluded
+    // from candidate pools by the blocked-era quarantine, so the hint scope is safe here.
+    let stabilized = { verified: false, handle: resolvedHandle };
+    for (const hint of normalizedScanHints) {
       stabilized = await stabilizePlacementForSlowLaunch({
         processHintLc: hint,
         bounds: placementBounds,
         monitor,
-        initialHandle: stabilized.handle || resumeGate.handle,
+        initialHandle: stabilized.handle || resolvedHandle,
+        excludedWindowHandles: Array.from(blockedHandleSet),
         aggressiveMaximize,
         positionOnlyBeforeMaximize,
         skipFrameChanged,
@@ -3141,21 +3735,44 @@ const resumePlacementAfterConfirmationModal = async ({
           ? 'post-modal-maximized-stabilized'
           : 'post-modal-maximized-not-stabilized',
         verified: Boolean(stabilized.verified),
-        handle: stabilized.handle || resumeGate.handle,
+        handle: stabilized.handle || resolvedHandle,
       });
     }
     if (!stabilized.verified) {
       return {
         resolved: false,
         status: 'placement-failed',
-        handle: stabilized.handle || resumeGate.handle,
+        handle: stabilized.handle || resolvedHandle,
       };
     }
+
+    const settledWinner = await settlePostModalMaximizedWinner(
+      stabilized.handle || resolvedHandle,
+    );
+    if (launchDiagnostics) {
+      launchDiagnostics.result({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume',
+        reason: settledWinner.verified
+          ? 'post-modal-maximized-winner-verified'
+          : 'post-modal-maximized-winner-not-verified',
+        verified: Boolean(settledWinner.verified),
+        handle: settledWinner.handle || stabilized.handle || resolvedHandle,
+      });
+    }
+    if (!settledWinner.verified) {
+      return {
+        resolved: false,
+        status: 'placement-failed',
+        handle: settledWinner.handle || stabilized.handle || resolvedHandle,
+      };
+    }
+    finalResolvedHandle = settledWinner.handle || stabilized.handle || resolvedHandle;
   }
   return {
     resolved: true,
     status: 'resolved',
-    handle: resumeGate.handle,
+    handle: finalResolvedHandle,
   };
 };
 
@@ -3409,6 +4026,10 @@ const launchProfileById = async (profileId) => {
   }
   const replacedRunId = runSession?.replacedRunId || null;
   const isCurrentRunActive = () => launchStatusStore.isActiveRun(normalizedProfileId, activeRunId);
+  const latestRunLogFile = initializeLatestLaunchDiagnosticsLog({
+    profileId: normalizedProfileId,
+    runId: activeRunId,
+  });
 
   const launchState = profile?.launchMaximized
     ? 'maximized'
@@ -3459,6 +4080,8 @@ const launchProfileById = async (profileId) => {
     const processKey = getPlacementProcessKey(launchItem);
     processHintCounts.set(processKey, (processHintCounts.get(processKey) || 0) + 1);
   }
+  const consumedReuseHandlesByProcessHint = new Map();
+  const baselineReuseHandlesByProcessHint = new Map();
 
   const { shell } = require('electron');
   const profileDiagnostics = createLaunchDiagnostics({
@@ -3480,6 +4103,7 @@ const launchProfileById = async (profileId) => {
   profileDiagnostics.start({
     strategy: 'launch-profile',
     reason: 'launch-profile-requested',
+    latestRunLogFile,
     launchOrder,
     appCount: appLaunches.length,
     modernLaunchCount: modernLaunchData.launches.length,
@@ -3503,6 +4127,8 @@ const launchProfileById = async (profileId) => {
 
   const runLaunch = async (launchItem) => {
     if (!isCurrentRunActive()) return;
+    let launchStatusMode = 'spawned_new_window';
+    let launchStatusReasonCode = 'spawned_new_window';
     const launchDiagnostics = createLaunchDiagnostics({
       profileId: normalizedProfileId,
       launchSequence: Number(launchItem?.launchSequence ?? -1),
@@ -3511,6 +4137,10 @@ const launchProfileById = async (profileId) => {
     });
     try {
       const processHintLc = getPlacementProcessKey(launchItem);
+      if (!consumedReuseHandlesByProcessHint.has(processHintLc)) {
+        consumedReuseHandlesByProcessHint.set(processHintLc, new Set());
+      }
+      const consumedReuseHandles = consumedReuseHandlesByProcessHint.get(processHintLc);
       const processNameHint = processHintLc;
       const hintCount = processHintCounts.get(processHintLc) || 0;
       const isDuplicateProcessLaunch = hintCount > 1;
@@ -3533,28 +4163,29 @@ const launchProfileById = async (profileId) => {
         isChromiumFamily,
         monitor: describeMonitor(launchItem.monitor),
       });
-      const preLaunchWindowInfos = isDuplicateProcessLaunch
-        ? await getVisibleWindowInfos(processHintLc, {
-          diagnostics: launchDiagnostics,
-          diagnosticsContext: {
-            processHintLc,
-            strategy: 'duplicate-prelaunch-window-scan',
-          },
-        })
-        : [];
+      const preLaunchWindowInfos = await getVisibleWindowInfos(processHintLc, {
+        diagnostics: launchDiagnostics,
+        diagnosticsContext: {
+          processHintLc,
+          strategy: isDuplicateProcessLaunch
+            ? 'duplicate-prelaunch-window-scan'
+            : 'prelaunch-window-scan',
+        },
+        includeNonVisible: true,
+      });
       const preLaunchHandles = preLaunchWindowInfos.map((row) => row.handle);
+      if (!baselineReuseHandlesByProcessHint.has(processHintLc)) {
+        baselineReuseHandlesByProcessHint.set(
+          processHintLc,
+          new Set(
+            (Array.isArray(preLaunchHandles) ? preLaunchHandles : [])
+              .map((handle) => String(handle || '').trim())
+              .filter(Boolean),
+          ),
+        );
+      }
 
       let launchedChild = null;
-      if (launchItem.shortcutPath) {
-        const openErr = await shell.openPath(launchItem.shortcutPath);
-        if (openErr) throw new Error(openErr);
-      } else if (launchItem.launchUrl) {
-        await shell.openExternal(launchItem.launchUrl);
-      } else {
-        launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
-      }
-      launchedAppCount += 1;
-      publishCurrentLaunchStatus('in-progress');
       const bounds = buildWindowBoundsForApp(launchItem.app, launchItem.monitor, launchState, {
         diagnostics: launchDiagnostics,
         diagnosticsContext: {
@@ -3573,6 +4204,19 @@ const launchProfileById = async (profileId) => {
         sourcePosition: launchItem.app?.position || null,
         sourceSize: launchItem.app?.size || null,
       });
+      if (!bounds) {
+        if (launchItem.shortcutPath) {
+          const openErr = await shell.openPath(launchItem.shortcutPath);
+          if (openErr) throw new Error(openErr);
+        } else if (launchItem.launchUrl) {
+          await shell.openExternal(launchItem.launchUrl);
+        } else {
+          launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
+        }
+        launchedAppCount += 1;
+        publishCurrentLaunchStatus('in-progress');
+        return;
+      }
       if (bounds) {
         const aggressiveMaximize = bounds.state === 'maximized' && processHintLc === 'msedge';
         const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
@@ -3583,6 +4227,7 @@ const launchProfileById = async (profileId) => {
         const placementBounds = shouldDelayChromiumMaximize
           ? { ...bounds, state: 'normal' }
           : bounds;
+        const readyGateExpectedBounds = shouldDelayChromiumMaximize ? null : placementBounds;
         const excludedHandles = preLaunchHandles;
         const chromiumNormalSoftPos = isChromiumFamily && placementBounds.state === 'normal';
         launchDiagnostics.decision({
@@ -3594,12 +4239,6 @@ const launchProfileById = async (profileId) => {
           shouldDelayChromiumMaximize,
           placementState: placementBounds.state,
         });
-
-        if (isDuplicateProcessLaunch) {
-          await sleep(240);
-        } else if (launchItem.shortcutPath || launchItem.launchUrl) {
-          await sleep(200);
-        }
 
         const initialProcessHints = await buildCompanionProcessHints({
           baseProcessHintLc: processHintLc,
@@ -3615,25 +4254,213 @@ const launchProfileById = async (profileId) => {
           ? (launchItem.shortcutPath ? 14000 : 11000)
           : 9000;
         let activeProcessHints = initialProcessHints;
-        let readyGate = await waitForMainWindowReadyOrBlocker({
+        const currentPreLaunchHandleSet = new Set(
+          (Array.isArray(preLaunchHandles) ? preLaunchHandles : [])
+            .map((handle) => String(handle || '').trim())
+            .filter(Boolean),
+        );
+        const baselinePreLaunchHandleSet = baselineReuseHandlesByProcessHint.get(processHintLc) || new Set();
+        const preLaunchHandleSet = isDuplicateProcessLaunch
+          ? baselinePreLaunchHandleSet
+          : currentPreLaunchHandleSet;
+        launchDiagnostics.decision({
           processHintLc,
-          processHints: activeProcessHints,
-          expectedBounds: placementBounds,
-          timeoutMs: readyGateTimeoutMs,
-          pollMs: 260,
-          diagnostics: launchDiagnostics,
-          listWindows: getVisibleWindowInfos,
-          sleep,
-          summarizeWindowRows,
-          scoreWindowCandidate: (row, hint) => (
-            scoreWindowCandidate(row, { chromiumProcessHint: hint })
-          ),
-          diagnosticsContext: {
-            processHintLc,
-            strategy: 'window-ready-gate',
-            placementState: placementBounds.state,
-          },
+          strategy: 'launch-target-mode',
+          reason: 'prelaunch-window-snapshot',
+          preLaunchHandleCount: currentPreLaunchHandleSet.size,
+          reuseEligiblePreLaunchHandleCount: preLaunchHandleSet.size,
+          preLaunchWindowSample: summarizeWindowRows(preLaunchWindowInfos, 3),
         });
+        const findStableExistingMainWindowHandle = async (processHintsForScan = []) => {
+          if (preLaunchHandleSet.size === 0) return null;
+          const normalizedHints = Array.from(new Set(
+            [processHintLc, ...(Array.isArray(processHintsForScan) ? processHintsForScan : [])]
+              .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+              .filter(Boolean),
+          ));
+          if (normalizedHints.length === 0) return null;
+
+          const collectCandidates = async () => {
+            const rowsByHint = await Promise.all(
+              normalizedHints.map((hint) => getVisibleWindowInfos(hint, {
+                diagnostics: launchDiagnostics,
+                diagnosticsContext: {
+                  processHintLc,
+                  strategy: 'existing-main-window-scan',
+                  scanHint: hint,
+                },
+                includeNonVisible: true,
+              })),
+            );
+            const candidates = [];
+            const seen = new Set();
+            for (const rows of rowsByHint) {
+              for (const row of (Array.isArray(rows) ? rows : [])) {
+                const handle = String(row?.handle || '').trim();
+                if (!handle || seen.has(handle)) continue;
+                seen.add(handle);
+                if (!preLaunchHandleSet.has(handle)) continue;
+                if (consumedReuseHandles.has(handle)) continue;
+                // Allow minimized pre-existing handles here: warm-attach placement will restore and
+                // re-anchor them. Rejecting minimized rows prevented reuse_existing for already-running
+                // apps (OBS/Chrome) and forced unnecessary relaunch/confirmation flows.
+                if (row?.cloaked || row?.hung || row?.tool || !row?.enabled) continue;
+                if (row?.hasOwner || row?.topMost) continue;
+                if (isLikelyAuxiliaryWindowClass(row?.className)) continue;
+                if (isChromiumFamily && isChromiumNonPrimaryWindowRow(row)) continue;
+                const isMinimized = Boolean(row?.isMinimized);
+                if (!isMinimized && (Number(row?.width || 0) < 280 || Number(row?.height || 0) < 140)) continue;
+                // Tray-only / background phases can leave large non-client HWNDs that are not
+                // IsWindowVisible; reusing those skips launchExecutable and the user sees no UI.
+                // Minimized real windows remain eligible (taskbar) even if visibility is quirky.
+                if (!row?.isWindowVisible && !isMinimized) continue;
+                // Do not require "meaningful bounds" at detection-time for reuse_existing.
+                // Existing windows are often on a previous monitor/size; placement is responsible
+                // for resizing/repositioning to target bounds.
+                candidates.push(row);
+              }
+            }
+            return candidates.sort((a, b) => (
+              scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
+              - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc })
+            ));
+          };
+
+          const summarizeTopCandidate = (rankedCandidates) => {
+            const topRow = rankedCandidates?.[0] || null;
+            const topHandle = String(topRow?.handle || '').trim();
+            const topScore = Number(
+              topRow
+                ? (scoreWindowCandidate(topRow, { chromiumProcessHint: processHintLc }) || 0)
+                : 0,
+            );
+            const secondScore = Number(
+              scoreWindowCandidate(rankedCandidates?.[1], { chromiumProcessHint: processHintLc }) || 0,
+            );
+            return {
+              topHandle,
+              topScore,
+              secondScore,
+              candidateCount: Array.isArray(rankedCandidates) ? rankedCandidates.length : 0,
+            };
+          };
+
+          const pollSummaries = [];
+          for (let pollIndex = 0; pollIndex < 3; pollIndex += 1) {
+            const rankedCandidates = await collectCandidates();
+            pollSummaries.push(summarizeTopCandidate(rankedCandidates));
+            if (pollIndex < 2) {
+              await sleep(120);
+            }
+          }
+
+          const flipsIn3Polls = pollSummaries.reduce((flipCount, summary, index) => {
+            if (index === 0) return 0;
+            const previousHandle = String(pollSummaries[index - 1]?.topHandle || '').trim();
+            const currentHandle = String(summary?.topHandle || '').trim();
+            if (!previousHandle || !currentHandle) return flipCount;
+            return currentHandle === previousHandle ? flipCount : flipCount + 1;
+          }, 0);
+
+          const finalSummary = pollSummaries[pollSummaries.length - 1] || null;
+          const finalTopHandle = String(finalSummary?.topHandle || '').trim();
+          if (!finalTopHandle) return null;
+          if (shouldTriggerAmbiguityFallback({
+            topScore: finalSummary.topScore,
+            secondScore: finalSummary.secondScore,
+            flipsIn3Polls,
+          })) {
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'launch-target-mode',
+              reason: 'reuse-ambiguous-fallback-to-spawn',
+              topScore: finalSummary.topScore,
+              secondScore: finalSummary.secondScore,
+              flipsIn3Polls,
+              topHandleSequence: pollSummaries.map((summary) => summary.topHandle).filter(Boolean),
+              candidateCount: finalSummary.candidateCount,
+            });
+            return null;
+          }
+          return finalTopHandle;
+        };
+        let reusedExistingHandle = null;
+        const shouldPreferReuseExisting = !launchItem.launchUrl;
+        if (shouldPreferReuseExisting) {
+          reusedExistingHandle = await findStableExistingMainWindowHandle(activeProcessHints);
+        }
+        const slotPlan = planLaunchSlots({
+          requestedSlots: 1,
+          existingHandles: reusedExistingHandle ? [reusedExistingHandle] : [],
+        });
+
+        for (const reuseSlot of slotPlan.reuseSlots) {
+          const stableHandle = String(reuseSlot?.handle || '').trim();
+          if (!stableHandle) continue;
+          reusedExistingHandle = stableHandle;
+          consumedReuseHandles.add(stableHandle);
+          launchStatusMode = 'reused_existing_window';
+          launchStatusReasonCode = 'reused_existing_window';
+          launchedAppCount += 1;
+          publishCurrentLaunchStatus('in-progress');
+          launchDiagnostics.decision({
+            processHintLc,
+            strategy: 'launch-target-mode',
+            reason: 'reuse-existing-window-detected',
+            handle: reusedExistingHandle,
+            preLaunchHandleCount: preLaunchHandleSet.size,
+          });
+          break;
+        }
+
+        if (!reusedExistingHandle && slotPlan.spawnSlots.length > 0) {
+          launchStatusMode = 'spawned_new_window';
+          launchStatusReasonCode = shouldPreferReuseExisting
+            ? 'fallback_to_spawn'
+            : 'spawned_new_window';
+          if (launchItem.shortcutPath) {
+            const openErr = await shell.openPath(launchItem.shortcutPath);
+            if (openErr) throw new Error(openErr);
+          } else if (launchItem.launchUrl) {
+            await shell.openExternal(launchItem.launchUrl);
+          } else {
+            launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
+          }
+          if (isDuplicateProcessLaunch) {
+            await sleep(240);
+          } else if (launchItem.shortcutPath || launchItem.launchUrl) {
+            await sleep(200);
+          }
+          launchedAppCount += 1;
+          publishCurrentLaunchStatus('in-progress');
+        }
+
+        let readyGate = reusedExistingHandle
+          ? {
+            ready: true,
+            blocked: false,
+            timedOut: false,
+            handle: reusedExistingHandle,
+          }
+          : await waitForMainWindowReadyOrBlocker({
+            processHintLc,
+            processHints: activeProcessHints,
+            expectedBounds: readyGateExpectedBounds,
+            timeoutMs: readyGateTimeoutMs,
+            pollMs: 260,
+            diagnostics: launchDiagnostics,
+            listWindows: getVisibleWindowInfos,
+            sleep,
+            summarizeWindowRows,
+            scoreWindowCandidate: (row, hint) => (
+              scoreWindowCandidate(row, { chromiumProcessHint: hint })
+            ),
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'window-ready-gate',
+              placementState: placementBounds.state,
+            },
+          });
         if (!readyGate.ready && !readyGate.blocked) {
           const expandedHints = await buildCompanionProcessHints({
             baseProcessHintLc: processHintLc,
@@ -3657,7 +4484,7 @@ const launchProfileById = async (profileId) => {
             readyGate = await waitForMainWindowReadyOrBlocker({
               processHintLc,
               processHints: activeProcessHints,
-              expectedBounds: placementBounds,
+              expectedBounds: readyGateExpectedBounds,
               timeoutMs: Math.max(5000, Math.floor(readyGateTimeoutMs * 0.7)),
               pollMs: 240,
               diagnostics: launchDiagnostics,
@@ -3673,6 +4500,25 @@ const launchProfileById = async (profileId) => {
                 placementState: placementBounds.state,
               },
             });
+          }
+        }
+        if (!readyGate.ready && readyGate.blocked && readyGate.blockerKind === 'confirmation') {
+          const existingMainHandle = await findStableExistingMainWindowHandle(activeProcessHints);
+          if (existingMainHandle) {
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'window-ready-gate',
+              reason: 'confirmation-blocker-bypassed-existing-main-window',
+              blockerHandle: readyGate.blockerHandle || null,
+              existingMainHandle,
+              preLaunchHandleCount: preLaunchHandleSet.size,
+            });
+            readyGate = {
+              ready: true,
+              blocked: false,
+              timedOut: false,
+              handle: existingMainHandle,
+            };
           }
         }
         if (!readyGate.ready && readyGate.blocked && readyGate.blockerKind === 'confirmation') {
@@ -3701,6 +4547,8 @@ const launchProfileById = async (profileId) => {
             name: launchItem.appName,
             path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
             reason: 'Awaiting user confirmation modal before main window can be placed.',
+            mode: launchStatusMode,
+            reasonCode: launchStatusReasonCode,
             processHintLc,
             blockerHandle: readyGate.blockerHandle || null,
             status: 'waiting',
@@ -3710,6 +4558,10 @@ const launchProfileById = async (profileId) => {
           void resumePlacementAfterConfirmationModal({
             processHintLc,
             processHints: activeProcessHints,
+            blockedHandles: Array.from(new Set([
+              ...(Array.isArray(readyGate?.blockerHandles) ? readyGate.blockerHandles : []),
+              String(readyGate?.blockerHandle || '').trim(),
+            ].filter(Boolean))),
             placementBounds,
             monitor: launchItem.monitor,
             aggressiveMaximize,
@@ -3750,26 +4602,99 @@ const launchProfileById = async (profileId) => {
         let newHandles = [];
 
         if (readyGate.ready && readyGate.handle) {
-          launchDiagnostics.attempt({
-            processHintLc,
-            strategy: 'window-ready-gate',
-            reason: 'placing-stable-main-window-handle',
-            handle: readyGate.handle,
-          });
-          result = await moveSpecificWindowHandleToBounds({
-            handle: readyGate.handle,
-            bounds: placementBounds,
-            processHintLc,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
-            diagnostics: launchDiagnostics,
-            diagnosticsContext: {
+          const readyHandle = String(readyGate.handle || '').trim();
+          if (readyHandle) {
+            const placementRects = await getWindowPlacementRectsByHandle(readyHandle);
+            const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
+            const onTargetMonitor = isWindowOnTargetMonitor({
+              rect: measuredRect,
+              monitor: launchItem.monitor,
+              bounds: placementBounds,
+            });
+            const withinTolerance = isWithinAcceptableStateTolerance({
+              actual: measuredRect,
+              target: placementBounds,
+              onTargetMonitor,
+            });
+            if (launchStatusMode === 'reused_existing_window') {
+              const foregroundHandle = await getForegroundWindowHandle();
+              const alreadyForeground = foregroundHandle === readyHandle;
+              if (onTargetMonitor && withinTolerance) {
+                result = {
+                  applied: true,
+                  handle: readyHandle,
+                  status: alreadyForeground
+                    ? 'foreground-within-tolerance'
+                    : 'reused-within-tolerance-background',
+                };
+                launchDiagnostics.decision({
+                  processHintLc,
+                  strategy: 'window-ready-gate',
+                  reason: alreadyForeground
+                    ? 'reuse-existing-window-foreground-within-tolerance-skip-placement'
+                    : 'reuse-existing-window-background-within-tolerance-skip-placement',
+                  handle: readyHandle,
+                  placementState: placementBounds.state,
+                });
+              }
+            } else if (
+              shouldDelayChromiumMaximize
+              && onTargetMonitor
+            ) {
+              // Chromium delayed-maximize path: if spawned window is already on the target monitor,
+              // skip normal-state corrective move/stabilization to avoid visible "window thrash".
+              result = {
+                applied: true,
+                handle: readyHandle,
+                status: 'on-target-skip-normal-correction',
+              };
+              launchDiagnostics.decision({
+                processHintLc,
+                strategy: 'window-ready-gate',
+                reason: 'skip-normal-correction-delayed-chromium-already-on-target',
+                handle: readyHandle,
+                placementState: placementBounds.state,
+              });
+            } else if (onTargetMonitor && withinTolerance) {
+              // If a newly detected handle is already on target and within tolerance,
+              // skip corrective placement to avoid visible resize/move thrash.
+              result = {
+                applied: true,
+                handle: readyHandle,
+                status: 'already-within-tolerance',
+              };
+              launchDiagnostics.decision({
+                processHintLc,
+                strategy: 'window-ready-gate',
+                reason: 'ready-handle-already-within-tolerance-skip-placement',
+                handle: readyHandle,
+                placementState: placementBounds.state,
+              });
+            }
+          }
+
+          if (!result.applied) {
+            launchDiagnostics.attempt({
               processHintLc,
-              strategy: 'window-ready-gate-placement',
-              placementState: placementBounds.state,
-            },
-          });
+              strategy: 'window-ready-gate',
+              reason: 'placing-stable-main-window-handle',
+              handle: readyGate.handle,
+            });
+            result = await moveSpecificWindowHandleToBounds({
+              handle: readyGate.handle,
+              bounds: placementBounds,
+              processHintLc,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'window-ready-gate-placement',
+                placementState: placementBounds.state,
+              },
+            });
+          }
         }
 
         if (!result.applied && isDuplicateProcessLaunch) {
@@ -3888,6 +4813,93 @@ const launchProfileById = async (profileId) => {
           });
         }
 
+        if (!result.applied) {
+          await sleep(240);
+          launchDiagnostics.attempt({
+            processHintLc,
+            strategy: 'move-window-to-bounds',
+            reason: 'generic-late-window-retry',
+            pid: launchedChild?.pid || 0,
+          });
+          result = await moveWindowToBounds({
+            pid: launchedChild?.pid || 0,
+            bounds: placementBounds,
+            processNameHint,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            preferNameEnumeration: true,
+            excludedWindowHandles: excludedHandles,
+            skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'move-window-to-bounds-generic-retry',
+              placementState: placementBounds.state,
+            },
+          });
+        }
+
+        if (!result.applied) {
+          const postLaunchRowsByHint = await Promise.all(
+            (Array.isArray(activeProcessHints) && activeProcessHints.length > 0
+              ? activeProcessHints
+              : [processHintLc]
+            ).map((hint) => getVisibleWindowInfos(hint, {
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'postlaunch-candidate-scan',
+                scanHint: hint,
+              },
+            })),
+          );
+          const seenCandidateHandles = new Set();
+          let lateCandidates = [];
+          for (const rows of postLaunchRowsByHint) {
+            for (const row of (Array.isArray(rows) ? rows : [])) {
+              const handle = String(row?.handle || '').trim();
+              if (!handle || seenCandidateHandles.has(handle)) continue;
+              seenCandidateHandles.add(handle);
+              lateCandidates.push(row);
+            }
+          }
+          lateCandidates = lateCandidates
+            .filter((row) => row?.enabled && !row?.hung && !row?.cloaked && !row?.tool)
+            .filter((row) => String(row?.handle || '').trim())
+            .sort((a, b) => (
+              scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
+              - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc })
+            ));
+          if (isChromiumFamily && lateCandidates.some(isChromiumTopLevelWindowRow)) {
+            lateCandidates = lateCandidates.filter(isChromiumTopLevelWindowRow);
+          }
+          launchDiagnostics.attempt({
+            processHintLc,
+            strategy: 'postlaunch-candidate-scan',
+            reason: 'late-handle-placement-fallback',
+            candidateCount: lateCandidates.length,
+          });
+          for (const candidateRow of lateCandidates.slice(0, 10)) {
+            const candidateHandle = String(candidateRow?.handle || '').trim();
+            if (!candidateHandle) continue;
+            result = await moveSpecificWindowHandleToBounds({
+              handle: candidateHandle,
+              bounds: placementBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'postlaunch-candidate-scan',
+                candidateHandle,
+                placementState: placementBounds.state,
+              },
+            });
+            if (result.applied) break;
+          }
+        }
+
         if (!result.applied && isDuplicateProcessLaunch) {
           await sleep(260);
           launchDiagnostics.attempt({
@@ -3946,7 +4958,29 @@ const launchProfileById = async (profileId) => {
           applied: result.applied,
           handle: result.handle || null,
         });
-        if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
+        const reusedAlreadyWithinTolerance = (
+          launchStatusMode === 'reused_existing_window'
+          && (result.status === 'foreground-within-tolerance'
+            || result.status === 'reused-within-tolerance-background')
+        );
+        if (result.applied && result.handle && launchStatusMode === 'reused_existing_window') {
+          await bringWindowHandleToFront(result.handle, {
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'reuse-existing-foreground',
+              placementState: placementBounds.state,
+            },
+            maxAttempts: 3,
+          });
+        }
+        if (
+          result.applied
+          && result.handle
+          && launchItem.monitor
+          && placementBounds.state === 'normal'
+          && !shouldDelayChromiumMaximize
+        ) {
           placementRecords.push({
             appName: launchItem.appName,
             processHintLc,
@@ -3956,7 +4990,13 @@ const launchProfileById = async (profileId) => {
           });
         }
 
-        if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
+        if (
+          result.applied
+          && result.handle
+          && launchItem.monitor
+          && placementBounds.state === 'normal'
+          && !shouldDelayChromiumMaximize
+        ) {
           const knownHandleStabilized = await stabilizeKnownHandlePlacement({
             handle: result.handle,
             bounds: placementBounds,
@@ -3985,7 +5025,13 @@ const launchProfileById = async (profileId) => {
         }
 
         let placementVerified = false;
-        if (result.applied && result.handle && launchItem.monitor && placementBounds.state === 'normal') {
+        if (
+          result.applied
+          && result.handle
+          && launchItem.monitor
+          && placementBounds.state === 'normal'
+          && !shouldDelayChromiumMaximize
+        ) {
           const verification = await verifyAndCorrectWindowPlacement({
             handle: result.handle,
             monitor: launchItem.monitor,
@@ -4015,7 +5061,13 @@ const launchProfileById = async (profileId) => {
         }
 
         // Chromium often restores a remembered window size after first SetWindowPos; re-assert bounds once.
-        if (result.applied && result.handle && isChromiumFamily && placementBounds.state === 'normal') {
+        if (
+          result.applied
+          && result.handle
+          && isChromiumFamily
+          && placementBounds.state === 'normal'
+          && !shouldDelayChromiumMaximize
+        ) {
           await sleep(260);
           await moveSpecificWindowHandleToBounds({
             handle: result.handle,
@@ -4063,7 +5115,12 @@ const launchProfileById = async (profileId) => {
           });
         }
 
-        if (result.applied && placementBounds.state === 'normal' && launchItem.monitor) {
+        if (
+          result.applied
+          && placementBounds.state === 'normal'
+          && launchItem.monitor
+          && !shouldDelayChromiumMaximize
+        ) {
           const stabilizationDurationMs = isChromiumFamily ? 2000 : 5600;
           // Some apps resize/reframe after initial launch; keep correcting for a short window.
           const stabilized = await stabilizePlacementForSlowLaunch({
@@ -4094,7 +5151,67 @@ const launchProfileById = async (profileId) => {
           placementVerified = placementVerified || stabilized.verified;
         }
 
+        let skipDelayedChromiumMaximizeStabilization = false;
         if (result.applied && result.handle && shouldDelayChromiumMaximize) {
+          const delayedPlacementRects = await getWindowPlacementRectsByHandle(result.handle);
+          const delayedPlacementRect = delayedPlacementRects?.visibleRect || delayedPlacementRects?.outerRect || null;
+          const onTargetMonitor = isWindowOnTargetMonitor({
+            rect: delayedPlacementRect,
+            monitor: launchItem.monitor,
+            bounds,
+          });
+          const targetMonitorBounds = (
+            process.platform === 'win32' && launchItem.monitor?.workAreaPhysical
+              ? launchItem.monitor.workAreaPhysical
+              : (launchItem.monitor?.workArea || launchItem.monitor?.bounds || null)
+          );
+          const containmentSlackPx = 20;
+          const rectLeft = Number(delayedPlacementRect?.left || 0);
+          const rectTop = Number(delayedPlacementRect?.top || 0);
+          const rectRight = rectLeft + Number(delayedPlacementRect?.width || 0);
+          const rectBottom = rectTop + Number(delayedPlacementRect?.height || 0);
+          const monitorLeft = Number(targetMonitorBounds?.x || 0);
+          const monitorTop = Number(targetMonitorBounds?.y || 0);
+          const monitorRight = monitorLeft + Number(targetMonitorBounds?.width || 0);
+          const monitorBottom = monitorTop + Number(targetMonitorBounds?.height || 0);
+          const containedWithinTargetMonitor = Boolean(targetMonitorBounds) && (
+            rectLeft >= (monitorLeft - containmentSlackPx)
+            && rectTop >= (monitorTop - containmentSlackPx)
+            && rectRight <= (monitorRight + containmentSlackPx)
+            && rectBottom <= (monitorBottom + containmentSlackPx)
+          );
+          const targetWidth = Math.max(1, Number(bounds?.width || 0));
+          const targetHeight = Math.max(1, Number(bounds?.height || 0));
+          const widthRatio = Number(delayedPlacementRect?.width || 0) / targetWidth;
+          const heightRatio = Number(delayedPlacementRect?.height || 0) / targetHeight;
+          const areaRatio = (
+            Math.max(1, Number(delayedPlacementRect?.width || 0) * Number(delayedPlacementRect?.height || 0))
+            / Math.max(1, targetWidth * targetHeight)
+          );
+          const alreadyMaximizedLike = (
+            onTargetMonitor
+            && containedWithinTargetMonitor
+            && areaRatio >= 0.88
+            && widthRatio >= 0.9
+            && heightRatio >= 0.82
+          );
+          if (alreadyMaximizedLike) {
+            skipDelayedChromiumMaximizeStabilization = true;
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'chromium-delayed-maximize',
+              reason: 'skip-maximize-reapply-already-maximized-like',
+              handle: result.handle,
+            });
+          }
+        }
+
+        if (
+          result.applied
+          && result.handle
+          && shouldDelayChromiumMaximize
+          && !skipDelayedChromiumMaximizeStabilization
+        ) {
           await waitForWindowResponsive(processHintLc, result.handle, 2200, {
             diagnostics: launchDiagnostics,
             diagnosticsContext: {
@@ -4112,25 +5229,40 @@ const launchProfileById = async (profileId) => {
           });
         }
 
-        if (result.applied && bounds.state === 'maximized' && launchItem.monitor) {
+        if (
+          result.applied
+          && bounds.state === 'maximized'
+          && launchItem.monitor
+          && !skipDelayedChromiumMaximizeStabilization
+          && !reusedAlreadyWithinTolerance
+        ) {
           const maximizedStabilizationDurationMs = isChromiumFamily ? 2600 : 1800;
-          const maximizedStabilized = await stabilizePlacementForSlowLaunch({
-            processHintLc,
-            bounds,
-            monitor: launchItem.monitor,
-            initialHandle: result.handle,
-            excludedWindowHandles: preLaunchHandles,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
-            durationMs: maximizedStabilizationDurationMs,
-            diagnostics: launchDiagnostics,
-            diagnosticsContext: {
-              processHintLc,
-              strategy: 'maximized-stabilization',
-              placementState: bounds.state,
-            },
-          });
+          const stabilizationHints = Array.from(new Set(
+            [processHintLc, ...(Array.isArray(activeProcessHints) ? activeProcessHints : [])]
+              .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+              .filter(Boolean),
+          ));
+          let maximizedStabilized = { verified: false, handle: result.handle };
+          for (const hint of stabilizationHints) {
+            maximizedStabilized = await stabilizePlacementForSlowLaunch({
+              processHintLc: hint,
+              bounds,
+              monitor: launchItem.monitor,
+              initialHandle: maximizedStabilized.handle || result.handle,
+              excludedWindowHandles: preLaunchHandles,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
+              durationMs: maximizedStabilizationDurationMs,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc: hint,
+                strategy: 'maximized-stabilization',
+                placementState: bounds.state,
+              },
+            });
+            if (maximizedStabilized.verified) break;
+          }
           launchDiagnostics.result({
             processHintLc,
             strategy: 'placement-stabilization-maximized',
@@ -4139,6 +5271,18 @@ const launchProfileById = async (profileId) => {
               : 'maximized-stabilization-not-verified',
             verified: maximizedStabilized.verified,
             handle: maximizedStabilized.handle,
+          });
+        } else if (
+          result.applied
+          && bounds.state === 'maximized'
+          && launchItem.monitor
+          && reusedAlreadyWithinTolerance
+        ) {
+          launchDiagnostics.decision({
+            processHintLc,
+            strategy: 'placement-stabilization-maximized',
+            reason: 'skip-maximized-stabilization-reused-within-tolerance',
+            handle: result.handle || null,
           });
         }
       }
@@ -4152,6 +5296,8 @@ const launchProfileById = async (profileId) => {
         name: launchItem.appName,
         path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
         error: String(error?.message || error || 'Failed to launch app'),
+        mode: launchStatusMode,
+        reasonCode: launchStatusReasonCode,
       });
       publishCurrentLaunchStatus('in-progress');
     }
@@ -4398,7 +5544,8 @@ const runLaunchAutomationIfRequested = async () => {
   }
 };
 
-handleTrustedIpc('get-system-monitors', async () => {
+if (shouldBootstrapElectronMain) {
+  handleTrustedIpc('get-system-monitors', async () => {
   try {
     const monitors = buildSystemMonitorSnapshot();
     return monitors.map((monitor) => {
@@ -5111,8 +6258,15 @@ handleTrustedIpc('capture-running-app-layout', async () => {
       error: 'Failed to capture running app layout',
     };
   }
-});
-// Quit the app when all windows are closed (except on macOS)
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
-});
+  });
+  // Quit the app when all windows are closed (except on macOS)
+  app.on('window-all-closed', () => {
+    if (process.platform !== 'darwin') app.quit();
+  });
+}
+
+module.exports = {
+  planLaunchSlots,
+  scoreReuseCandidate,
+  shouldTriggerAmbiguityFallback,
+};
