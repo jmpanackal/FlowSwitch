@@ -16,15 +16,3 @@ export function ProfileIconGlyph({
       return <Folder className={className} />;
   }
 }
-
-/** Shorten auto-generated descriptions so the header stays scannable. */
-export function shortenProfileDescriptionForHeader(description: string): string {
-  const d = description.trim();
-  if (/^Custom profile with \d+ apps?$/i.test(d)) {
-    return "Custom profile";
-  }
-  if (/^Captured layout with \d+ apps?$/i.test(d)) {
-    return "Captured layout";
-  }
-  return d;
-}

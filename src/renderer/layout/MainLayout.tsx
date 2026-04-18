@@ -29,7 +29,6 @@ import {
   ChevronRight,
   ChevronLeft,
   X,
-  ChevronDown,
   Check,
   AlertTriangle,
   Layers,
@@ -55,10 +54,7 @@ import {
   useMainLayoutProfileMutations,
   type MainLayoutSelectedApp,
 } from "./hooks/useMainLayoutProfileMutations";
-import {
-  ProfileIconGlyph,
-  shortenProfileDescriptionForHeader,
-} from "./utils/profileHeaderPresentation";
+import { ProfileIconGlyph } from "./utils/profileHeaderPresentation";
 import { formatUnit } from "../utils/pluralize";
 
 const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
@@ -103,11 +99,6 @@ export default function App() {
 
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
-  const [showProfileDropdown, setShowProfileDropdown] =
-    useState(false);
-
-  // Ref for the dropdown container
-  const dropdownRef = useRef<HTMLDivElement>(null);
 
   // CUSTOM DRAG SYSTEM STATE
   const [dragState, setDragState] = useState<DragState>({
@@ -198,33 +189,6 @@ export default function App() {
     currentProfile,
     profileDragActionsRef,
   });
-
-  // FIXED: Document click listener for dropdown
-  useEffect(() => {
-    const handleDocumentClick = (event: MouseEvent) => {
-      if (
-        showProfileDropdown &&
-        dropdownRef.current &&
-        !dropdownRef.current.contains(event.target as Node)
-      ) {
-        setShowProfileDropdown(false);
-      }
-    };
-
-    if (showProfileDropdown) {
-      // Add listener with slight delay to avoid immediate closure
-      setTimeout(() => {
-        document.addEventListener("click", handleDocumentClick);
-      }, 10);
-    }
-
-    return () => {
-      document.removeEventListener(
-        "click",
-        handleDocumentClick,
-      );
-    };
-  }, [showProfileDropdown]);
 
   // SELECTED APP HANDLERS
   const handleClearAppSelection = useCallback(() => {
@@ -638,7 +602,6 @@ export default function App() {
 
       if (profileId === selectedProfile) {
         console.log("⚠️ PROFILE ALREADY SELECTED:", profileId);
-        setShowProfileDropdown(false);
         return;
       }
 
@@ -651,30 +614,9 @@ export default function App() {
       setSelectedApp(null);
       setRightSidebarOpen(false);
 
-      // Close dropdown
-      setShowProfileDropdown(false);
       console.log("🎉 PROFILE SWITCH COMPLETED:", profileId);
     },
     [isEditMode, selectedProfile],
-  );
-
-  // Handle dropdown toggle
-  const handleDropdownToggle = useCallback(
-    (e: React.MouseEvent) => {
-      e.preventDefault();
-      e.stopPropagation();
-
-      if (isEditMode) {
-        console.log(
-          "🚫 DROPDOWN TOGGLE BLOCKED - Edit mode is active",
-        );
-        return;
-      }
-
-      console.log("🔽 DROPDOWN TOGGLE:", !showProfileDropdown);
-      setShowProfileDropdown(!showProfileDropdown);
-    },
-    [isEditMode, showProfileDropdown],
   );
 
   const handleDragStart = () => {
@@ -713,8 +655,8 @@ export default function App() {
         {/* Left Sidebar - FIXED: Better height management */}
         <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] flow-shell-nav flex flex-col">
           {/* Header - Fixed height */}
-          <div className="flex-shrink-0 p-4 border-b border-flow-border/50">
-            <div className="flex items-center justify-between mb-3">
+          <div className="flex-shrink-0 border-b border-flow-border/50 px-4 py-2 md:px-6">
+            <div className="mb-2 flex items-center justify-between md:mb-2.5">
               <div>
                 <h1 className="text-base text-flow-text-primary font-semibold tracking-tight">
                   FlowSwitch
@@ -966,159 +908,65 @@ export default function App() {
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="relative z-10 border-b border-flow-border/50 bg-flow-bg-secondary/80 px-4 py-3 backdrop-blur-sm md:px-6 md:py-3.5 xl:px-8">
-              <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-6">
-                <div className="flex min-w-0 flex-1 justify-center xl:justify-start">
-                  <div className="relative w-full max-w-xl" ref={dropdownRef}>
-                    <button
-                      type="button"
-                      onClick={handleDropdownToggle}
-                      disabled={isEditMode}
-                      className={`flow-header-well flex w-full items-start gap-3 rounded-xl p-2.5 text-left md:gap-3 md:p-3 ${
-                        isEditMode
-                          ? "cursor-not-allowed text-flow-text-muted opacity-50"
-                          : "flow-header-well-interactive cursor-pointer text-flow-text-primary"
-                      }`}
-                    >
-                      <div className="flex shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/90 p-2 md:p-2.5">
-                        <ProfileIconGlyph
-                          icon={currentProfile.icon}
-                          className="h-5 w-5 text-flow-text-secondary md:h-6 md:w-6"
-                        />
-                      </div>
-                      <div className="min-w-0 flex-1">
-                        <div className="mb-0.5 flex flex-wrap items-center gap-2">
-                          <h2 className="max-w-[20rem] truncate text-base font-semibold tracking-tight text-flow-text-primary md:text-lg">
-                            {currentProfile.name}
-                          </h2>
-                          {currentProfile.autoLaunchOnBoot && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-green/30 bg-flow-accent-green/20 px-2 py-0.5 text-xs font-medium text-flow-accent-green">
-                              <Zap className="h-3 w-3" />
-                              Boot
-                            </span>
-                          )}
-                          {currentProfile.autoSwitchTime && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-purple/30 bg-flow-accent-purple/20 px-2 py-0.5 text-xs font-medium text-flow-accent-purple">
-                              <Clock className="h-3 w-3" />
-                              {currentProfile.autoSwitchTime}
-                            </span>
-                          )}
-                          {currentProfile.hotkey && (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-blue/30 bg-flow-accent-blue/20 px-2 py-0.5 text-xs font-medium text-flow-accent-blue">
-                              {currentProfile.hotkey}
-                            </span>
-                          )}
-                        </div>
-                        <p className="truncate text-xs text-flow-text-secondary md:text-sm">
-                          {shortenProfileDescriptionForHeader(
-                            currentProfile.description,
-                          )}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
-                            <Zap className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
-                            ~
-                            {currentProfile.estimatedStartupTime}
-                            s startup
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
-                            <Layers className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
-                            {formatUnit(currentProfile.appCount, "app")}
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
-                            <Globe className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
-                            {formatUnit(currentProfile.tabCount, "tab")}
-                          </span>
-                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
-                            <Folder className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
-                            {formatUnit(
-                              currentProfile.fileCount || 0,
-                              "file",
-                            )}
-                          </span>
-                          {currentProfile.launchOrder === "sequential" ? (
-                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
-                              Sequential launch
-                            </span>
-                          ) : null}
-                        </div>
-                      </div>
-                      {!isEditMode ? (
-                        <ChevronDown
-                          className={`mt-1 h-4 w-4 shrink-0 text-flow-text-muted transition-transform duration-150 ease-out ${
-                            showProfileDropdown ? "rotate-180" : ""
-                          }`}
-                          aria-hidden
-                        />
-                      ) : null}
-                    </button>
-
-                    {/* Profile Dropdown */}
-                    {showProfileDropdown && !isEditMode && (
-                      <div
-                        className="absolute top-full left-0 mt-2 w-full min-w-[20rem] bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg overflow-hidden z-[60]"
-                        style={{ pointerEvents: "auto" }}
-                      >
-                        <div className="max-h-80 overflow-y-auto scrollbar-elegant">
-                          {profiles.map((profile) => (
-                            <button
-                              key={profile.id}
-                              onClick={() => {
-                                handleProfileSwitch(profile.id);
-                              }}
-                              className="w-full flex items-center gap-3 p-3.5 text-left hover:bg-flow-surface/80 transition-colors duration-150 border-b border-flow-border/30 last:border-b-0"
-                            >
-                              <div className="flex-1 min-w-0">
-                                <div className="flex items-center gap-2 mb-1">
-                                  <h3 className="text-sm font-semibold text-flow-text-primary tracking-tight">
-                                    {profile.name}
-                                  </h3>
-                                  {profile.id ===
-                                    selectedProfile && (
-                                    <div className="flex items-center gap-1 px-2 py-0.5 text-xs font-medium rounded-full bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30">
-                                      <Check className="w-3 h-3 flex-shrink-0" />
-                                      Active
-                                    </div>
-                                  )}
-                                  {profile.autoLaunchOnBoot && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded bg-flow-accent-green/20 text-flow-accent-green">
-                                      <Zap className="w-2.5 h-2.5" />
-                                      Boot
-                                    </span>
-                                  )}
-                                  {profile.autoSwitchTime && (
-                                    <span className="inline-flex items-center gap-1 px-1.5 py-0.5 text-xs font-medium rounded bg-flow-accent-purple/20 text-flow-accent-purple">
-                                      <Clock className="w-2.5 h-2.5" />
-                                      {profile.autoSwitchTime}
-                                    </span>
-                                  )}
-                                  {profile.hotkey && (
-                                    <span className="inline-flex items-center px-1.5 py-0.5 text-xs font-medium rounded bg-flow-accent-blue/20 text-flow-accent-blue">
-                                      {profile.hotkey}
-                                    </span>
-                                  )}
-                                </div>
-                                <p className="text-sm text-flow-text-secondary mb-2 truncate">
-                                  {profile.description}
-                                </p>
-                                <div className="flex flex-wrap items-center gap-2 text-xs text-flow-text-muted">
-                                  <span>{formatUnit(profile.appCount, "app")}</span>
-                                  <span>{formatUnit(profile.tabCount, "tab")}</span>
-                                  <span>
-                                    {formatUnit(profile.fileCount || 0, "file")}
-                                  </span>
-                                  <span>
-                                    ~
-                                    {profile.estimatedStartupTime}
-                                    s
-                                  </span>
-                                </div>
-                              </div>
-                            </button>
-                          ))}
-                        </div>
-                      </div>
+            <header className="relative z-10 shrink-0 border-b border-flow-border/50 bg-flow-bg-secondary/80 px-4 py-2 backdrop-blur-sm md:px-6 xl:px-8">
+              <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+                <div
+                  className={`flex min-w-0 flex-1 items-center gap-2 ${
+                    isEditMode ? "opacity-50" : ""
+                  }`}
+                  aria-label="Active profile"
+                >
+                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-flow-border/35 bg-flow-bg-tertiary/70">
+                    <ProfileIconGlyph
+                      icon={currentProfile.icon}
+                      className="h-4 w-4 text-flow-text-secondary"
+                    />
+                  </div>
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
+                    <h2 className="max-w-[min(100%,14rem)] truncate text-sm font-semibold tracking-tight text-flow-text-primary sm:max-w-[22rem] md:text-base">
+                      {currentProfile.name}
+                    </h2>
+                    {currentProfile.autoLaunchOnBoot && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-green/30 bg-flow-accent-green/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-green">
+                        <Zap className="h-2.5 w-2.5 shrink-0" />
+                        Boot
+                      </span>
                     )}
+                    {currentProfile.autoSwitchTime && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-purple/30 bg-flow-accent-purple/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-purple">
+                        <Clock className="h-2.5 w-2.5 shrink-0" />
+                        {currentProfile.autoSwitchTime}
+                      </span>
+                    )}
+                    {currentProfile.hotkey && (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-blue/30 bg-flow-accent-blue/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-blue">
+                        {currentProfile.hotkey}
+                      </span>
+                    )}
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
+                      <Zap className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
+                      ~{currentProfile.estimatedStartupTime}s
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
+                      <Layers className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
+                      {formatUnit(currentProfile.appCount, "app")}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
+                      <Globe className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
+                      {formatUnit(currentProfile.tabCount, "tab")}
+                    </span>
+                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
+                      <Folder className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
+                      {formatUnit(
+                        currentProfile.fileCount || 0,
+                        "file",
+                      )}
+                    </span>
+                    {currentProfile.launchOrder === "sequential" ? (
+                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
+                        Sequential
+                      </span>
+                    ) : null}
                   </div>
                 </div>
 
