@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
+import { formatUnit } from "../../utils/pluralize";
 import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
@@ -327,7 +328,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
       id: `profile-${Date.now()}`,
       name: profileName,
       icon: profileIcon,
-      description: profileDescription || `Custom profile with ${selectedApps.length} apps`,
+      description: profileDescription || `Custom profile with ${formatUnit(selectedApps.length, "app")}`,
       appCount: selectedApps.length,
       tabCount: 0,
       globalVolume: 70,
@@ -378,7 +379,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
       id: `memory-${Date.now()}`,
       name: profileName,
       icon: profileIcon,
-      description: profileDescription || `Captured layout with ${totalCapturedApps} apps`,
+      description: profileDescription || `Captured layout with ${formatUnit(totalCapturedApps, "app")}`,
       appCount: totalCapturedApps,
       tabCount: 0,
       globalVolume: 70,

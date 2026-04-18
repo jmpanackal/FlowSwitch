@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { Monitor, Folder, Globe, MoreVertical, Copy, Edit, Trash2, Settings, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
 import { LucideIcon } from "lucide-react";
+import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
+import { formatUnit } from "../../utils/pluralize";
 
 interface Profile {
   id: string;
@@ -66,19 +68,6 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
     return <Folder className="w-2 h-2 text-white" />;
   };
   
-  const getProfileIcon = () => {
-    switch (profile.icon) {
-      case 'work':
-        return <Folder className="w-4 h-4" />;
-      case 'gaming':
-        return <Monitor className="w-4 h-4" />;
-      case 'personal':
-        return <Globe className="w-4 h-4" />;
-      default:
-        return <Folder className="w-4 h-4" />;
-    }
-  };
-
   const handleActionClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
     action();
@@ -128,7 +117,7 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
           <div className={`p-2 rounded-lg transition-colors duration-150 ${
             profile.isActive ? 'bg-flow-accent-blue/15' : 'bg-flow-bg-tertiary/80 group-hover:bg-flow-surface'
           }`}>
-            {getProfileIcon()}
+            <ProfileIconGlyph icon={profile.icon} className="w-4 h-4" />
           </div>
           
           <div className="flex-1 min-w-0">
@@ -148,15 +137,15 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex items-center gap-1 text-flow-text-muted">
                 <Layers className="w-3 h-3" />
-                <span>{profile.appCount} apps</span>
+                <span>{formatUnit(profile.appCount, "app")}</span>
               </div>
               <div className="flex items-center gap-1 text-flow-text-muted">
                 <Globe className="w-3 h-3" />
-                <span>{profile.tabCount} tabs</span>
+                <span>{formatUnit(profile.tabCount, "tab")}</span>
               </div>
               <div className="flex items-center gap-1 text-flow-text-muted">
                 <Monitor className="w-3 h-3" />
-                <span>{profile.monitors.length} monitors</span>
+                <span>{formatUnit(profile.monitors.length, "monitor")}</span>
               </div>
               <div className="flex items-center gap-1 text-flow-text-muted">
                 <Clock className="w-3 h-3" />

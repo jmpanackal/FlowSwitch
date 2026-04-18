@@ -48,6 +48,9 @@ interface ContentManagerProps {
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   onDragStart?: () => void;
   compact?: boolean;
+  /** When both set with `compact`, hides the local search field and uses this query. */
+  sidebarSearchQuery?: string;
+  onSidebarSearchQueryChange?: (query: string) => void;
 }
 
 // Available apps for users to choose from
@@ -152,11 +155,20 @@ export function ContentManager({
   onUpdateProfile, 
   onCustomDragStart, 
   onDragStart, 
-  compact = false 
+  compact = false,
+  sidebarSearchQuery,
+  onSidebarSearchQueryChange,
 }: ContentManagerProps) {
   const [content, setContent] = useState<ContentItem[]>([]);
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
+  const sidebarSearchControlled =
+    Boolean(compact)
+    && typeof sidebarSearchQuery === "string"
+    && typeof onSidebarSearchQueryChange === "function";
+  const effectiveSearchQuery = sidebarSearchControlled
+    ? sidebarSearchQuery
+    : searchQuery;
   const [selectedType, setSelectedType] = useState<'all' | 'link' | 'file' | 'folder'>('all');
   const [sortBy, setSortBy] = useState<SortOption>('name');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -286,8 +298,8 @@ export function ContentManager({
     console.log(`📊 Display results: ${displayFolders.length} folders, ${displayContent.length} items`);
 
     // Apply search filter
-    if (searchQuery) {
-      const query = searchQuery.toLowerCase();
+    if (effectiveSearchQuery) {
+      const query = effectiveSearchQuery.toLowerCase();
       displayFolders = displayFolders.filter(folder => 
         folder.name.toLowerCase().includes(query)
       );
@@ -1212,83 +1224,121 @@ export function ContentManager({
   const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) : null;
 
   return (
-    <div className="p-4">
+    <div
+      className={
+        compact
+          ? "flex min-h-0 min-w-0 flex-1 flex-col"
+          : "p-4"
+      }
+    >
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <div className="flex items-center gap-2">
-          <Link className="w-4 h-4 text-flow-text-muted" />
-          <h2 className="text-sm font-medium text-flow-text-secondary uppercase tracking-wide">Content</h2>
-          
-          {/* Help Tooltip */}
-          <div className="relative">
-            <button
-              onMouseEnter={() => setShowHelpTooltip(true)}
-              onMouseLeave={() => setShowHelpTooltip(false)}
-              className="inline-flex items-center justify-center p-1 text-flow-text-muted hover:text-flow-text-secondary rounded transition-colors"
-              aria-label="Show help"
-            >
-              <Info className="w-3 h-3" />
-            </button>
-            
-            {showHelpTooltip && (
-              <div className="absolute left-0 top-full mt-2 w-64 p-3 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg z-50">
-                <div className="text-xs text-flow-text-secondary font-medium mb-2">Actions:</div>
-                <div className="space-y-1 text-xs text-flow-text-muted">
-                  {getHelpTooltipContent().map((line, index) => (
-                    <div key={index}>{line}</div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-          
+      <div
+        className={`flex items-center justify-between ${
+          compact
+            ? "shrink-0 border-b border-flow-border/50 px-3 py-3"
+            : "mb-4"
+        }`}
+      >
+        <div className="flex min-w-0 items-center gap-2">
+          <Link
+            className={`shrink-0 text-flow-text-muted ${
+              compact ? "h-3.5 w-3.5" : "h-4 w-4"
+            }`}
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          <h2
+            className={
+              compact
+                ? "flow-sidebar-section-title"
+                : "text-sm font-medium uppercase tracking-wide text-flow-text-secondary"
+            }
+          >
+            Content
+          </h2>
 
-          {currentFolder && selectedType === 'all' && (
-            <span className="text-xs text-flow-text-muted">
-              in {currentFolder.name}
-            </span>
-          )}
-          {(selectedType === 'link' || selectedType === 'file') && (
-            <span className="text-xs text-flow-text-muted">
-              {selectedType}s from all folders
-            </span>
-          )}
+          {!compact ? (
+            <>
+              <div className="relative">
+                <button
+                  type="button"
+                  onMouseEnter={() => setShowHelpTooltip(true)}
+                  onMouseLeave={() => setShowHelpTooltip(false)}
+                  className="inline-flex items-center justify-center rounded p-1 text-flow-text-muted transition-colors hover:text-flow-text-secondary"
+                  aria-label="Show help"
+                >
+                  <Info className="h-3 w-3" />
+                </button>
+
+                {showHelpTooltip && (
+                  <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-flow-border bg-flow-surface-elevated p-3 shadow-lg">
+                    <div className="mb-2 text-xs font-medium text-flow-text-secondary">
+                      Actions:
+                    </div>
+                    <div className="space-y-1 text-xs text-flow-text-muted">
+                      {getHelpTooltipContent().map((line, index) => (
+                        <div key={index}>{line}</div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {currentFolder && selectedType === "all" && (
+                <span className="text-xs text-flow-text-muted">
+                  in {currentFolder.name}
+                </span>
+              )}
+              {(selectedType === "link" || selectedType === "file") && (
+                <span className="text-xs text-flow-text-muted">
+                  {selectedType}s from all folders
+                </span>
+              )}
+            </>
+          ) : null}
         </div>
-        <div className="flex items-center gap-1">
-          {/* Enhanced Add Button */}
+        <div className="flex shrink-0 items-center gap-2">
+          {compact ? (
+            <span className="flow-sidebar-meta">
+              {displayFolders.length + displayContent.length} in view
+            </span>
+          ) : null}
           <div className="relative">
             <button
+              type="button"
               onClick={() => setShowAddMenu(!showAddMenu)}
-              className="inline-flex items-center gap-1 px-2 py-1 text-xs text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-colors"
+              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-flow-text-secondary transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
               title="Add Content"
             >
-              <Plus className="w-3 h-3" />
+              <Plus className="h-3 w-3" />
               Add
-              <ChevronDown className="w-3 h-3" />
+              <ChevronDown className="h-3 w-3" />
             </button>
-            
+
             {showAddMenu && (
-              <div className="absolute top-full right-0 mt-1 w-40 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
+              <div className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 w-40 min-w-0 py-0.5">
                 <button
+                  type="button"
                   onClick={() => {
                     setAddModalType('link');
                     setShowAddModal(true);
                     setShowAddMenu(false);
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-flow-text-primary hover:bg-flow-surface transition-colors"
+                  className="flow-menu-item text-xs"
                 >
-                  <ExternalLink className="w-3 h-3 text-blue-400" />
+                  <ExternalLink className="h-3.5 w-3.5 shrink-0 text-blue-400" />
                   Add Link
                 </button>
                 <button
+                  type="button"
                   onClick={() => {
                     setAddModalType('file');
                     setShowAddModal(true);
                     setShowAddMenu(false);
                   }}
-                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-flow-text-primary hover:bg-flow-surface transition-colors"
+                  className="flow-menu-item text-xs"
                 >
-                  <Upload className="w-3 h-3 text-green-400" />
+                  <Upload className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
                   Add File/Folder
                 </button>
               </div>
@@ -1297,82 +1347,102 @@ export function ContentManager({
         </div>
       </div>
 
-      {/* Search and Filters - CLEAN: Consistent with UI */}
-      <div className="space-y-3 mb-4">
-        {/* Search Bar */}
-        <div className="relative">
-          <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-3 h-3 text-flow-text-muted" />
-          <input
-            type="text"
-            placeholder="Search content..."
-            value={searchQuery}
-            onChange={(e) => setSearchQuery(e.target.value)}
-            className="w-full pl-9 pr-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary placeholder-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-          />
-        </div>
-
-        {/* Inline Filter Controls - Compact design */}
-        <div className="space-y-3">
-          {/* Type and Sort Row */}
-          <div className="grid grid-cols-2 gap-2">
-            <select
-              value={selectedType}
-              onChange={(e) => setSelectedType(e.target.value as 'all' | 'link' | 'file' | 'folder')}
-              className="px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-              title="Filter by content type"
-            >
-              <option value="all">All Types</option>
-              <option value="link">Links</option>
-              <option value="file">Files</option>
-              <option value="folder">Folders</option>
-            </select>
-
-            <select
-              value={sortBy}
-              onChange={(e) => setSortBy(e.target.value as SortOption)}
-              className="px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-              title="Sort content by"
-            >
-              <option value="name">Name</option>
-              <option value="lastUsed">Recent</option>
-              <option value="dateAdded">Added</option>
-              <option value="type">Type</option>
-              <option value="favorites">Favorites</option>
-            </select>
+      <div
+        className={`space-y-3 ${compact ? "mb-3 px-3 pt-3" : "mb-4"}`}
+      >
+        {!sidebarSearchControlled ? (
+          <div className="relative">
+            <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 transform text-flow-text-muted" />
+            <input
+              type="text"
+              placeholder="Search content..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className={
+                compact
+                  ? "flow-sidebar-search w-full py-2 pl-9 pr-3"
+                  : "w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary placeholder-flow-text-muted transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+              }
+            />
           </div>
+        ) : null}
 
-          {/* View and Favorites Row */}
-          <div className="flex items-center gap-2">
-            <select
-              value={viewMode}
-              onChange={(e) => setViewMode(e.target.value as ViewMode)}
-              className="flex-1 px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-              title="Change view mode"
-            >
-              <option value="normal">Normal</option>
-              <option value="detailed">Detailed</option>
-              <option value="simplified">Compact</option>
-            </select>
+        {!compact ? (
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-2">
+              <select
+                value={selectedType}
+                onChange={(e) =>
+                  setSelectedType(
+                    e.target.value as "all" | "link" | "file" | "folder",
+                  )
+                }
+                className="rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                title="Filter by content type"
+              >
+                <option value="all">All Types</option>
+                <option value="link">Links</option>
+                <option value="file">Files</option>
+                <option value="folder">Folders</option>
+              </select>
 
-            <button
-              onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-              className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded transition-colors ${
-                showFavoritesOnly 
-                  ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30' 
-                  : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
-              }`}
-              title={showFavoritesOnly ? "Show all content" : "Show favorites only"}
-            >
-              <Heart className={`w-3 h-3 ${showFavoritesOnly ? 'fill-current' : ''}`} />
-              <span className="whitespace-nowrap">{showFavoritesOnly ? 'Favs' : 'All'}</span>
-            </button>
+              <select
+                value={sortBy}
+                onChange={(e) => setSortBy(e.target.value as SortOption)}
+                className="rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                title="Sort content by"
+              >
+                <option value="name">Name</option>
+                <option value="lastUsed">Recent</option>
+                <option value="dateAdded">Added</option>
+                <option value="type">Type</option>
+                <option value="favorites">Favorites</option>
+              </select>
+            </div>
+
+            <div className="flex items-center gap-2">
+              <select
+                value={viewMode}
+                onChange={(e) => setViewMode(e.target.value as ViewMode)}
+                className="flex-1 rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                title="Change view mode"
+              >
+                <option value="normal">Normal</option>
+                <option value="detailed">Detailed</option>
+                <option value="simplified">Compact</option>
+              </select>
+
+              <button
+                type="button"
+                onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                className={`inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs transition-colors ${
+                  showFavoritesOnly
+                    ? "border border-flow-accent-blue/30 bg-flow-accent-blue/20 text-flow-accent-blue"
+                    : "border border-flow-border bg-flow-surface text-flow-text-secondary hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
+                }`}
+                title={
+                  showFavoritesOnly ? "Show all content" : "Show favorites only"
+                }
+              >
+                <Heart
+                  className={`h-3 w-3 ${showFavoritesOnly ? "fill-current" : ""}`}
+                />
+                <span className="whitespace-nowrap">
+                  {showFavoritesOnly ? "Favs" : "All"}
+                </span>
+              </button>
+            </div>
           </div>
-        </div>
+        ) : null}
       </div>
 
       {/* Breadcrumbs - Moved to appear under filters */}
       {breadcrumbs.length > 1 && selectedType === 'all' && (
-        <div className="flex items-center gap-1 mb-4 p-2 bg-flow-surface border border-flow-border rounded-lg">
+        <div
+          className={`flex items-center gap-1 border border-flow-border bg-flow-surface p-2 rounded-lg ${
+            compact ? "mx-3 mb-3" : "mb-4"
+          }`}
+        >
           <Home className="w-3 h-3 text-flow-text-muted" />
           {breadcrumbs.map((crumb, index) => (
             <div key={crumb.id || 'root'} className="flex items-center gap-1">
@@ -1395,7 +1465,11 @@ export function ContentManager({
 
 
       {/* Content List - Smart scrolling with elegant scrollbar, no horizontal scroll */}
-      <div className={`${viewMode === 'simplified' ? 'space-y-1' : 'space-y-2'} max-h-[60vh] overflow-y-auto overflow-x-hidden scrollbar-elegant`}>
+      <div
+        className={`${viewMode === "simplified" ? "space-y-1" : "space-y-2"} max-h-[60vh] overflow-x-hidden overflow-y-auto scrollbar-elegant ${
+          compact ? "min-h-0 flex-1 px-3 pb-3" : ""
+        }`}
+      >
         {displayFolders.length === 0 && displayContent.length === 0 ? (
           <div className="text-center py-8">
             <FileText className="w-8 h-8 text-flow-text-muted mx-auto mb-2" />
@@ -1407,7 +1481,7 @@ export function ContentManager({
                'No content found'}
             </p>
             <p className="text-xs text-flow-text-muted mt-1">
-              {searchQuery || showFavoritesOnly 
+              {effectiveSearchQuery || showFavoritesOnly 
                 ? 'Try adjusting your search or filters' 
                 : 'Start by adding some content'
               }

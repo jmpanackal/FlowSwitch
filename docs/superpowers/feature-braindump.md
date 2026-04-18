@@ -11,6 +11,10 @@ After review, move them to `Reviewed Raw Archive` and keep this section small.
 
 - check computer temps/task manager consumption or overall machine load and use it to adapt launch behavior or warn users when launch workload may over-tax CPU/memory.
 - support for ultra wide monitors along with presets for window layouts for ultrawides
+- Change what is pinned to the taskbar per profile
+- Option to restrict profiles at times or based on other criteria to prevent distractions or for kids
+- Standardize styling for reused features like dropdowns, settings modals, etc
+- What if the whole header section was a big launch button since that is the primary function users will be doing? Or just a very large launch button. Or if the launch button said Launch 'name of profie here' to make it even more obvious
 
 ## Reviewed Raw Archive (Reference Only)
 

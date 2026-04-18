@@ -1,5 +1,13 @@
 import { useState, useEffect, useMemo, useRef } from "react";
-import { Monitor, Grid3X3, Zap, ChevronDown, GripVertical } from "lucide-react";
+import {
+  Monitor,
+  Grid3X3,
+  Zap,
+  ChevronDown,
+  GripVertical,
+  PenLine,
+  Save,
+} from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MinimizedApps } from "./MinimizedApps";
 import { AppSettings } from "./AppSettings";
@@ -115,6 +123,10 @@ interface MonitorLayoutProps {
   selectedApp?: any;
   onAutoSnapApps?: (monitorId: string, appUpdates: { appIndex: number; position: { x: number; y: number }; size: { width: number; height: number } }[]) => void;
   onUpdateMonitorPositions?: (positions: Array<{ id: string; layoutPosition: { x: number; y: number } }>) => void;
+  /** When set, shows Edit layout / Done in the preview toolbar (layout editing, not profile prefs). */
+  onToggleLayoutEdit?: () => void;
+  /** Visually join the preview toolbar to the profile header above (shared column). */
+  layoutToolbarConnected?: boolean;
 }
 
 // Layout definitions - Horizontal Monitor Layouts
@@ -365,7 +377,9 @@ export function MonitorLayout({
   onFileSelect, // Legacy
   selectedApp,
   onAutoSnapApps,
-  onUpdateMonitorPositions
+  onUpdateMonitorPositions,
+  onToggleLayoutEdit,
+  layoutToolbarConnected = false,
 }: MonitorLayoutProps) {
   // Enhanced drag state with persistence
   const [localDragState, setLocalDragState] = useState<{
@@ -1319,29 +1333,84 @@ export function MonitorLayout({
 
   return (
     <div ref={layoutRootRef} className="h-full flex flex-col relative min-h-0">
-      {/* Header Section */}
-      <div className={`flex items-center justify-between ${densePreviewMode ? 'mb-2' : compactPreviewMode ? 'mb-3' : 'mb-4'} flex-shrink-0`}>
-        <div className="flex items-center gap-3">
-          <Monitor className={`${densePreviewMode ? 'w-4 h-4' : 'w-5 h-5'} text-white/70`} />
-          <h3 className={`text-white ${densePreviewMode ? 'text-base' : 'text-lg'}`}>Monitor Layout Preview</h3>
-          {isEditMode ? (
-            <div className="flex items-center gap-2">
-              <div className="flex items-center gap-2 px-3 py-1.5 bg-flow-accent-blue/20 border border-flow-accent-blue/30 rounded-lg backdrop-blur-sm">
-                <div className="w-2 h-2 bg-flow-accent-blue rounded-full animate-pulse" />
-                <span className="text-flow-accent-blue text-xs font-medium">Edit Mode</span>
-                {dragState?.isDragging && (
-                  <span className="text-flow-accent-blue text-xs font-medium">
-                    | Dragging: {dragState.dragData?.name || 'Item'}
-                  </span>
-                )}
-              </div>
-              <span className="text-xs text-white/50">Apps only - Files become content</span>
+      {/* Preview toolbar — layout editing lives here (not profile preferences) */}
+      <div
+        className={`flex-shrink-0 ${
+          layoutToolbarConnected
+            ? `-mx-4 bg-flow-bg-secondary/90 px-4 pb-3 pt-2.5 md:-mx-6 md:px-6 xl:-mx-8 xl:px-8 ${
+                densePreviewMode ? "mb-2" : compactPreviewMode ? "mb-3" : "mb-4"
+              }`
+            : `rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 ${
+                densePreviewMode ? "mb-2" : compactPreviewMode ? "mb-3" : "mb-4"
+              }`
+        }`}
+      >
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-wrap items-center gap-3">
+            <Monitor
+              className={`shrink-0 text-flow-accent-blue/90 ${densePreviewMode ? "h-4 w-4" : "h-5 w-5"}`}
+              strokeWidth={1.75}
+            />
+            <div className="flex min-w-0 flex-col gap-0.5">
+              <h3
+                className={`font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
+              >
+                Monitor layout
+              </h3>
+              <p className="text-[11px] text-flow-text-muted">
+                Drag apps on monitors · use Edit layout to change positions
+              </p>
             </div>
-          ) : (
-            <span className="text-xs text-white/50 bg-white/10 px-2 py-1 rounded-full">
-              View Mode
-            </span>
-          )}
+            {isEditMode ? (
+              <div className="flex flex-wrap items-center gap-2">
+                <div className="flex items-center gap-2 rounded-lg bg-flow-accent-blue/15 px-2.5 py-1">
+                  <div className="h-2 w-2 animate-pulse rounded-full bg-flow-accent-blue" />
+                  <span className="text-xs font-medium text-flow-accent-blue">
+                    Editing layout
+                  </span>
+                  {dragState?.isDragging && (
+                    <span className="text-xs font-medium text-flow-accent-blue/90">
+                      · {dragState.dragData?.name || "Item"}
+                    </span>
+                  )}
+                </div>
+                <span className="text-[11px] text-flow-text-muted">
+                  Apps only — files become content
+                </span>
+              </div>
+            ) : (
+              <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
+                View mode
+              </span>
+            )}
+          </div>
+          {onToggleLayoutEdit ? (
+            <button
+              type="button"
+              onClick={onToggleLayoutEdit}
+              title={
+                isEditMode
+                  ? "Save layout and exit edit mode"
+                  : "Edit monitor layout (drag apps between monitors)"
+              }
+              aria-label={
+                isEditMode
+                  ? "Save layout and exit edit mode"
+                  : "Edit monitor layout"
+              }
+              className={`inline-flex shrink-0 items-center justify-center rounded-lg p-2.5 transition-colors md:p-3 ${
+                isEditMode
+                  ? "bg-flow-accent-blue text-flow-text-primary shadow-sm hover:bg-flow-accent-blue-hover"
+                  : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
+              }`}
+            >
+              {isEditMode ? (
+                <Save className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
+              ) : (
+                <PenLine className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
+              )}
+            </button>
+          ) : null}
         </div>
       </div>
 

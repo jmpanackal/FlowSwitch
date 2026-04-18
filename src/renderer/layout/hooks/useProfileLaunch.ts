@@ -16,6 +16,11 @@ type UseProfileLaunchOptions = {
   setIsLaunching: Dispatch<SetStateAction<boolean>>;
   setLaunchFeedback: Dispatch<SetStateAction<LaunchFeedbackState>>;
   launchFeedbackTimeoutRef: MutableRefObject<number | null>;
+  /** Called when a launch finishes successfully, with wall-clock seconds for this run. */
+  onLaunchCompletedDuration?: (
+    profileId: string,
+    durationSeconds: number,
+  ) => void;
 };
 
 export function useProfileLaunch({
@@ -24,10 +29,26 @@ export function useProfileLaunch({
   setIsLaunching,
   setLaunchFeedback,
   launchFeedbackTimeoutRef,
+  onLaunchCompletedDuration,
 }: UseProfileLaunchOptions) {
   const launchStatusPollRef = useRef<number | null>(null);
   const launchStatusPollTokenRef = useRef(0);
   const activeLaunchRunRef = useRef<{ profileId: string; runId: string } | null>(null);
+  const launchWallClockStartMsRef = useRef<number | null>(null);
+
+  const emitLaunchDurationIfSuccess = useCallback(
+    (profileId: string) => {
+      const start = launchWallClockStartMsRef.current;
+      launchWallClockStartMsRef.current = null;
+      if (start == null || !onLaunchCompletedDuration) return;
+      const seconds = Math.max(
+        1,
+        Math.round((Date.now() - start) / 1000),
+      );
+      onLaunchCompletedDuration(profileId, seconds);
+    },
+    [onLaunchCompletedDuration],
+  );
 
   const stopLaunchStatusPolling = useCallback(() => {
     launchStatusPollTokenRef.current += 1;
@@ -69,6 +90,7 @@ export function useProfileLaunch({
         launchFeedbackTimeoutRef.current = null;
       }
 
+      launchWallClockStartMsRef.current = Date.now();
       setIsLaunching(true);
       setLaunchFeedback({
         status: "in-progress",
@@ -98,6 +120,7 @@ export function useProfileLaunch({
             serializableProfiles,
           );
           if (!saveResult?.ok) {
+            launchWallClockStartMsRef.current = null;
             setLaunchFeedback({
               status: "error",
               message: "Could not save profile changes before launch.",
@@ -120,6 +143,7 @@ export function useProfileLaunch({
         );
 
         if (!launchResult?.ok) {
+          launchWallClockStartMsRef.current = null;
           activeLaunchRunRef.current = null;
           const errorMessage = launchResult?.error
             || "Could not launch this profile. Check app executable paths in app details.";
@@ -136,6 +160,7 @@ export function useProfileLaunch({
 
         const launchRunId = String(launchResult?.runId || "").trim();
         if (!launchResult?.started || !launchRunId) {
+          launchWallClockStartMsRef.current = null;
           activeLaunchRunRef.current = null;
           setLaunchFeedback({
             status: "error",
@@ -176,6 +201,7 @@ export function useProfileLaunch({
 
             if (st === "cancelled") {
               stopLaunchStatusPolling();
+              launchWallClockStartMsRef.current = null;
               activeLaunchRunRef.current = null;
               setIsLaunching(false);
               setLaunchFeedback({
@@ -188,6 +214,7 @@ export function useProfileLaunch({
 
             if (st === "failed") {
               stopLaunchStatusPolling();
+              launchWallClockStartMsRef.current = null;
               activeLaunchRunRef.current = null;
               setIsLaunching(false);
               setLaunchFeedback({
@@ -202,6 +229,7 @@ export function useProfileLaunch({
               stopLaunchStatusPolling();
               activeLaunchRunRef.current = null;
               setIsLaunching(false);
+              emitLaunchDurationIfSuccess(launchProfileId);
               setLaunchFeedback({
                 status: "success",
                 message: `Launch complete: ${summaryText}.`,
@@ -234,6 +262,7 @@ export function useProfileLaunch({
               stopLaunchStatusPolling();
               activeLaunchRunRef.current = null;
               setIsLaunching(false);
+              emitLaunchDurationIfSuccess(launchProfileId);
               setLaunchFeedback({
                 status: "success",
                 message: `Launch complete: ${summaryText}.`,
@@ -242,15 +271,17 @@ export function useProfileLaunch({
               return;
             }
 
-            setLaunchFeedback({
-              status: "in-progress",
-              message: "Launching profile...",
-            });
+            // Main-process steady state while apps launch; LaunchControl shows progress — no redundant feedback updates.
+            if (st === "in-progress") {
+              return;
+            }
+
           } catch {
             // Keep UI resilient; next poll tick can recover.
           }
         }, 1300);
       } catch (error) {
+        launchWallClockStartMsRef.current = null;
         activeLaunchRunRef.current = null;
         console.error("Failed to launch profile:", error);
         const errorMessage =
@@ -287,6 +318,7 @@ export function useProfileLaunch({
     launchFeedbackTimeoutRef,
     stopLaunchStatusPolling,
     isCurrentLaunchContext,
+    emitLaunchDurationIfSuccess,
   ]);
 
   return {
