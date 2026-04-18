@@ -9,7 +9,7 @@
     "typecheck": "node scripts/typecheck-baseline.mjs check",
     "typecheck:full": "tsc --noEmit",
     "typecheck:baseline:update": "node scripts/typecheck-baseline.mjs update",
-    "test": "node --test src/main/utils/",
+    "test": "node --test src/main/utils/ src/main/services/",
     "dev:frontend": "vite",
     "dev:electron": "electron .",
     "dev": "npm-run-all -p dev:frontend dev:electron",

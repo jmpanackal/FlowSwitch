@@ -6,8 +6,12 @@ export {};
 declare global {
   interface Window {
     electron: {
-      launchProfile: (profileId: string) => Promise<{
+      launchProfile: (
+        profileId: string,
+        options?: { fireAndForget?: boolean },
+      ) => Promise<{
         ok: boolean;
+        started?: boolean;
         error?: string;
         runId?: string;
         replacedRunId?: string | null;
@@ -17,6 +21,8 @@ declare global {
         launchedAppCount?: number;
         launchedTabCount?: number;
         requestedAppCount?: number;
+        cancelled?: boolean;
+        superseded?: boolean;
         failedApps?: Array<{
           name: string;
           path: string;
@@ -39,13 +45,17 @@ declare global {
         pendingConfirmationCount?: number;
         unresolvedPendingConfirmationCount?: number;
       }>;
+      cancelProfileLaunch?: (
+        profileId: string,
+        runId: string,
+      ) => Promise<{ ok: boolean; error?: string; reason?: string }>;
       getLaunchProfileStatus: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;
         status?: {
           profileId: string;
           runId: string;
-          state: "idle" | "in-progress" | "awaiting-confirmations" | "complete" | "failed" | string;
+          state: "idle" | "in-progress" | "awaiting-confirmations" | "complete" | "failed" | "cancelled" | string;
           launchedAppCount: number;
           launchedTabCount: number;
           failedAppCount: number;

@@ -80,3 +80,28 @@ test('sealRun prevents late async status writes from same run', () => {
   assert.equal(status?.state, 'complete');
   assert.equal(status?.runId, run.runId);
 });
+
+test('cancelRun marks cancelled state and clears active run', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  store.publishStatus('profile-1', run.runId, {
+    state: 'in-progress',
+    launchedAppCount: 0,
+    pendingConfirmations: [],
+  });
+  const cancel = store.cancelRun('profile-1', run.runId);
+  assert.equal(cancel.ok, true);
+  assert.equal(store.isActiveRun('profile-1', run.runId), false);
+  const status = store.getStatus('profile-1');
+  assert.equal(status?.state, 'cancelled');
+  assert.equal(status?.runId, run.runId);
+});
+
+test('cancelRun rejects non-active run id', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const first = store.startRun('profile-1');
+  const second = store.startRun('profile-1');
+  const cancel = store.cancelRun('profile-1', first.runId);
+  assert.equal(cancel.ok, false);
+  assert.equal(store.isActiveRun('profile-1', second.runId), true);
+});

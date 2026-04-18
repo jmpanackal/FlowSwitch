@@ -124,12 +124,30 @@ const createLaunchStatusStore = (options = {}) => {
     return true;
   };
 
+  const cancelRun = (profileId, runId) => {
+    const safeProfileId = String(profileId || '').trim();
+    const safeRunId = String(runId || '').trim();
+    if (!safeProfileId || !safeRunId) return { ok: false, reason: 'invalid-arguments' };
+    if (!isActiveRun(safeProfileId, safeRunId)) return { ok: false, reason: 'not-active' };
+    activeRunByProfileId.delete(safeProfileId);
+    const currentStatus = statusByProfileId.get(safeProfileId);
+    if (currentStatus && currentStatus.runId === safeRunId) {
+      statusByProfileId.set(safeProfileId, {
+        ...currentStatus,
+        state: 'cancelled',
+        updatedAt: now(),
+      });
+    }
+    return { ok: true };
+  };
+
   return {
     startRun,
     isActiveRun,
     publishStatus,
     getStatus,
     sealRun,
+    cancelRun,
   };
 };
 
