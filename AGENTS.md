@@ -12,6 +12,13 @@ This file is the repository-level source of truth for git workflow and change cl
 - Tests: `npm run test`
 - Production build: `npm run build`
 
+## Latest Launch Diagnostics Log
+
+- Path: `%APPDATA%/FlowSwitch/logs/launch-latest.jsonl`
+- Behavior: overwritten at the start of every `launchProfileById` run, then appended with that run's launch diagnostics events.
+- Purpose: always provides a single latest-run artifact for debugging when terminal scrollback is incomplete.
+- Optional override: set `FLOWSWITCH_LAUNCH_LOG_FILE` to a custom path if needed.
+
 ## Required Git Behavior
 
 - Keep each commit to one logical change.
