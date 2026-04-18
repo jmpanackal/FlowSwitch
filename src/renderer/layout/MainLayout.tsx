@@ -42,6 +42,13 @@ import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "./utils/documentTextSelection";
+import {
+  computeDropZonesForAppCount,
+  getAppColor,
+  getAppIcon,
+  getBrowserColor,
+  getBrowserIcon,
+} from "./utils/layoutDropPresentation";
 
 interface SelectedApp {
   type: "app" | "browser";
@@ -892,45 +899,7 @@ export default function App() {
           (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId));
       const prospectiveAppCount = (targetMonitor?.apps?.length || 0) + (isIncomingApp ? 1 : 0);
 
-      const getDropZones = (count: number) => {
-        if (isPortrait) {
-          if (count <= 1) return [{ position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }];
-          if (count === 2) return [
-            { position: { x: 50, y: 25 }, size: { width: 100, height: 50 } },
-            { position: { x: 50, y: 75 }, size: { width: 100, height: 50 } },
-          ];
-          if (count === 3) return [
-            { position: { x: 50, y: 16.67 }, size: { width: 100, height: 33.33 } },
-            { position: { x: 50, y: 50 }, size: { width: 100, height: 33.33 } },
-            { position: { x: 50, y: 83.33 }, size: { width: 100, height: 33.33 } },
-          ];
-          return [
-            { position: { x: 50, y: 12.5 }, size: { width: 100, height: 25 } },
-            { position: { x: 50, y: 37.5 }, size: { width: 100, height: 25 } },
-            { position: { x: 50, y: 62.5 }, size: { width: 100, height: 25 } },
-            { position: { x: 50, y: 87.5 }, size: { width: 100, height: 25 } },
-          ];
-        }
-
-        if (count <= 1) return [{ position: { x: 50, y: 50 }, size: { width: 100, height: 100 } }];
-        if (count === 2) return [
-          { position: { x: 25, y: 50 }, size: { width: 50, height: 100 } },
-          { position: { x: 75, y: 50 }, size: { width: 50, height: 100 } },
-        ];
-        if (count === 3) return [
-          { position: { x: 16.67, y: 50 }, size: { width: 33.33, height: 100 } },
-          { position: { x: 50, y: 50 }, size: { width: 33.33, height: 100 } },
-          { position: { x: 83.33, y: 50 }, size: { width: 33.33, height: 100 } },
-        ];
-        return [
-          { position: { x: 25, y: 25 }, size: { width: 50, height: 50 } },
-          { position: { x: 75, y: 25 }, size: { width: 50, height: 50 } },
-          { position: { x: 25, y: 75 }, size: { width: 50, height: 50 } },
-          { position: { x: 75, y: 75 }, size: { width: 50, height: 50 } },
-        ];
-      };
-
-      const zones = getDropZones(prospectiveAppCount);
+      const zones = computeDropZonesForAppCount(isPortrait, prospectiveAppCount);
       let activeZone = zones[0];
       let bestDistance = Number.POSITIVE_INFINITY;
       for (const zone of zones) {
@@ -1204,49 +1173,6 @@ export default function App() {
     },
     [currentProfile],
   );
-
-  // Helper functions for app icons and colors
-  const getBrowserIcon = (browserName: string) => {
-    // Return appropriate icon component based on browser name
-    return require("lucide-react").Globe; // Fallback
-  };
-
-  const getBrowserColor = (browserName: string) => {
-    const colorMap = {
-      Chrome: "#4285F4",
-      Firefox: "#FF7139",
-      Safari: "#006CFF",
-      Edge: "#0078D4",
-    };
-    return (
-      colorMap[browserName as keyof typeof colorMap] ||
-      "#4285F4"
-    );
-  };
-
-  const getAppIcon = (appName: string) => {
-    // Return appropriate icon component based on app name
-    return require("lucide-react").Monitor; // Fallback
-  };
-
-  const getAppColor = (appName: string) => {
-    const colorMap = {
-      "Adobe Acrobat": "#DC143C",
-      "Microsoft Word": "#2B579A",
-      "Microsoft Excel": "#217346",
-      "Microsoft PowerPoint": "#D24726",
-      "Visual Studio Code": "#007ACC",
-      Notepad: "#0078D4",
-      "File Explorer": "#FFB900",
-      "VLC Media Player": "#FF8800",
-      "Windows Media Player": "#0078D4",
-      WinRAR: "#FF6B35",
-      "7-Zip": "#0078D4",
-    };
-    return (
-      colorMap[appName as keyof typeof colorMap] || "#4285F4"
-    );
-  };
 
   const handleDragStart = () => {
     if (!isEditMode) {
