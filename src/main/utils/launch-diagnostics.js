@@ -63,6 +63,7 @@ const summarizeWindowRow = (row) => {
     handle: toStringOrNull(row.handle),
     className: toStringOrNull(row.className),
     enabled: Boolean(row.enabled),
+    isMinimized: Boolean(row.isMinimized),
     hung: Boolean(row.hung),
     cloaked: Boolean(row.cloaked),
     tool: Boolean(row.tool),

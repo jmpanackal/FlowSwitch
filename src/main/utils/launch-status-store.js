@@ -10,6 +10,8 @@ const clonePendingConfirmations = (pendingConfirmations) => (
     name: String(item?.name || ''),
     path: String(item?.path || ''),
     reason: String(item?.reason || ''),
+    mode: item?.mode ? String(item.mode) : undefined,
+    reasonCode: item?.reasonCode ? String(item.reasonCode) : undefined,
     processHintLc: item?.processHintLc ? String(item.processHintLc) : undefined,
     blockerHandle: item?.blockerHandle ? String(item.blockerHandle) : null,
     status: normalizePendingStatus(item?.status),
