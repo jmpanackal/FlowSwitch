@@ -31,7 +31,7 @@ import {
   Check,
   AlertTriangle,
 } from "lucide-react";
-import { DragState, DragSourceType } from "./types/dragTypes";
+import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
 import type { FlowProfile } from "../../types/flow-profile";
 import { useProfilesPersistence } from "./hooks/useProfilesPersistence";
@@ -39,17 +39,13 @@ import { useLaunchFeedback } from "./hooks/useLaunchFeedback";
 import { useProfileLaunch } from "./hooks/useProfileLaunch";
 import { useNativeAppDragBridge } from "./hooks/useNativeAppDragBridge";
 import {
+  useLayoutCustomDrag,
+  type ProfileLayoutDragActions,
+} from "./hooks/useLayoutCustomDrag";
+import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "./utils/documentTextSelection";
-import {
-  computeDropZonesForAppCount,
-  getAppColor,
-  getAppIcon,
-  getBrowserColor,
-  getBrowserIcon,
-} from "./utils/layoutDropPresentation";
-
 interface SelectedApp {
   type: "app" | "browser";
   source: "monitor" | "minimized";
@@ -83,6 +79,7 @@ export default function App() {
     launchFeedbackTimeoutRef,
   });
   const [isEditMode, setIsEditMode] = useState(false);
+  const isEditModeRef = useRef(false);
   const [
     selectedProfileForSettings,
     setSelectedProfileForSettings,
@@ -130,6 +127,20 @@ export default function App() {
   const profileForSettings = profiles.find(
     (p) => p.id === selectedProfileForSettings,
   ) || null;
+
+  const currentProfileRef = useRef<FlowProfile | null>(null);
+  currentProfileRef.current = currentProfile;
+  isEditModeRef.current = isEditMode;
+  const profileDragActionsRef = useRef<ProfileLayoutDragActions | null>(null);
+
+  const { handleCustomDragStart } = useLayoutCustomDrag({
+    dragStateRef,
+    setDragState,
+    setIsEditMode,
+    isEditModeRef,
+    currentProfileRef,
+    profileDragActionsRef,
+  });
 
   // FIXED: Document click listener for dropdown
   useEffect(() => {
@@ -607,571 +618,6 @@ export default function App() {
       setShowProfileDropdown(!showProfileDropdown);
     },
     [isEditMode, showProfileDropdown],
-  );
-
-  // CUSTOM DRAG SYSTEM HANDLERS
-  const handleCustomDragStart = useCallback(
-    (
-      data: any,
-      sourceType: DragSourceType,
-      sourceId: string,
-      startPos: { x: number; y: number },
-      preview?: React.ReactNode,
-    ) => {
-      console.log("🎯 CUSTOM DRAG START:", {
-        data,
-        sourceType,
-        sourceId,
-        startPos,
-      });
-
-      if (!isEditMode) {
-        setIsEditMode(true);
-      }
-
-      setDragState({
-        isDragging: true,
-        dragData: data,
-        startPosition: startPos,
-        currentPosition: startPos,
-        sourceType,
-        sourceId,
-        dragPreview: preview || null,
-      });
-
-      // Add global mouse event listeners
-      document.addEventListener(
-        "mousemove",
-        handleGlobalMouseMove,
-      );
-      document.addEventListener("mouseup", handleGlobalMouseUp);
-      suspendDocumentTextSelection();
-      document.body.style.cursor = "grabbing";
-    },
-    [isEditMode],
-  );
-
-  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
-    if (!dragStateRef.current.isDragging) return;
-
-    setDragState((prev) => ({
-      ...prev,
-      currentPosition: { x: e.clientX, y: e.clientY },
-    }));
-  }, []);
-
-  const handleGlobalMouseUp = useCallback(
-    (e: MouseEvent) => {
-      if (!dragStateRef.current.isDragging) return;
-
-      console.log("🎯 CUSTOM DRAG END:", {
-        x: e.clientX,
-        y: e.clientY,
-      });
-
-      // Check what element we're dropping on
-      const elementBelow = document.elementFromPoint(
-        e.clientX,
-        e.clientY,
-      );
-      const dropTarget = elementBelow?.closest(
-        "[data-drop-target]",
-      );
-
-      if (
-        dropTarget &&
-        dragStateRef.current.dragData &&
-        currentProfile
-      ) {
-        const targetType = dropTarget.getAttribute(
-          "data-drop-target",
-        );
-        const targetId =
-          dropTarget.getAttribute("data-target-id");
-
-        console.log("🎯 DROP TARGET FOUND:", {
-          targetType,
-          targetId,
-          dragData: dragStateRef.current.dragData,
-        });
-
-        handleCustomDrop(
-          dragStateRef.current.dragData,
-          targetType,
-          targetId,
-          { x: e.clientX, y: e.clientY },
-        );
-      }
-
-      // Clean up drag state
-      setDragState({
-        isDragging: false,
-        dragData: null,
-        startPosition: { x: 0, y: 0 },
-        currentPosition: { x: 0, y: 0 },
-        sourceType: null,
-        sourceId: null,
-        dragPreview: null,
-      });
-
-      document.removeEventListener(
-        "mousemove",
-        handleGlobalMouseMove,
-      );
-      document.removeEventListener(
-        "mouseup",
-        handleGlobalMouseUp,
-      );
-      restoreDocumentTextSelection();
-      document.body.style.cursor = "";
-    },
-    [currentProfile],
-  );
-
-  const handleCustomDrop = useCallback(
-    (
-      dragData: any,
-      targetType: string | null,
-      targetId: string | null,
-      dropPosition: { x: number; y: number },
-    ) => {
-      if (!currentProfile || !dragData || !targetType) {
-        console.log("❌ DROP FAILED: Missing data", {
-          currentProfile: !!currentProfile,
-          dragData,
-          targetType,
-        });
-        return;
-      }
-
-      console.log("🎯 PROCESSING DROP:", {
-        dragData,
-        targetType,
-        targetId,
-        dropPosition,
-      });
-
-      if (targetType === "monitor" && targetId) {
-        handleDropOnMonitor(dragData, targetId, dropPosition);
-      } else if (targetType === "minimized") {
-        handleDropOnMinimized(dragData);
-      }
-    },
-    [currentProfile],
-  );
-
-  const handleDropOnMonitor = useCallback(
-    (
-      dragData: any,
-      targetMonitorId: string,
-      dropPosition: { x: number; y: number },
-    ) => {
-      if (!currentProfile) return;
-
-      // Check if we're dropping onto an existing app tile
-      const elementBelow = document.elementFromPoint(
-        dropPosition.x,
-        dropPosition.y,
-      );
-      const appTile = elementBelow?.closest(
-        '[data-unified-window="true"][data-item-type="app"]',
-      );
-
-      if (
-        appTile &&
-        (dragData.type === "file" ||
-          dragData.type === "content") &&
-        dragData.source === "sidebar"
-      ) {
-        // Handle content association with existing app
-        const appMonitorId = appTile.getAttribute(
-          "data-monitor-id",
-        );
-        const appIndex = parseInt(
-          appTile.getAttribute("data-item-index") || "0",
-        );
-
-        if (appMonitorId === targetMonitorId) {
-          console.log(
-            "🎯 ASSOCIATING CONTENT WITH EXISTING APP:",
-            {
-              content: dragData.name,
-              monitorId: appMonitorId,
-              appIndex,
-            },
-          );
-
-          // FIXED: Check if this is a link being dropped on a browser app
-          const monitor = currentProfile.monitors.find(m => m.id === appMonitorId);
-          const targetApp = monitor?.apps[appIndex];
-          
-          const isLink = dragData.contentType === "link" || (dragData.type === "content" && dragData.url);
-          const isBrowserApp = targetApp && (
-            targetApp.name?.toLowerCase().includes("chrome") ||
-            targetApp.name?.toLowerCase().includes("browser") ||
-            targetApp.name?.toLowerCase().includes("firefox") ||
-            targetApp.name?.toLowerCase().includes("safari") ||
-            targetApp.name?.toLowerCase().includes("edge")
-          );
-
-          if (isLink && isBrowserApp) {
-            // Add as browser tab instead of associated file
-            console.log("🌐 ADDING LINK AS BROWSER TAB TO EXISTING BROWSER:", {
-              linkName: dragData.name,
-              linkUrl: dragData.url,
-              browserApp: targetApp.name,
-              instanceId: targetApp.instanceId
-            });
-
-            const newTab = {
-              id: `content-tab-${Date.now()}`,
-              name: dragData.name,
-              url: dragData.url,
-              browser: targetApp.name,
-              newWindow: false,
-              monitorId: appMonitorId,
-              isActive: true,
-              appInstanceId: targetApp.instanceId, // Associate with specific app instance
-            };
-
-            addBrowserTab(currentProfile.id, newTab);
-          } else if (dragData.type === "content") {
-            // Associate content with existing app as file
-            const contentData = {
-              id: `content-${Date.now()}`,
-              name: dragData.name,
-              url: dragData.url,
-              path: dragData.path,
-              type: dragData.fileType || dragData.contentType,
-              associatedApp: dragData.defaultApp,
-              useDefaultApp: dragData.useDefaultApp || false,
-            };
-
-            associateFileWithApp(
-              currentProfile.id,
-              appMonitorId,
-              appIndex,
-              contentData,
-            );
-          } else {
-            // Legacy file association
-            associateFileWithApp(
-              currentProfile.id,
-              appMonitorId,
-              appIndex,
-              {
-                id: `file-${Date.now()}`,
-                name: dragData.name,
-                path: dragData.path,
-                type: dragData.fileType,
-                associatedApp: dragData.associatedApp,
-                useDefaultApp: dragData.useDefaultApp || false,
-              },
-            );
-          }
-          return;
-        }
-      }
-
-      // Calculate relative position on the monitor for normal drops
-      const monitorElement = document.querySelector(
-        `[data-monitor-id="${targetMonitorId}"]`,
-      );
-      if (!monitorElement) return;
-
-      const rect = monitorElement.getBoundingClientRect();
-      const relativeX =
-        ((dropPosition.x - rect.left) / rect.width) * 100;
-      const relativeY =
-        ((dropPosition.y - rect.top) / rect.height) * 100;
-      const rawPosition = {
-        x: Math.max(0, Math.min(100, relativeX)),
-        y: Math.max(0, Math.min(100, relativeY)),
-      };
-
-      const targetMonitor = currentProfile.monitors?.find((m: any) => m.id === targetMonitorId);
-      const isPortrait = targetMonitor?.orientation === "portrait";
-      const sourceMonitorId = dragData.sourceMonitorId || dragData.monitorId || null;
-      const isIncomingApp =
-        dragData.type === "app" &&
-        (dragData.source === "sidebar" ||
-          dragData.source === "minimized" ||
-          (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId));
-      const prospectiveAppCount = (targetMonitor?.apps?.length || 0) + (isIncomingApp ? 1 : 0);
-
-      const zones = computeDropZonesForAppCount(isPortrait, prospectiveAppCount);
-      let activeZone = zones[0];
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const zone of zones) {
-        const distance = Math.sqrt(
-          Math.pow(rawPosition.x - zone.position.x, 2) +
-          Math.pow(rawPosition.y - zone.position.y, 2),
-        );
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          activeZone = zone;
-        }
-      }
-
-      const position = {
-        x: activeZone.position.x,
-        y: activeZone.position.y,
-      };
-      const snappedSize = {
-        width: activeZone.size.width,
-        height: activeZone.size.height,
-      };
-
-      console.log("🎯 DROP ON MONITOR:", {
-        targetMonitorId,
-        position,
-        dragData,
-      });
-
-      if (dragData.source === "sidebar") {
-        // FIXED: All sidebar content (files, links, etc.) creates app instances
-        if (
-          dragData.type === "content" ||
-          dragData.type === "file"
-        ) {
-          console.log(
-            "🚀 CREATING NEW APP INSTANCE FOR CONTENT/FILE:",
-            dragData,
-          );
-
-          if (
-            dragData.contentType === "link" ||
-            (dragData.type === "content" && dragData.url)
-          ) {
-            // Create browser app instance with link as tab
-            const newApp: any = {
-              name: dragData.defaultApp,
-              icon: getBrowserIcon(dragData.defaultApp),
-              color: getBrowserColor(dragData.defaultApp),
-              position,
-              size: { width: 60, height: 60 },
-              volume: 50,
-              launchBehavior: "new" as const,
-              runAsAdmin: false,
-              forceCloseOnExit: false,
-              smartSave: false,
-              monitorId: targetMonitorId,
-              associatedFiles: [],
-            };
-
-            // Add app to monitor
-            addApp(currentProfile.id, targetMonitorId, newApp);
-
-            // Add browser tab with instance association
-            const newTab = {
-              name: dragData.name,
-              url: dragData.url,
-              browser: dragData.defaultApp,
-              newWindow: false,
-              monitorId: targetMonitorId,
-              isActive: true,
-              appInstanceId: newApp.instanceId, // NEW: Associate with specific app instance
-              id: `content-tab-${Date.now()}`,
-            };
-
-            addBrowserTab(currentProfile.id, newTab);
-          } else {
-            // Create app instance with file content
-            const newApp: any = {
-              name:
-                dragData.defaultApp ||
-                dragData.associatedApp ||
-                "File Viewer",
-              icon: getAppIcon(
-                dragData.defaultApp ||
-                  dragData.associatedApp ||
-                  "File Viewer",
-              ),
-              color: getAppColor(
-                dragData.defaultApp ||
-                  dragData.associatedApp ||
-                  "File Viewer",
-              ),
-              position,
-              size: { width: 60, height: 60 },
-              volume: 50,
-              launchBehavior: "new" as const,
-              runAsAdmin: false,
-              forceCloseOnExit: false,
-              smartSave: false,
-              monitorId: targetMonitorId,
-              associatedFiles: [
-                {
-                  id: `content-file-${Date.now()}`,
-                  name: dragData.name,
-                  path: dragData.path,
-                  type: dragData.fileType || dragData.type,
-                  associatedApp:
-                    dragData.defaultApp ||
-                    dragData.associatedApp ||
-                    "File Viewer",
-                  useDefaultApp: true,
-                },
-              ],
-            };
-
-            addApp(currentProfile.id, targetMonitorId, newApp);
-          }
-        } else {
-          // Add new app to monitor
-          const newApp: any = {
-            name: dragData.name,
-            icon: dragData.icon,
-            iconPath: dragData.iconPath ?? null,
-            executablePath: dragData.executablePath ?? null,
-            shortcutPath: dragData.shortcutPath ?? null,
-            launchUrl: dragData.launchUrl ?? null,
-            color: dragData.color,
-            position,
-            size: snappedSize,
-            volume: 50,
-            launchBehavior: "new" as const,
-            runAsAdmin: false,
-            forceCloseOnExit: false,
-            smartSave: false,
-            monitorId: targetMonitorId,
-            associatedFiles: [], // Initialize empty file list
-          };
-
-          addApp(currentProfile.id, targetMonitorId, newApp);
-        }
-      } else if (
-        dragData.source === "monitor" &&
-        dragData.sourceMonitorId !== targetMonitorId
-      ) {
-        // Move app between monitors (only apps, no files)
-        moveAppBetweenMonitors(
-          currentProfile.id,
-          dragData.sourceMonitorId,
-          dragData.appIndex,
-          targetMonitorId,
-          position,
-          snappedSize,
-        );
-      } else if (dragData.source === "minimized") {
-        // Move app from minimized to monitor (only apps, no files)
-        moveMinimizedAppToMonitor(
-          currentProfile.id,
-          dragData.appIndex,
-          targetMonitorId,
-          position,
-          snappedSize,
-        );
-      }
-    },
-    [currentProfile],
-  );
-
-  const handleDropOnMinimized = useCallback(
-    (dragData: any) => {
-      if (!currentProfile) return;
-
-      console.log("🎯 DROP ON MINIMIZED:", dragData);
-
-      if (dragData.source === "monitor") {
-        // Move app from monitor to minimized (only apps, no files)
-        moveAppToMinimized(
-          currentProfile.id,
-          dragData.sourceMonitorId,
-          dragData.appIndex,
-        );
-      } else if (dragData.source === "sidebar") {
-        // FIXED: All sidebar content creates minimized app instances
-        if (
-          dragData.type === "content" ||
-          dragData.type === "file"
-        ) {
-          console.log(
-            "🚀 CREATING MINIMIZED APP INSTANCE FOR CONTENT/FILE:",
-            dragData,
-          );
-
-          const newApp: any = {
-            name:
-              dragData.defaultApp ||
-              dragData.associatedApp ||
-              "File Viewer",
-            icon: getAppIcon(
-              dragData.defaultApp ||
-                dragData.associatedApp ||
-                "File Viewer",
-            ),
-            color: getAppColor(
-              dragData.defaultApp ||
-                dragData.associatedApp ||
-                "File Viewer",
-            ),
-            volume: 50,
-            launchBehavior: "minimize" as const,
-            targetMonitor:
-              currentProfile.monitors.find((m) => m.primary)
-                ?.id || "monitor-1",
-            associatedFiles:
-              dragData.contentType === "file" ||
-              dragData.type === "file"
-                ? [
-                    {
-                      id: `content-file-${Date.now()}`,
-                      name: dragData.name,
-                      path: dragData.path,
-                      type: dragData.fileType || dragData.type,
-                      associatedApp:
-                        dragData.defaultApp ||
-                        dragData.associatedApp ||
-                        "File Viewer",
-                      useDefaultApp: true,
-                    },
-                  ]
-                : [],
-          };
-
-          addAppToMinimized(currentProfile.id, newApp);
-
-          // If it's a link, also add browser tab with instance association
-          if (
-            dragData.contentType === "link" ||
-            (dragData.type === "content" && dragData.url)
-          ) {
-            const newTab = {
-              name: dragData.name,
-              url: dragData.url,
-              browser: dragData.defaultApp,
-              newWindow: false,
-              monitorId: newApp.targetMonitor,
-              isActive: true,
-              appInstanceId: newApp.instanceId, // NEW: Associate with specific app instance
-              id: `content-tab-${Date.now()}`,
-            };
-
-            addBrowserTab(currentProfile.id, newTab);
-          }
-        } else {
-          // Add new app to minimized
-          const newApp: any = {
-            name: dragData.name,
-            icon: dragData.icon,
-            iconPath: dragData.iconPath ?? null,
-            executablePath: dragData.executablePath ?? null,
-            shortcutPath: dragData.shortcutPath ?? null,
-            launchUrl: dragData.launchUrl ?? null,
-            color: dragData.color,
-            volume: 50,
-            launchBehavior: "minimize" as const,
-            targetMonitor:
-              currentProfile.monitors.find((m) => m.primary)
-                ?.id || "monitor-1",
-          };
-
-          addAppToMinimized(currentProfile.id, newApp);
-        }
-      }
-    },
-    [currentProfile],
   );
 
   const handleDragStart = () => {
@@ -2080,6 +1526,16 @@ export default function App() {
         }
       }
     }
+  };
+
+  profileDragActionsRef.current = {
+    associateFileWithApp,
+    addApp,
+    addAppToMinimized,
+    moveAppToMinimized,
+    moveAppBetweenMonitors,
+    moveMinimizedAppToMonitor,
+    addBrowserTab,
   };
 
   const handleAutoSnapApps = useCallback(
