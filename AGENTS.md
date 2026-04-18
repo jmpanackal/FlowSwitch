@@ -27,6 +27,17 @@ This file is the repository-level source of truth for git workflow and change cl
 - Do not commit debug leftovers (`console.log`, commented-out code, unused imports).
 - Run lint and typecheck before committing.
 
+## Agent handoff before commit (human review first)
+
+Automated agents should **not** create a git commit unless the user **explicitly** asked to commit in that same request (for example: “commit this”, “ship it”, “merge when ready”).
+
+When finishing work (whether or not a commit is made), provide:
+
+1. **Plain-language summary** — a short bullet list (about three to six bullets) of what changed and why, written for a human skimming the message.
+2. **Manual test checklist** — concrete steps to verify the change in the app (or one line such as “Smoke only: open app and confirm no obvious regressions” when that is enough).
+
+The human uses that summary to review, then commits, requests edits, or discards. Commits made by an agent should still follow one logical change per commit, conventional prefixes, and lint plus typecheck before commit.
+
 ## Branch Strategy
 
 - `main` = stable

@@ -3,8 +3,11 @@ import {
   useRef,
   useCallback,
   useEffect,
+  useMemo,
 } from "react";
 import { LaunchControl } from "./components/LaunchControl";
+import { TitleBarAppMenu } from "./components/TitleBarAppMenu";
+import { AppChromeModals } from "./components/AppChromeModals";
 import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
 import { ProfileCard } from "./components/ProfileCard";
 import { MonitorLayout } from "./components/MonitorLayout";
@@ -18,22 +21,19 @@ import {
   Plus,
   Settings,
   Edit,
-  Save,
+  PenLine,
   Clock,
   Zap,
-  Upload,
-  Download,
   LayoutGrid,
   Link,
+  Users,
+  Search,
   ArrowRight,
   ChevronRight,
   ChevronLeft,
   X,
   Check,
   AlertTriangle,
-  Layers,
-  Folder,
-  Globe,
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
@@ -54,7 +54,7 @@ import {
   useMainLayoutProfileMutations,
   type MainLayoutSelectedApp,
 } from "./hooks/useMainLayoutProfileMutations";
-import { ProfileIconGlyph } from "./utils/profileHeaderPresentation";
+import { ProfileIconFrame } from "./utils/profileHeaderPresentation";
 import { formatUnit } from "../utils/pluralize";
 
 const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
@@ -76,13 +76,6 @@ export default function App() {
   const [isLaunching, setIsLaunching] = useState(false);
   const { launchFeedback, setLaunchFeedback, launchFeedbackTimeoutRef } =
     useLaunchFeedback();
-  const { handleLaunch, handleCancelLaunch } = useProfileLaunch({
-    profiles,
-    selectedProfileId: selectedProfile,
-    setIsLaunching,
-    setLaunchFeedback,
-    launchFeedbackTimeoutRef,
-  });
   const [isEditMode, setIsEditMode] = useState(false);
   const isEditModeRef = useRef(false);
   const [
@@ -91,6 +84,10 @@ export default function App() {
   ] = useState<string | null>(null);
   const [showCreateProfile, setShowCreateProfile] =
     useState(false);
+  const [appChromeModal, setAppChromeModal] = useState<
+    null | "preferences" | "about"
+  >(null);
+  const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
   const [currentView, setCurrentView] = useState<
     "profiles" | "apps" | "content"
   >("profiles");
@@ -124,6 +121,31 @@ export default function App() {
   const currentProfile = profiles.find(
     (p) => p.id === selectedProfile,
   ) || null;
+
+  useEffect(() => {
+    setSidebarSearchQuery("");
+  }, [currentView]);
+
+  const filteredProfiles = useMemo(() => {
+    const q = sidebarSearchQuery.trim().toLowerCase();
+    if (!q) return profiles;
+    return profiles.filter((p) => p.name.toLowerCase().includes(q));
+  }, [profiles, sidebarSearchQuery]);
+
+  const profileLaunchSummaryParts = useMemo(() => {
+    if (!currentProfile) return [] as string[];
+    const parts: string[] = [];
+    if (currentProfile.appCount > 0) {
+      parts.push(formatUnit(currentProfile.appCount, "app"));
+    }
+    if (currentProfile.tabCount > 0) {
+      parts.push(formatUnit(currentProfile.tabCount, "tab"));
+    }
+    if ((currentProfile.fileCount || 0) > 0) {
+      parts.push(formatUnit(currentProfile.fileCount || 0, "file"));
+    }
+    return parts;
+  }, [currentProfile]);
   const profileForSettings = profiles.find(
     (p) => p.id === selectedProfileForSettings,
   ) || null;
@@ -188,6 +210,19 @@ export default function App() {
     setSelectedApp,
     currentProfile,
     profileDragActionsRef,
+  });
+
+  const { handleLaunch, handleCancelLaunch } = useProfileLaunch({
+    profiles,
+    selectedProfileId: selectedProfile,
+    setIsLaunching,
+    setLaunchFeedback,
+    launchFeedbackTimeoutRef,
+    onLaunchCompletedDuration: (profileId, durationSeconds) => {
+      updateProfile(profileId, {
+        estimatedStartupTime: durationSeconds,
+      });
+    },
   });
 
   // SELECTED APP HANDLERS
@@ -639,107 +674,38 @@ export default function App() {
           Autosave is disabled until you restart the app after the issue is resolved, to avoid overwriting your data.
         </div>
       ) : null}
-      <div className="app-drag-region h-9 px-3 flow-shell-titlebar flex items-center justify-between select-none">
-        <div className="flex items-center gap-2">
-          <img
-            src="/flowswitch-logo.png"
-            alt="FlowSwitch logo"
-            className="h-8 w-8 rounded-md object-contain"
-          />
-        </div>
-        <span className="text-[11px] text-flow-text-muted tracking-wide">
-          Workspace automation
-        </span>
+      <div className="app-drag-region flow-shell-titlebar flex h-9 shrink-0 items-stretch px-2 select-none md:px-3">
+        <TitleBarAppMenu
+          onAppPreferences={() => setAppChromeModal("preferences")}
+          onAbout={() => setAppChromeModal("about")}
+        />
+        <div className="min-h-0 min-w-0 flex-1" aria-hidden />
       </div>
+      <input
+        type="file"
+        accept=".json"
+        onChange={importProfile}
+        className="hidden"
+        id="flowswitch-import-profile"
+        aria-hidden
+      />
       <div className="flex h-[calc(100vh-2.25rem)]">
         {/* Left Sidebar - FIXED: Better height management */}
         <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] flow-shell-nav flex flex-col">
-          {/* Header - Fixed height */}
-          <div className="flex-shrink-0 border-b border-flow-border/50 px-4 py-2 md:px-6">
-            <div className="mb-2 flex items-center justify-between md:mb-2.5">
-              <div>
-                <h1 className="text-base text-flow-text-primary font-semibold tracking-tight">
-                  FlowSwitch
-                </h1>
-                <p className="text-[11px] text-flow-text-muted mt-0.5">
-                  Profiles, apps, layouts
-                </p>
-              </div>
-              <div
-                className="flex items-center gap-0.5 rounded-lg border border-flow-border/45 bg-flow-surface/35 p-0.5"
-                role="toolbar"
-                aria-label="Profile file actions"
-              >
-                <input
-                  type="file"
-                  accept=".json"
-                  onChange={importProfile}
-                  className="hidden"
-                  id="import-profile"
-                />
-                <label
-                  htmlFor="import-profile"
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out cursor-pointer"
-                  title="Import profile"
-                  aria-label="Import profile"
-                >
-                  <Upload className="w-3.5 h-3.5" />
-                </label>
-                <button
-                  type="button"
-                  onClick={() =>
-                    currentProfile &&
-                    exportProfile(currentProfile.id)
-                  }
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none"
-                  title={
-                    currentProfile
-                      ? "Export current profile"
-                      : "Select a profile to export"
-                  }
-                  aria-label="Export current profile"
-                  disabled={!currentProfile}
-                >
-                  <Download className="w-3.5 h-3.5" />
-                </button>
-                <span
-                  className="mx-0.5 h-4 w-px shrink-0 bg-flow-border/50"
-                  aria-hidden="true"
-                />
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (currentProfile) {
-                      setSelectedProfileForSettings(currentProfile.id);
-                    }
-                  }}
-                  disabled={!currentProfile}
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none"
-                  title={
-                    currentProfile
-                      ? "Profile settings"
-                      : "Select a profile for settings"
-                  }
-                  aria-label="Open profile settings"
-                >
-                  <Settings className="w-3.5 h-3.5" />
-                </button>
-              </div>
-            </div>
-
-            {/* View Toggle - Compact */}
-            <div className="flow-segment-track" role="tablist" aria-label="Sidebar view">
+          <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
+            <div className="flow-nav-tab-strip" role="tablist" aria-label="Sidebar view">
               <button
                 type="button"
                 role="tab"
                 aria-selected={currentView === "profiles"}
                 onClick={() => setCurrentView("profiles")}
-                className={`flow-segment-tab px-2 py-1.5 ${
+                className={`flow-nav-tab ${
                   currentView === "profiles"
-                    ? "flow-segment-tab-active"
-                    : "flow-segment-tab-idle"
+                    ? "flow-nav-tab-active"
+                    : "flow-nav-tab-idle"
                 }`}
               >
+                <Users className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
                 Profiles
               </button>
               <button
@@ -747,13 +713,13 @@ export default function App() {
                 role="tab"
                 aria-selected={currentView === "apps"}
                 onClick={() => setCurrentView("apps")}
-                className={`flow-segment-tab flex items-center justify-center gap-1 px-2 py-1.5 ${
+                className={`flow-nav-tab ${
                   currentView === "apps"
-                    ? "flow-segment-tab-active"
-                    : "flow-segment-tab-idle"
+                    ? "flow-nav-tab-active"
+                    : "flow-nav-tab-idle"
                 }`}
               >
-                <LayoutGrid className="w-3 h-3 shrink-0" />
+                <LayoutGrid className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
                 Apps
               </button>
               <button
@@ -761,15 +727,42 @@ export default function App() {
                 role="tab"
                 aria-selected={currentView === "content"}
                 onClick={() => setCurrentView("content")}
-                className={`flow-segment-tab flex items-center justify-center gap-1 px-2 py-1.5 ${
+                className={`flow-nav-tab ${
                   currentView === "content"
-                    ? "flow-segment-tab-active"
-                    : "flow-segment-tab-idle"
+                    ? "flow-nav-tab-active"
+                    : "flow-nav-tab-idle"
                 }`}
               >
-                <Link className="w-3 h-3 shrink-0" />
+                <Link className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
                 Content
               </button>
+            </div>
+            <div className="relative">
+              <Search
+                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-flow-text-muted"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              <input
+                type="search"
+                value={sidebarSearchQuery}
+                onChange={(e) => setSidebarSearchQuery(e.target.value)}
+                placeholder={
+                  currentView === "profiles"
+                    ? "Search profiles…"
+                    : currentView === "apps"
+                      ? "Search apps…"
+                      : "Search content…"
+                }
+                className="flow-sidebar-search"
+                aria-label={
+                  currentView === "profiles"
+                    ? "Search profiles"
+                    : currentView === "apps"
+                      ? "Search apps"
+                      : "Search content"
+                }
+              />
             </div>
           </div>
 
@@ -777,11 +770,18 @@ export default function App() {
           <div className="flex-1 min-h-0 flex flex-col">
             {currentView === "profiles" && (
               <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-shrink-0 p-3 border-b border-flow-border/50">
+                <div className="flex-shrink-0 border-b border-flow-border/50 p-3">
                   <div className="flex items-center justify-between">
-                    <h2 className="flow-section-label">
-                      Profiles
-                    </h2>
+                    <div className="flex items-center gap-2">
+                      <Users
+                        className="h-3.5 w-3.5 shrink-0 text-flow-text-muted"
+                        strokeWidth={1.75}
+                        aria-hidden
+                      />
+                      <h2 className="flow-sidebar-section-title">
+                        Profiles
+                      </h2>
+                    </div>
                     <button
                       onClick={() => setShowCreateProfile(true)}
                       disabled={isEditMode}
@@ -816,49 +816,57 @@ export default function App() {
 
                 <div className="flex-1 overflow-y-auto scrollbar-elegant p-3">
                   <div className="space-y-2.5">
-                    {profiles.map((profile) => (
-                      <ProfileCard
-                        key={profile.id}
-                        profile={{
-                          ...profile,
-                          isActive:
-                            profile.id === selectedProfile,
-                        }}
-                        onClick={() =>
-                          handleProfileSwitch(profile.id)
-                        }
-                        onSettings={
-                          isEditMode
-                            ? undefined
-                            : () =>
-                                setSelectedProfileForSettings(
-                                  profile.id,
-                                )
-                        }
-                        onDuplicate={
-                          isEditMode
-                            ? undefined
-                            : () => duplicateProfile(profile.id)
-                        }
-                        onDelete={
-                          isEditMode
-                            ? undefined
-                            : () => deleteProfile(profile.id)
-                        }
-                        onExport={
-                          isEditMode
-                            ? undefined
-                            : () => exportProfile(profile.id)
-                        }
-                        onSetOnStartup={
-                          isEditMode
-                            ? undefined
-                            : () =>
-                                setOnStartupProfile(profile.id)
-                        }
-                        disabled={isEditMode}
-                      />
-                    ))}
+                    {filteredProfiles.length === 0 ? (
+                      <p className="py-6 text-center text-xs text-flow-text-muted">
+                        {profiles.length === 0
+                          ? "No profiles yet. Create one with New."
+                          : "No profiles match this search."}
+                      </p>
+                    ) : (
+                      filteredProfiles.map((profile) => (
+                        <ProfileCard
+                          key={profile.id}
+                          profile={{
+                            ...profile,
+                            isActive:
+                              profile.id === selectedProfile,
+                          }}
+                          onClick={() =>
+                            handleProfileSwitch(profile.id)
+                          }
+                          onSettings={
+                            isEditMode
+                              ? undefined
+                              : () =>
+                                  setSelectedProfileForSettings(
+                                    profile.id,
+                                  )
+                          }
+                          onDuplicate={
+                            isEditMode
+                              ? undefined
+                              : () => duplicateProfile(profile.id)
+                          }
+                          onDelete={
+                            isEditMode
+                              ? undefined
+                              : () => deleteProfile(profile.id)
+                          }
+                          onExport={
+                            isEditMode
+                              ? undefined
+                              : () => exportProfile(profile.id)
+                          }
+                          onSetOnStartup={
+                            isEditMode
+                              ? undefined
+                              : () =>
+                                  setOnStartupProfile(profile.id)
+                          }
+                          disabled={isEditMode}
+                        />
+                      ))
+                    )}
                   </div>
                 </div>
               </div>
@@ -881,6 +889,8 @@ export default function App() {
                   onCustomDragStart={handleCustomDragStart}
                   currentProfile={currentProfile}
                   compact={true}
+                  sidebarSearchQuery={sidebarSearchQuery}
+                  onSidebarSearchQueryChange={setSidebarSearchQuery}
                 />
               </div>
             )}
@@ -894,6 +904,8 @@ export default function App() {
                   onDragStart={handleDragStart}
                   onCustomDragStart={handleCustomDragStart}
                   compact={true}
+                  sidebarSearchQuery={sidebarSearchQuery}
+                  onSidebarSearchQueryChange={setSidebarSearchQuery}
                 />
               </div>
             )}
@@ -908,88 +920,68 @@ export default function App() {
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="relative z-10 shrink-0 border-b border-flow-border/50 bg-flow-bg-secondary/80 px-4 py-2 backdrop-blur-sm md:px-6 xl:px-8">
-              <div className="flex min-w-0 flex-col gap-2 md:flex-row md:items-center md:justify-between md:gap-3">
+            <header className="relative z-10 flex min-h-[5.75rem] shrink-0 items-center border-b border-white/[0.06] bg-flow-bg-secondary/90 px-4 py-3 backdrop-blur-sm md:px-6 xl:px-8">
+              <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
                 <div
-                  className={`flex min-w-0 flex-1 items-center gap-2 ${
+                  className={`flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6 ${
                     isEditMode ? "opacity-50" : ""
                   }`}
                   aria-label="Active profile"
                 >
-                  <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-flow-border/35 bg-flow-bg-tertiary/70">
-                    <ProfileIconGlyph
-                      icon={currentProfile.icon}
-                      className="h-4 w-4 text-flow-text-secondary"
-                    />
+                  <div className="flex min-w-0 flex-wrap items-start gap-3">
+                    <div className="ring-2 ring-flow-accent-blue/35 ring-offset-2 ring-offset-flow-bg-secondary rounded-xl">
+                      <ProfileIconFrame icon={currentProfile.icon} />
+                    </div>
+                    <div className="flex min-w-0 flex-col gap-1.5">
+                      <div className="flex min-w-0 flex-wrap items-center gap-2">
+                        <h2 className="min-w-0 truncate text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl">
+                          {currentProfile.name}
+                        </h2>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-1.5">
+                        {currentProfile.autoLaunchOnBoot && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-emerald-200/95">
+                            <Zap className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                            Boot
+                          </span>
+                        )}
+                        {currentProfile.autoSwitchTime && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-violet-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-violet-100/90">
+                            <Clock className="h-3 w-3 shrink-0" strokeWidth={1.75} />
+                            {currentProfile.autoSwitchTime}
+                          </span>
+                        )}
+                        {currentProfile.hotkey && (
+                          <span className="inline-flex items-center gap-1 rounded-md bg-sky-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-sky-100/90">
+                            {currentProfile.hotkey}
+                          </span>
+                        )}
+                      </div>
+                    </div>
                   </div>
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-x-2 gap-y-1">
-                    <h2 className="max-w-[min(100%,14rem)] truncate text-sm font-semibold tracking-tight text-flow-text-primary sm:max-w-[22rem] md:text-base">
-                      {currentProfile.name}
-                    </h2>
-                    {currentProfile.autoLaunchOnBoot && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-green/30 bg-flow-accent-green/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-green">
-                        <Zap className="h-2.5 w-2.5 shrink-0" />
-                        Boot
+                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 lg:gap-3">
+                    <div className="inline-flex items-center gap-2 rounded-lg bg-amber-500/[0.09] px-3 py-1.5 text-xs font-medium text-amber-100/95">
+                      <Clock className="h-3.5 w-3.5 shrink-0 text-amber-200/90" strokeWidth={1.75} aria-hidden />
+                      <span>
+                        ~{currentProfile.estimatedStartupTime}s startup
+                        {currentProfile.launchOrder === "sequential"
+                          ? " · sequential"
+                          : ""}
                       </span>
-                    )}
-                    {currentProfile.autoSwitchTime && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-purple/30 bg-flow-accent-purple/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-purple">
-                        <Clock className="h-2.5 w-2.5 shrink-0" />
-                        {currentProfile.autoSwitchTime}
-                      </span>
-                    )}
-                    {currentProfile.hotkey && (
-                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-accent-blue/30 bg-flow-accent-blue/15 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-accent-blue">
-                        {currentProfile.hotkey}
-                      </span>
-                    )}
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
-                      <Zap className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
-                      ~{currentProfile.estimatedStartupTime}s
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
-                      <Layers className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
-                      {formatUnit(currentProfile.appCount, "app")}
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
-                      <Globe className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
-                      {formatUnit(currentProfile.tabCount, "tab")}
-                    </span>
-                    <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
-                      <Folder className="h-2.5 w-2.5 shrink-0 opacity-80" aria-hidden />
-                      {formatUnit(
-                        currentProfile.fileCount || 0,
-                        "file",
-                      )}
-                    </span>
-                    {currentProfile.launchOrder === "sequential" ? (
-                      <span className="inline-flex items-center gap-0.5 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/50 px-1.5 py-0 text-[10px] font-medium leading-tight text-flow-text-muted">
-                        Sequential
-                      </span>
-                    ) : null}
+                    </div>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
-                  <div className="flex flex-wrap items-center justify-end gap-2 md:gap-2.5">
-                    <button
-                      type="button"
-                      onClick={() => setIsEditMode(!isEditMode)}
-                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150 ease-out md:px-4 md:py-2.5 md:text-sm ${
-                        isEditMode
-                          ? "border border-flow-accent-blue/80 bg-flow-accent-blue text-flow-text-primary shadow-md ring-1 ring-flow-accent-blue/25 hover:bg-flow-accent-blue-hover"
-                          : "border border-flow-border/60 bg-flow-surface/90 text-flow-text-secondary hover:border-flow-border-accent/50 hover:bg-flow-surface-elevated hover:text-flow-text-primary"
-                      }`}
-                    >
-                      {isEditMode ? (
-                        <Save className="h-4 w-4 shrink-0" />
-                      ) : (
-                        <Edit className="h-4 w-4 shrink-0" />
-                      )}
-                      {isEditMode ? "Save Profile" : "Edit Profile"}
-                    </button>
+                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end lg:items-center">
+                  <div className="flex flex-wrap items-center justify-end gap-2 lg:gap-2.5">
                     <ProfileHeaderOverflowMenu
                       disabled={isEditMode}
+                      importInputId="flowswitch-import-profile"
+                      exportDisabled={!currentProfile}
+                      onExport={() =>
+                        currentProfile &&
+                        exportProfile(currentProfile.id)
+                      }
                       onSettings={() =>
                         setSelectedProfileForSettings(currentProfile.id)
                       }
@@ -1003,6 +995,7 @@ export default function App() {
                       onLaunch={handleLaunch}
                       onCancel={handleCancelLaunch}
                       showCancel={launchControlShowCancel}
+                      profileSummaryParts={profileLaunchSummaryParts}
                     />
                   </div>
                   {showLaunchFeedbackStrip ? (
@@ -1053,19 +1046,22 @@ export default function App() {
 
                 <div className="flex items-center gap-3">
                   <button
+                    type="button"
                     disabled
+                    title="Select a profile to edit its monitor layout"
                     className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
                   >
-                    <Edit className="w-4 h-4" />
-                    Edit Profile
+                    <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                    Edit layout
                   </button>
                   <button
+                    type="button"
                     disabled
+                    title="Select a profile for preferences and import/export"
                     className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
-                    title="Profile Settings"
                   >
                     <Settings className="w-4 h-4" />
-                    Settings
+                    Preferences
                   </button>
                   <button
                     disabled
@@ -1082,13 +1078,17 @@ export default function App() {
           {/* Main Content Area */}
           {currentProfile && (
             <main className="flex-1 overflow-hidden relative flow-shell-canvas">
-              <div className="h-full px-4 md:px-6 xl:px-8 py-4 md:py-6">
+              <div className="h-full px-4 pb-4 pt-0 md:px-6 md:pb-6 xl:px-8">
                 <MonitorLayout
                   monitors={currentProfile.monitors}
                   minimizedApps={currentProfile.minimizedApps}
                   minimizedFiles={[]} // REMOVED: No more standalone files
                   browserTabs={currentProfile.browserTabs}
                   isEditMode={isEditMode}
+                  onToggleLayoutEdit={() =>
+                    setIsEditMode((prev) => !prev)
+                  }
+                  layoutToolbarConnected
                   dragState={dragState}
                   selectedApp={selectedApp}
                   onUpdateApp={(monitorId, appIndex, updates) =>
@@ -1399,6 +1399,13 @@ export default function App() {
             setProfiles((prev) => [...prev, newProfile]);
             setShowCreateProfile(false);
           }}
+        />
+
+        <AppChromeModals
+          preferencesOpen={appChromeModal === "preferences"}
+          aboutOpen={appChromeModal === "about"}
+          onClosePreferences={() => setAppChromeModal(null)}
+          onCloseAbout={() => setAppChromeModal(null)}
         />
       </div>
     </div>

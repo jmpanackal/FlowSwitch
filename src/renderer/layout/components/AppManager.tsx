@@ -1,6 +1,6 @@
 import { useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Search, Settings, Trash2, Power, Save, Move } from "lucide-react";
+import { Search, Settings, Trash2, Power, Save, Move, LayoutGrid } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 
 interface AppManagerProps {
@@ -12,6 +12,9 @@ interface AppManagerProps {
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   currentProfile?: any;
   compact?: boolean;
+  /** When both set with `compact`, hides the local search field and uses this query. */
+  sidebarSearchQuery?: string;
+  onSidebarSearchQueryChange?: (query: string) => void;
 }
 
 
@@ -53,9 +56,18 @@ export function AppManager({
   onDragStart,
   onCustomDragStart,
   currentProfile, 
-  compact = false 
+  compact = false,
+  sidebarSearchQuery,
+  onSidebarSearchQueryChange,
 }: AppManagerProps) {
   const [searchTerm, setSearchTerm] = useState('');
+  const sidebarSearchControlled =
+    Boolean(compact)
+    && typeof sidebarSearchQuery === "string"
+    && typeof onSidebarSearchQueryChange === "function";
+  const effectiveSearchTerm = sidebarSearchControlled
+    ? sidebarSearchQuery
+    : searchTerm;
   const [selectedApp, setSelectedApp] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAppSettings, setShowAppSettings] = useState(false);
@@ -80,10 +92,14 @@ export function AppManager({
     return { lastAccessed: 0, size: 0 };
   }
 
-  const categories = Array.from(new Set(allApps.map(app => app.category)));
-  let filteredApps = allApps.filter(app => {
-    const matchesSearch = app.name.toLowerCase().includes(searchTerm.toLowerCase());
-    const matchesCategory = !selectedCategory || app.category === selectedCategory;
+  let filteredApps = allApps.filter((app) => {
+    const matchesSearch = app.name
+      .toLowerCase()
+      .includes(effectiveSearchTerm.toLowerCase());
+    const matchesCategory =
+      compact
+      || !selectedCategory
+      || app.category === selectedCategory;
     return matchesSearch && matchesCategory;
   });
 
@@ -221,79 +237,41 @@ export function AppManager({
 
   if (compact) {
     return (
-      <div className="p-4">
-        {/* Header - CLEAN: Consistent with UI */}
-        <div className="flex items-center justify-between mb-3">
+      <div className="flex min-h-0 flex-1 flex-col">
+        <div className="flex shrink-0 items-center justify-between border-b border-flow-border/50 px-3 py-3">
           <div className="flex items-center gap-2">
-            <Settings className="w-3.5 h-3.5 text-flow-text-muted" />
-            <h2 className="text-[11px] font-medium text-flow-text-secondary uppercase tracking-wider">Apps</h2>
-          </div>
-          <span className="text-flow-text-muted text-xs">{filteredApps.length} available</span>
-        </div>
-
-        {/* Search and Filters - CLEAN: Consistent with content section */}
-
-        <div className="space-y-3 mb-4">
-          {/* Search Bar */}
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-3 h-3 text-flow-text-muted" />
-            <input
-              type="text"
-              placeholder="Search apps..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-9 pr-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary placeholder-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
+            <LayoutGrid
+              className="h-3.5 w-3.5 shrink-0 text-flow-text-muted"
+              strokeWidth={1.75}
+              aria-hidden
             />
+            <h2 className="flow-sidebar-section-title">Apps</h2>
           </div>
-
-          {/* Category and Sort Filter - Compact design */}
-          <div className="flex items-center gap-2">
-            <select
-              value={selectedCategory || ''}
-              onChange={(e) => setSelectedCategory(e.target.value || null)}
-              className="flex-1 px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-              title="Filter by category"
-            >
-              <option value="">All</option>
-              {categories.map((cat) => (
-                <option key={cat || 'other'} value={cat || ''}>{cat || 'Other'}</option>
-              ))}
-            </select>
-            <select
-              value={sortOption}
-              onChange={e => setSortOption(e.target.value as 'name' | 'lastAccessed' | 'size')}
-              className="px-2 py-1.5 bg-flow-surface border border-flow-border rounded text-xs text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue/50 transition-all duration-200"
-              title="Sort apps"
-            >
-              <option value="name">A-Z</option>
-              <option value="lastAccessed">Last Opened</option>
-              <option value="size">Size</option>
-            </select>
-            <button
-              onClick={() => setExpandedApp(expandedApp ? null : 'toggle-all')}
-              className={`inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded transition-colors ${
-                expandedApp
-                  ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30'
-                  : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
-              }`}
-              title="Show app details"
-            >
-              <Settings className="w-3 h-3" />
-              <span className="whitespace-nowrap">Details</span>
-            </button>
-          </div>
+          <span className="flow-sidebar-meta">{filteredApps.length} available</span>
         </div>
 
-        {/* Drag Instructions - Compact */}
-        <div className="rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3 mb-4">
-          <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
-            <Move className="w-3.5 h-3.5 text-flow-accent-blue shrink-0" />
-            <span>Drag apps onto a monitor or into the minimized row.</span>
-          </div>
-        </div>
+        <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-3">
+          {!sidebarSearchControlled ? (
+            <div className="relative mb-3">
+              <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 transform text-flow-text-muted" />
+              <input
+                type="text"
+                placeholder="Search apps..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="flow-sidebar-search w-full py-2 pl-9 pr-3"
+              />
+            </div>
+          ) : null}
 
-        {/* App List - CLEAN: Smart scrolling with elegant scrollbar, no horizontal scroll */}
-        <div className="space-y-2 max-h-[60vh] overflow-y-auto overflow-x-hidden scrollbar-elegant">
+          <div className="mb-3 rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
+            <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
+              <Move className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={1.75} />
+              <span>Drag apps onto a monitor or into the minimized row.</span>
+            </div>
+          </div>
+
+        <div className="scrollbar-elegant max-h-[60vh] min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto">
           {filteredApps.map((app, index) => {
             const usage = getAppUsage(app.name);
             const isExpanded = expandedApp === app.name || expandedApp === 'toggle-all';
@@ -414,6 +392,7 @@ export function AppManager({
               </div>
             );
           })}
+        </div>
         </div>
 
         {/* App Settings Modal */}

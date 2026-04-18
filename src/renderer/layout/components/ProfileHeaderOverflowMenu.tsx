@@ -5,18 +5,30 @@ import {
   Copy,
   Trash2,
   Plus,
+  Upload,
+  Download,
 } from "lucide-react";
 
 type ProfileHeaderOverflowMenuProps = {
   disabled: boolean;
+  /** Hidden file input id for import (label uses htmlFor). */
+  importInputId: string;
+  exportDisabled: boolean;
+  onExport: () => void;
   onSettings: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
   onNewProfile: () => void;
 };
 
+const menuPanelClass =
+  "flow-menu-panel absolute right-0 top-full z-[30000] mt-1.5 min-w-[14rem]";
+
 export function ProfileHeaderOverflowMenu({
   disabled,
+  importInputId,
+  exportDisabled,
+  onExport,
   onSettings,
   onDuplicate,
   onDelete,
@@ -55,56 +67,76 @@ export function ProfileHeaderOverflowMenu({
           e.stopPropagation();
           if (!disabled) setOpen((v) => !v);
         }}
-        className={`inline-flex items-center justify-center rounded-lg p-2 md:px-3 md:py-2.5 text-flow-text-secondary border border-flow-border/60 bg-flow-surface/90 hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50 transition-all duration-150 ease-out ${
-          disabled ? "opacity-50 cursor-not-allowed" : ""
+        className={`inline-flex items-center justify-center rounded-lg p-2 text-flow-text-secondary transition-colors duration-150 ease-out hover:bg-white/[0.06] md:px-2.5 md:py-2 ${
+          disabled ? "cursor-not-allowed opacity-50" : ""
         }`}
         title="More actions"
         aria-expanded={open}
         aria-haspopup="menu"
       >
-        <MoreHorizontal className="w-4 h-4" />
+        <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
         <span className="sr-only">More profile actions</span>
       </button>
       {open && !disabled ? (
-        <div
-          className="absolute right-0 top-full z-[70] mt-1.5 min-w-[12rem] rounded-xl border border-flow-border/60 bg-flow-surface-elevated py-1 shadow-flow-shadow-lg"
-          role="menu"
-        >
+        <div className={menuPanelClass} role="menu">
           <button
             type="button"
             role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
+            className="flow-menu-item"
+            onClick={() => run(onSettings)}
+          >
+            <Settings className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+            Profile preferences…
+          </button>
+          <div className="my-1 h-px bg-white/[0.08]" />
+          <button
+            type="button"
+            role="menuitem"
+            className="flow-menu-item"
             onClick={() => run(onNewProfile)}
           >
-            <Plus className="w-4 h-4 shrink-0" />
+            <Plus className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             New profile
           </button>
           <button
             type="button"
             role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
-            onClick={() => run(onSettings)}
-          >
-            <Settings className="w-4 h-4 shrink-0" />
-            Profile settings
-          </button>
-          <button
-            type="button"
-            role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
+            className="flow-menu-item"
             onClick={() => run(onDuplicate)}
           >
-            <Copy className="w-4 h-4 shrink-0" />
+            <Copy className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
             Duplicate
           </button>
-          <div className="my-1 h-px bg-flow-border/60" />
+          <div className="my-1 h-px bg-white/[0.08]" />
+          <label
+            htmlFor={importInputId}
+            role="menuitem"
+            className="flow-menu-item cursor-pointer"
+            onClick={() => setOpen(false)}
+          >
+            <Upload className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+            Import profile…
+          </label>
           <button
             type="button"
             role="menuitem"
-            className="flex w-full items-center gap-2 px-3 py-2 text-left text-sm text-flow-accent-red hover:bg-flow-accent-red/10"
+            disabled={exportDisabled}
+            className="flow-menu-item disabled:pointer-events-none disabled:opacity-40"
+            onClick={() => {
+              if (!exportDisabled) run(onExport);
+            }}
+          >
+            <Download className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+            Export profile
+          </button>
+          <div className="my-1 h-px bg-white/[0.08]" />
+          <button
+            type="button"
+            role="menuitem"
+            className="flow-menu-item flow-menu-item-danger"
             onClick={() => run(onDelete)}
           >
-            <Trash2 className="w-4 h-4 shrink-0" />
+            <Trash2 className="h-4 w-4 shrink-0" strokeWidth={1.75} />
             Delete
           </button>
         </div>
