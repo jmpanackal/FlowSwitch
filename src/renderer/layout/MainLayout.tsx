@@ -4,6 +4,8 @@ import {
   useCallback,
   useEffect,
 } from "react";
+import { LaunchControl } from "./components/LaunchControl";
+import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
 import { ProfileCard } from "./components/ProfileCard";
 import { MonitorLayout } from "./components/MonitorLayout";
 import { ProfileSettings } from "./components/ProfileSettings";
@@ -30,6 +32,9 @@ import {
   ChevronDown,
   Check,
   AlertTriangle,
+  Layers,
+  Folder,
+  Globe,
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
@@ -50,6 +55,13 @@ import {
   useMainLayoutProfileMutations,
   type MainLayoutSelectedApp,
 } from "./hooks/useMainLayoutProfileMutations";
+import {
+  ProfileIconGlyph,
+  shortenProfileDescriptionForHeader,
+} from "./utils/profileHeaderPresentation";
+import { formatUnit } from "../utils/pluralize";
+
+const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
 
 /**
  * Application shell: profile grid, monitor layout editor, app/content managers, and the custom
@@ -124,6 +136,20 @@ export default function App() {
   const profileForSettings = profiles.find(
     (p) => p.id === selectedProfileForSettings,
   ) || null;
+
+  const showLaunchFeedbackStrip =
+    launchFeedback.status !== "idle"
+    && !(
+      launchFeedback.status === "in-progress"
+      && launchFeedback.message === GENERIC_LAUNCH_PROFILE_MESSAGE
+    );
+
+  const launchControlShowCancel = Boolean(
+    (isLaunching
+      || launchFeedback.status === "in-progress"
+      || launchFeedback.status === "warning")
+    && window.electron?.cancelProfileLaunch,
+  );
 
   const currentProfileRef = useRef<FlowProfile | null>(null);
   currentProfileRef.current = currentProfile;
@@ -697,7 +723,11 @@ export default function App() {
                   Profiles, apps, layouts
                 </p>
               </div>
-              <div className="flex items-center gap-1.5">
+              <div
+                className="flex items-center gap-0.5 rounded-lg border border-flow-border/45 bg-flow-surface/35 p-0.5"
+                role="toolbar"
+                aria-label="Profile file actions"
+              >
                 <input
                   type="file"
                   accept=".json"
@@ -707,28 +737,48 @@ export default function App() {
                 />
                 <label
                   htmlFor="import-profile"
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out cursor-pointer"
-                  title="Import Profile"
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out cursor-pointer"
+                  title="Import profile"
                   aria-label="Import profile"
                 >
                   <Upload className="w-3.5 h-3.5" />
                 </label>
                 <button
+                  type="button"
                   onClick={() =>
                     currentProfile &&
                     exportProfile(currentProfile.id)
                   }
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
-                  title="Export Current Profile"
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none"
+                  title={
+                    currentProfile
+                      ? "Export current profile"
+                      : "Select a profile to export"
+                  }
                   aria-label="Export current profile"
+                  disabled={!currentProfile}
                 >
                   <Download className="w-3.5 h-3.5" />
                 </button>
-                <span className="h-4 w-px bg-flow-border/40 mx-0.5" aria-hidden="true" />
+                <span
+                  className="mx-0.5 h-4 w-px shrink-0 bg-flow-border/50"
+                  aria-hidden="true"
+                />
                 <button
-                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
-                  title="Open settings"
-                  aria-label="Open settings"
+                  type="button"
+                  onClick={() => {
+                    if (currentProfile) {
+                      setSelectedProfileForSettings(currentProfile.id);
+                    }
+                  }}
+                  disabled={!currentProfile}
+                  className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-md transition-all duration-150 ease-out disabled:opacity-40 disabled:pointer-events-none"
+                  title={
+                    currentProfile
+                      ? "Profile settings"
+                      : "Select a profile for settings"
+                  }
+                  aria-label="Open profile settings"
                 >
                   <Settings className="w-3.5 h-3.5" />
                 </button>
@@ -916,80 +966,91 @@ export default function App() {
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="px-4 md:px-6 xl:px-8 py-2.5 md:py-3 border-b border-flow-border/50 bg-flow-bg-secondary/80 backdrop-blur-sm relative z-10">
-              <div className="flex items-center justify-between">
-                <div className="flex items-center gap-4">
-                  {/* Profile Switcher - Now without settings button */}
-                  <div className="relative" ref={dropdownRef}>
+            <header className="relative z-10 border-b border-flow-border/50 bg-flow-bg-secondary/80 px-4 py-3 backdrop-blur-sm md:px-6 md:py-3.5 xl:px-8">
+              <div className="flex min-w-0 flex-col gap-3 xl:flex-row xl:items-start xl:justify-between xl:gap-6">
+                <div className="flex min-w-0 flex-1 justify-center xl:justify-start">
+                  <div className="relative w-full max-w-xl" ref={dropdownRef}>
                     <button
+                      type="button"
                       onClick={handleDropdownToggle}
                       disabled={isEditMode}
-                      className={`flow-header-well flex items-center gap-2 md:gap-3 p-2 md:p-2.5 max-w-[52vw] ${
+                      className={`flow-header-well flex w-full items-start gap-3 rounded-xl p-2.5 text-left md:gap-3 md:p-3 ${
                         isEditMode
-                          ? "opacity-50 cursor-not-allowed text-flow-text-muted"
-                          : "flow-header-well-interactive text-flow-text-primary cursor-pointer"
+                          ? "cursor-not-allowed text-flow-text-muted opacity-50"
+                          : "flow-header-well-interactive cursor-pointer text-flow-text-primary"
                       }`}
                     >
-                      <div className="flex-1">
-                        <div className="flex items-center gap-3 mb-1">
-                          <h2 className="text-base md:text-lg text-flow-text-primary font-semibold tracking-tight truncate max-w-[22rem]">
+                      <div className="flex shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/90 p-2 md:p-2.5">
+                        <ProfileIconGlyph
+                          icon={currentProfile.icon}
+                          className="h-5 w-5 text-flow-text-secondary md:h-6 md:w-6"
+                        />
+                      </div>
+                      <div className="min-w-0 flex-1">
+                        <div className="mb-0.5 flex flex-wrap items-center gap-2">
+                          <h2 className="max-w-[20rem] truncate text-base font-semibold tracking-tight text-flow-text-primary md:text-lg">
                             {currentProfile.name}
                           </h2>
                           {currentProfile.autoLaunchOnBoot && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-flow-accent-green/20 text-flow-accent-green border border-flow-accent-green/30">
-                              <Zap className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-green/30 bg-flow-accent-green/20 px-2 py-0.5 text-xs font-medium text-flow-accent-green">
+                              <Zap className="h-3 w-3" />
                               Boot
                             </span>
                           )}
                           {currentProfile.autoSwitchTime && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-flow-accent-purple/20 text-flow-accent-purple border border-flow-accent-purple/30">
-                              <Clock className="w-3 h-3" />
+                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-purple/30 bg-flow-accent-purple/20 px-2 py-0.5 text-xs font-medium text-flow-accent-purple">
+                              <Clock className="h-3 w-3" />
                               {currentProfile.autoSwitchTime}
                             </span>
                           )}
                           {currentProfile.hotkey && (
-                            <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30">
+                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-accent-blue/30 bg-flow-accent-blue/20 px-2 py-0.5 text-xs font-medium text-flow-accent-blue">
                               {currentProfile.hotkey}
                             </span>
                           )}
                         </div>
-                        <p className="text-flow-text-secondary text-xs md:text-sm truncate">
-                          {currentProfile.description}
-                        </p>
-                        <div className="flex items-center gap-2 md:gap-4 mt-1.5 flex-wrap">
-                          <div className="flex items-center gap-1 text-flow-text-muted text-xs">
-                            <Clock className="w-3 h-3" />
-                            <span>
-                              ~
-                              {
-                                currentProfile.estimatedStartupTime
-                              }
-                              s startup
-                            </span>
-                          </div>
-                          <div className="text-flow-text-muted text-xs">
-                            {currentProfile.appCount} apps •{" "}
-                            {currentProfile.tabCount} tabs •{" "}
-                            {currentProfile.fileCount || 0}{" "}
-                            files
-                          </div>
-                          {currentProfile.launchOrder ===
-                            "sequential" && (
-                            <div className="text-flow-text-muted text-xs">
-                              Sequential launch
-                            </div>
+                        <p className="truncate text-xs text-flow-text-secondary md:text-sm">
+                          {shortenProfileDescriptionForHeader(
+                            currentProfile.description,
                           )}
+                        </p>
+                        <div className="mt-2 flex flex-wrap gap-1.5">
+                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
+                            <Zap className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+                            ~
+                            {currentProfile.estimatedStartupTime}
+                            s startup
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
+                            <Layers className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+                            {formatUnit(currentProfile.appCount, "app")}
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
+                            <Globe className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+                            {formatUnit(currentProfile.tabCount, "tab")}
+                          </span>
+                          <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
+                            <Folder className="h-3 w-3 shrink-0 opacity-80" aria-hidden />
+                            {formatUnit(
+                              currentProfile.fileCount || 0,
+                              "file",
+                            )}
+                          </span>
+                          {currentProfile.launchOrder === "sequential" ? (
+                            <span className="inline-flex items-center gap-1 rounded-full border border-flow-border/35 bg-flow-bg-tertiary/60 px-2 py-0.5 text-[11px] font-medium text-flow-text-muted">
+                              Sequential launch
+                            </span>
+                          ) : null}
                         </div>
                       </div>
-                      {!isEditMode && (
+                      {!isEditMode ? (
                         <ChevronDown
-                          className={`w-4 h-4 text-flow-text-muted transition-transform duration-150 ease-out ${
-                            showProfileDropdown
-                              ? "rotate-180"
-                              : ""
+                          className={`mt-1 h-4 w-4 shrink-0 text-flow-text-muted transition-transform duration-150 ease-out ${
+                            showProfileDropdown ? "rotate-180" : ""
                           }`}
+                          aria-hidden
                         />
-                      )}
+                      ) : null}
                     </button>
 
                     {/* Profile Dropdown */}
@@ -1040,22 +1101,15 @@ export default function App() {
                                 <p className="text-sm text-flow-text-secondary mb-2 truncate">
                                   {profile.description}
                                 </p>
-                                <div className="flex items-center gap-3 text-xs text-flow-text-muted">
+                                <div className="flex flex-wrap items-center gap-2 text-xs text-flow-text-muted">
+                                  <span>{formatUnit(profile.appCount, "app")}</span>
+                                  <span>{formatUnit(profile.tabCount, "tab")}</span>
                                   <span>
-                                    {profile.appCount} apps
-                                  </span>
-                                  <span>
-                                    {profile.tabCount} tabs
-                                  </span>
-                                  <span>
-                                    {profile.fileCount || 0}{" "}
-                                    files
+                                    {formatUnit(profile.fileCount || 0, "file")}
                                   </span>
                                   <span>
                                     ~
-                                    {
-                                      profile.estimatedStartupTime
-                                    }
+                                    {profile.estimatedStartupTime}
                                     s
                                   </span>
                                 </div>
@@ -1068,94 +1122,70 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* MOVED: Action buttons with edit/save button first */}
-                <div className="flex flex-col items-end gap-2">
-                  <div className="flex items-center gap-2 md:gap-3 flex-wrap justify-end">
+                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end">
+                  <div className="flex flex-wrap items-center justify-end gap-2 md:gap-2.5">
                     <button
+                      type="button"
                       onClick={() => setIsEditMode(!isEditMode)}
-                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out ${
+                      className={`inline-flex items-center justify-center gap-2 rounded-lg px-3 py-2 text-xs font-medium transition-all duration-150 ease-out md:px-4 md:py-2.5 md:text-sm ${
                         isEditMode
-                          ? "bg-flow-accent-blue text-flow-text-primary border border-flow-accent-blue/80 hover:bg-flow-accent-blue-hover shadow-md ring-1 ring-flow-accent-blue/25"
-                          : "bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50"
+                          ? "border border-flow-accent-blue/80 bg-flow-accent-blue text-flow-text-primary shadow-md ring-1 ring-flow-accent-blue/25 hover:bg-flow-accent-blue-hover"
+                          : "border border-flow-border/60 bg-flow-surface/90 text-flow-text-secondary hover:border-flow-border-accent/50 hover:bg-flow-surface-elevated hover:text-flow-text-primary"
                       }`}
                     >
                       {isEditMode ? (
-                        <Save className="w-4 h-4" />
+                        <Save className="h-4 w-4 shrink-0" />
                       ) : (
-                        <Edit className="w-4 h-4" />
+                        <Edit className="h-4 w-4 shrink-0" />
                       )}
-                      {isEditMode
-                        ? "Save Profile"
-                        : "Edit Profile"}
+                      {isEditMode ? "Save Profile" : "Edit Profile"}
                     </button>
-                    <button
-                      onClick={() =>
-                        setSelectedProfileForSettings(
-                          currentProfile.id,
-                        )
+                    <ProfileHeaderOverflowMenu
+                      disabled={isEditMode}
+                      onSettings={() =>
+                        setSelectedProfileForSettings(currentProfile.id)
                       }
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50"
-                      title="Profile Settings"
-                    >
-                      <Settings className="w-4 h-4" />
-                      Settings
-                    </button>
-                    <button
-                      onClick={handleLaunch}
-                      disabled={isLaunching || isEditMode}
-                      className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/40 focus:ring-offset-2 focus:ring-offset-flow-bg-primary bg-flow-accent-blue text-flow-text-primary hover:bg-flow-accent-blue-hover active:bg-flow-accent-blue/90 disabled:opacity-50 shadow-sm"
-                    >
-                      {isLaunching ? (
-                        <>
-                          <div className="w-4 h-4 border-2 border-flow-text-primary/30 border-t-flow-text-primary rounded-full animate-spin" />
-                          Launching...
-                        </>
-                      ) : (
-                        <>
-                          <Play className="w-4 h-4" />
-                          Launch Profile
-                        </>
-                      )}
-                    </button>
-                    {(isLaunching
-                      || launchFeedback.status === "in-progress"
-                      || launchFeedback.status === "warning")
-                      && window.electron?.cancelProfileLaunch ? (
-                        <button
-                          type="button"
-                          onClick={() => void handleCancelLaunch()}
-                          disabled={isEditMode}
-                          className="inline-flex items-center justify-center gap-2 rounded-lg px-3 md:px-4 py-2 md:py-2.5 text-xs md:text-sm font-medium transition-all duration-150 ease-out bg-flow-surface/90 border border-flow-border/60 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent/50 disabled:opacity-50"
-                        >
-                          <X className="w-4 h-4" />
-                          Cancel launch
-                        </button>
-                      ) : null}
+                      onDuplicate={() => duplicateProfile(currentProfile.id)}
+                      onDelete={() => deleteProfile(currentProfile.id)}
+                      onNewProfile={() => setShowCreateProfile(true)}
+                    />
+                    <LaunchControl
+                      isEditMode={isEditMode}
+                      isLaunching={isLaunching}
+                      onLaunch={handleLaunch}
+                      onCancel={handleCancelLaunch}
+                      showCancel={launchControlShowCancel}
+                    />
                   </div>
-                  {launchFeedback.status !== "idle" && (
+                  {showLaunchFeedbackStrip ? (
                     <div
-                      className={`inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
+                      className={`inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
                         launchFeedback.status === "success"
                           ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
                           : launchFeedback.status === "warning"
                             ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
-                          : launchFeedback.status === "error"
-                            ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
-                            : "border-flow-border-accent bg-flow-surface-elevated text-flow-text-secondary"
+                            : launchFeedback.status === "error"
+                              ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
+                              : "border-flow-border-accent bg-flow-surface-elevated text-flow-text-secondary"
                       }`}
                     >
                       {launchFeedback.status === "success" ? (
-                        <Check className="w-3.5 h-3.5" />
+                        <Check className="h-3.5 w-3.5 shrink-0" />
                       ) : launchFeedback.status === "warning" ? (
-                        <AlertTriangle className="w-3.5 h-3.5" />
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
                       ) : launchFeedback.status === "error" ? (
-                        <X className="w-3.5 h-3.5" />
+                        <X className="h-3.5 w-3.5 shrink-0" />
                       ) : (
-                        <div className="w-3.5 h-3.5 border border-current border-t-transparent rounded-full animate-spin" />
+                        <div
+                          className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
+                          aria-hidden
+                        />
                       )}
-                      <span>{launchFeedback.message}</span>
+                      <span className="min-w-0 break-words text-left">
+                        {launchFeedback.message}
+                      </span>
                     </div>
-                  )}
+                  ) : null}
                 </div>
               </div>
             </header>

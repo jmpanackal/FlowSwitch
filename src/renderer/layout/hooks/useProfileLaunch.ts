@@ -242,10 +242,11 @@ export function useProfileLaunch({
               return;
             }
 
-            setLaunchFeedback({
-              status: "in-progress",
-              message: "Launching profile...",
-            });
+            // Main-process steady state while apps launch; LaunchControl shows progress — no redundant feedback updates.
+            if (st === "in-progress") {
+              return;
+            }
+
           } catch {
             // Keep UI resilient; next poll tick can recover.
           }
