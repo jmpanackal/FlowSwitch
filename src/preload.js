@@ -4,7 +4,10 @@ const { contextBridge, ipcRenderer } = require('electron');
 // Expose safe APIs to the frontend through `window.electron`
 contextBridge.exposeInMainWorld('electron', {
   // Launch profile actions in main process (apps + tabs)
-  launchProfile: (profileId) => ipcRenderer.invoke('launch-profile', profileId),
+  launchProfile: (profileId, options) => ipcRenderer.invoke('launch-profile', profileId, options || {}),
+  cancelProfileLaunch: (profileId, runId) => (
+    ipcRenderer.invoke('cancel-profile-launch', { profileId, runId })
+  ),
   getLaunchProfileStatus: (profileId) => ipcRenderer.invoke('launch-profile-status', profileId),
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)

@@ -67,10 +67,14 @@ Progress note (2026-04-16):
 - Added stale snapshot rejection in renderer polling by `runId` + poll token.
 - Added replace semantics where new launch supersedes prior run and stale async writes are ignored.
 
+Progress note (2026-04-18):
+- Main-process modularization: `window-candidate-classifier.js`, `process-hints.js`, `monitor-map.js`, `placement-orchestrator.js` (verify-and-correct factory); `launch-status-store` lives under `services/` per spec §5.2; `src/main/README.md` documents `services/` vs `utils/`.
+- Phase 2 control plane: `launch-profile` supports `{ fireAndForget: true }` for early `runId` return while work continues; `cancel-profile-launch` IPC + `launchStatusStore.cancelRun` cooperates with `isCurrentRunActive()`; renderer polls status until terminal states (`complete` / `failed` / `cancelled` / resolved `awaiting-confirmations`).
+
 ### B) Classifier and Candidate Selection
-- [ ] (P0, owner: agent) Extract classifier from `main.js` to dedicated module (`not_started`)  
+- [x] (P0, owner: agent) Extract classifier from `main.js` to dedicated module (`done`)  
   depends_on: none  
-  done_when: classifier decisions no longer implemented inline in `main.js`
+  done_when: classifier decisions no longer implemented inline in `main.js` (window scoring + Chromium/auxiliary helpers in `src/main/services/window-candidate-classifier.js`)
 - [ ] (P0, owner: agent) Implement deterministic weighted scoring with reason tracing (`not_started`)  
   depends_on: classifier extraction  
   done_when: same input snapshot returns same top candidate and reason tags across runs
@@ -85,9 +89,9 @@ Progress note (2026-04-16):
   done_when: trigger conditions emit review-required events + before/after reports
 
 ### C) Process Hints and Ownership
-- [ ] (P0, owner: agent) Extract process hints to `process-hints.js` (`not_started`)  
+- [x] (P0, owner: agent) Extract process hints to `process-hints.js` (`done`)  
   depends_on: none  
-  done_when: hint expansion logic is module-owned and testable
+  done_when: hint expansion logic is module-owned and testable (`src/main/services/process-hints.js`)
 - [ ] (P0, owner: agent) Implement process hint versioning + diagnostics key (`not_started`)  
   depends_on: process-hints extraction  
   done_when: `processHintsVersion` emitted without `pre-module` transitional marker
@@ -220,7 +224,7 @@ Progress note (2026-04-16, reuse-existing detection broadened for minimized/prev
 Progress note (2026-04-17, Task 5 launch-status reason code propagation):
 - Updated launch profile status payload wiring in `src/main/main.js` so slot reason codes surface in user-facing paths (not diagnostics-only): `reused_existing_window`, `spawned_new_window`, and `fallback_to_spawn`.
 - `runLaunch` now keeps explicit `launchStatusMode` and `launchStatusReasonCode` state per launch item, maps spawn-after-reuse-attempt to `fallback_to_spawn`, and carries these values into pending confirmation and failed-app payload entries.
-- Updated `src/main/utils/launch-status-store.js` cloning so structured pending-confirmation fields `mode` and `reasonCode` are preserved in status store payloads; pending-confirmation `reason` remains plain human text.
+- Updated `src/main/services/launch-status-store.js` cloning so structured pending-confirmation fields `mode` and `reasonCode` are preserved in status store payloads; pending-confirmation `reason` remains plain human text.
 - Verification commands run for this slice: `npm run lint` (0 errors, warnings only), `npm run test` (40/40 pass), `npm run typecheck` (baseline check passed: current 18, baseline 31, resolved 13).
 
 Progress note (2026-04-17, chromium delayed-maximize thrash reduction + normal precision tightening):
