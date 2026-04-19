@@ -3,7 +3,8 @@
 const path = require('path');
 const fs = require('fs');
 const ws = require('windows-shortcuts');
-const { BrowserWindow, dialog } = require('electron');
+const { BrowserWindow, dialog, shell } = require('electron');
+const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 
 
 const createHandleTrustedIpc = (ipcMain, isTrustedIpcSender) => (
@@ -148,6 +149,82 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       properties: ['openFile', 'multiSelections'],
     });
     return pack(r);
+  });
+
+  const MAX_BROWSE_FOLDER_ENTRIES = 500;
+
+  handleTrustedIpc('open-path-in-explorer', async (_event, rawPath) => {
+    try {
+      const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+      const safePath = safeLimitedString(trimmed, MAX_SHORTCUT_PATH_LENGTH);
+      if (!safePath) return { ok: false, error: 'Invalid path' };
+
+      const resolved = path.resolve(safePath);
+      if (!fs.existsSync(resolved)) {
+        return { ok: false, error: 'Path does not exist' };
+      }
+      let st;
+      try {
+        st = fs.statSync(resolved);
+      } catch {
+        return { ok: false, error: 'Path is not accessible' };
+      }
+      if (st.isDirectory()) {
+        const errMsg = await shell.openPath(resolved);
+        if (errMsg) return { ok: false, error: errMsg };
+        return { ok: true };
+      }
+      if (st.isFile()) {
+        shell.showItemInFolder(resolved);
+        return { ok: true };
+      }
+      return { ok: false, error: 'Unsupported path type' };
+    } catch (err) {
+      console.error('[open-path-in-explorer]', err);
+      return { ok: false, error: 'Failed to open in File Explorer' };
+    }
+  });
+
+  handleTrustedIpc('browse-folder-list', async (_event, rawPath) => {
+    try {
+      const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+      const safePath = safeLimitedString(trimmed, MAX_SHORTCUT_PATH_LENGTH);
+      if (!safePath) return { ok: false, error: 'Invalid path' };
+
+      const resolved = path.resolve(safePath);
+      if (!fs.existsSync(resolved)) {
+        return { ok: false, error: 'Path does not exist' };
+      }
+      let st;
+      try {
+        st = fs.statSync(resolved);
+      } catch {
+        return { ok: false, error: 'Path is not accessible' };
+      }
+      if (!st.isDirectory()) {
+        return { ok: false, error: 'Path is not a folder' };
+      }
+
+      let dirents;
+      try {
+        dirents = fs.readdirSync(resolved, { withFileTypes: true });
+      } catch (readErr) {
+        console.error('[browse-folder-list] readdir', readErr);
+        return { ok: false, error: 'Could not read folder contents' };
+      }
+
+      const mapped = dirents.map((d) => ({
+        name: d.name,
+        isDirectory: d.isDirectory(),
+      }));
+      mapped.sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
+      const truncated = mapped.length > MAX_BROWSE_FOLDER_ENTRIES;
+      const entries = truncated ? mapped.slice(0, MAX_BROWSE_FOLDER_ENTRIES) : mapped;
+      return { ok: true, entries, truncated };
+    } catch (err) {
+      console.error('[browse-folder-list]', err);
+      return { ok: false, error: 'Failed to list folder' };
+    }
   });
 
   handleTrustedIpc('launch-profile', async (_event, profileId, request = {}) => {

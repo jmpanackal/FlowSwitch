@@ -70,12 +70,28 @@ const createAppShellSecurity = ({ app, session, ipcMain }) => {
   const setupSessionSecurity = () => {
     const defaultSession = session.defaultSession;
 
+    const isClipboardPermission = (permission) => {
+      const p = String(permission || '');
+      return (
+        p === 'clipboard-read'
+        || p === 'clipboard-write'
+        || p === 'clipboard-sanitized-read'
+        || p === 'clipboard-sanitized-write'
+      );
+    };
+
     defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+      if (isClipboardPermission(permission)) {
+        callback(true);
+        return;
+      }
       console.warn('[session] blocked permission request:', permission);
       callback(false);
     });
 
-    defaultSession.setPermissionCheckHandler(() => false);
+    defaultSession.setPermissionCheckHandler((_webContents, permission) => (
+      isClipboardPermission(permission)
+    ));
 
     defaultSession.webRequest.onHeadersReceived((details, callback) => {
       if (details.resourceType !== 'mainFrame' || !shouldInjectAppCsp(details.url)) {

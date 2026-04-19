@@ -1,13 +1,114 @@
-import React, { useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Settings, Trash2, Monitor, Clock, Zap, Shield, Globe, FileText, Plus, Edit, Save, X, Volume2, VolumeX, Minimize2, Maximize2, Copy, ExternalLink, FolderOpen, Replace, Play, RotateCcw, Eye, EyeOff, Hash, StickyNote, TestTube, FileOutput, Tag, User, Sliders, Package, MoreHorizontal, Clipboard, Link2, File } from "lucide-react";
+import {
+  Settings,
+  Trash2,
+  Monitor,
+  Clock,
+  Zap,
+  Shield,
+  Globe,
+  FileText,
+  Plus,
+  Edit,
+  Save,
+  X,
+  Volume2,
+  VolumeX,
+  Maximize2,
+  Copy,
+  ExternalLink,
+  FolderOpen,
+  Replace,
+  StickyNote,
+  FileOutput,
+  Sliders,
+  Package,
+  Clipboard,
+  Link2,
+  File,
+  ChevronDown,
+  Upload,
+  Folder,
+  GripVertical,
+  LayoutDashboard,
+} from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
-import { AppFileAssociationModal } from "./AppFileAssociationModal";
+import { ClickCopyPathBlock } from "./ClickCopyPathBlock";
+import {
+  inspectorFieldLabelClass,
+  inspectorHelperTextClass,
+  inspectorPanelCompactButtonClass,
+  inspectorPanelCompactButtonDisabledClass,
+  inspectorPanelDangerButtonClass,
+  inspectorPanelGridButtonDisabledClass,
+  inspectorPanelListButtonClass,
+  inspectorSectionPrimaryEmphasisClass,
+  inspectorSectionPrimaryTitleClass,
+} from "./inspectorStyles";
+
+/** Use text/plain so Electron/Chromium reliably carries drag payload. */
+const dragTabPayload = (index: number) => `flowswitch-tab:${index}`;
+const dragAssocPayload = (index: number) => `flowswitch-assoc:${index}`;
+const parseTabDragPayload = (raw: string) => {
+  const m = /^flowswitch-tab:(\d+)$/.exec(String(raw || "").trim());
+  return m ? Number(m[1]) : NaN;
+};
+const parseAssocDragPayload = (raw: string) => {
+  const m = /^flowswitch-assoc:(\d+)$/.exec(String(raw || "").trim());
+  return m ? Number(m[1]) : NaN;
+};
+
+const associationBaseName = (p: string) => {
+  const s = p.replace(/[/\\]+$/, "");
+  const parts = s.split(/[/\\]/);
+  return parts[parts.length - 1] || s;
+};
+
+const associationExtType = (fileName: string) =>
+  fileName.split(".").pop()?.toLowerCase() || "unknown";
+
+const defaultAppForAssociationFile = (fileName: string): string => {
+  const ext = associationExtType(fileName);
+  const appMap: Record<string, string> = {
+    pdf: "Adobe Acrobat",
+    doc: "Microsoft Word",
+    docx: "Microsoft Word",
+    xls: "Microsoft Excel",
+    xlsx: "Microsoft Excel",
+    ppt: "Microsoft PowerPoint",
+    pptx: "Microsoft PowerPoint",
+    txt: "Notepad",
+    md: "Visual Studio Code",
+    js: "Visual Studio Code",
+    ts: "Visual Studio Code",
+    tsx: "Visual Studio Code",
+    jsx: "Visual Studio Code",
+    py: "Visual Studio Code",
+    html: "Visual Studio Code",
+    css: "Visual Studio Code",
+    json: "Visual Studio Code",
+    jpg: "Photos",
+    jpeg: "Photos",
+    png: "Photos",
+    gif: "Photos",
+    svg: "Visual Studio Code",
+    mp4: "VLC Media Player",
+    avi: "VLC Media Player",
+    mov: "VLC Media Player",
+    mp3: "Windows Media Player",
+    wav: "Windows Media Player",
+    zip: "WinRAR",
+    rar: "WinRAR",
+    "7z": "7-Zip",
+  };
+  return appMap[ext] || "File Explorer";
+};
 
 interface SelectedApp {
   type: 'app' | 'browser' | 'file';
-  source: 'monitor' | 'minimized';
+  source: 'monitor' | 'minimized' | 'sidebar';
   monitorId?: string;
   appIndex?: number;
   data: any; // The actual app/browser/file data
@@ -25,9 +126,12 @@ interface SelectedAppDetailsProps {
   browserTabs?: any[]; // Browser tabs for the profile
   onUpdateBrowserTabs?: (tabs: any[]) => void;
   onAddBrowserTab?: (tab: any) => void;
+  /** Installed app from Apps sidebar: place on layout (same behavior as sidebar + menu). */
+  onAddSidebarAppToMonitor?: (monitorId: string) => void;
+  onAddSidebarAppToMinimized?: () => void;
 }
 
-type TabType = 'identity' | 'launch' | 'content' | 'metadata' | 'debug';
+type TabType = "overview" | "launch" | "content";
 
 export function SelectedAppDetails({
   selectedApp,
@@ -40,15 +144,104 @@ export function SelectedAppDetails({
   monitors = [],
   browserTabs = [],
   onUpdateBrowserTabs,
-  onAddBrowserTab
+  onAddBrowserTab,
+  onAddSidebarAppToMonitor,
+  onAddSidebarAppToMinimized,
 }: SelectedAppDetailsProps) {
-  const [showFileAssociationModal, setShowFileAssociationModal] = useState(false);
-  const [activeTab, setActiveTab] = useState<TabType>('identity');
+  const [addAssocMenuOpen, setAddAssocMenuOpen] = useState(false);
+  const addAssocMenuRef = useRef<HTMLDivElement>(null);
+  const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [showAdvanced, setShowAdvanced] = useState(false);
+  const [revealPathError, setRevealPathError] = useState<string | null>(null);
   
-  // Direct paste functionality
   const [pasteInput, setPasteInput] = useState('');
-  const [pasteType, setPasteType] = useState<'auto' | 'file' | 'link'>('auto');
+  const [identityPathCopyNotice, setIdentityPathCopyNotice] = useState<string | null>(null);
+  const identityPathCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(() => {
+    return () => {
+      if (identityPathCopyTimer.current) {
+        clearTimeout(identityPathCopyTimer.current);
+        identityPathCopyTimer.current = null;
+      }
+    };
+  }, []);
+
+  useEffect(() => {
+    setIdentityPathCopyNotice(null);
+  }, [selectedApp?.data?.executablePath]);
+
+  useEffect(() => {
+    setRevealPathError(null);
+  }, [
+    selectedApp?.data?.executablePath,
+    selectedApp?.data?.shortcutPath,
+  ]);
+
+  useEffect(() => {
+    setAddAssocMenuOpen(false);
+  }, [
+    selectedApp?.data?.instanceId,
+    selectedApp?.monitorId,
+    selectedApp?.appIndex,
+    selectedApp?.source,
+  ]);
+
+  const showAddToLayout =
+    selectedApp?.source === "sidebar"
+    && typeof onAddSidebarAppToMonitor === "function"
+    && typeof onAddSidebarAppToMinimized === "function";
+
+  const selectedAppTabResetKey = useMemo(() => {
+    if (!selectedApp) return "";
+    if (selectedApp.source === "sidebar") {
+      return `sidebar:${selectedApp.type}:${String(selectedApp.data?.name ?? "")}`;
+    }
+    const iid = selectedApp.data?.instanceId;
+    if (iid) return `slot:${String(iid)}`;
+    return `slot:${selectedApp.source}:${String(selectedApp.monitorId ?? "")}:${String(selectedApp.appIndex ?? "")}`;
+  }, [
+    selectedApp?.source,
+    selectedApp?.type,
+    selectedApp?.data?.name,
+    selectedApp?.data?.instanceId,
+    selectedApp?.monitorId,
+    selectedApp?.appIndex,
+  ]);
+
+  useEffect(() => {
+    if (!selectedAppTabResetKey) return;
+    setActiveTab("overview");
+  }, [selectedAppTabResetKey]);
+
+  const monitorsSortedForAdd = useMemo(() => {
+    const list = [...(monitors || [])] as {
+      id: string;
+      name?: string;
+      primary?: boolean;
+    }[];
+    list.sort((a, b) => {
+      if (a.primary === b.primary) return 0;
+      return a.primary ? -1 : 1;
+    });
+    return list;
+  }, [monitors]);
+
+  const tabs: { id: TabType; label: string; icon: LucideIcon }[] = [
+    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "launch", label: "Launch", icon: Sliders },
+    { id: "content", label: "Content", icon: Package },
+  ];
+
+  useEffect(() => {
+    if (!addAssocMenuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const el = addAssocMenuRef.current;
+      if (el && !el.contains(e.target as Node)) setAddAssocMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [addAssocMenuOpen]);
 
   if (!selectedApp) {
     return (
@@ -59,7 +252,7 @@ export function SelectedAppDetails({
           </div>
           <h3 className="text-sm font-semibold text-flow-text-primary tracking-tight mb-2">No app selected</h3>
           <p className="text-xs text-flow-text-muted leading-relaxed">
-            Select an app on a monitor or in the minimized row to view launch options, files, and metadata.
+            Select an app from the layout, the minimized row, or the Apps sidebar to view details.
           </p>
         </div>
       </div>
@@ -67,9 +260,20 @@ export function SelectedAppDetails({
   }
 
   const { data, type, source, monitorId } = selectedApp;
+  const isProfileSlot = source === "monitor" || source === "minimized";
+
+  const monitorDisplayName =
+    monitors.find((m) => m.id === monitorId)?.name || monitorId || "Monitor";
+  const activeStatusLine =
+    source === "sidebar"
+      ? "Inactive"
+      : source === "minimized"
+        ? "Active: Minimized"
+        : `Active: ${monitorDisplayName}`;
 
   // Handle field updates with auto-save
   const handleFieldUpdate = (field: string, value: any) => {
+    if (!isProfileSlot) return;
     if (onUpdateApp) {
       onUpdateApp({ [field]: value });
     }
@@ -77,6 +281,50 @@ export function SelectedAppDetails({
 
   // Get current data
   const currentData = data;
+
+  const copyIdentityExecutablePath = async () => {
+    const t = typeof currentData.executablePath === "string"
+      ? currentData.executablePath.trim()
+      : "";
+    if (!t) return;
+    try {
+      await navigator.clipboard.writeText(t);
+      if (identityPathCopyTimer.current) clearTimeout(identityPathCopyTimer.current);
+      setIdentityPathCopyNotice("Copied");
+      identityPathCopyTimer.current = setTimeout(() => {
+        setIdentityPathCopyNotice(null);
+        identityPathCopyTimer.current = null;
+      }, 1600);
+    } catch {
+      /* ignore */
+    }
+  };
+
+  const pathForRevealInExplorer = (() => {
+    const sc = typeof currentData.shortcutPath === "string" ? currentData.shortcutPath.trim() : "";
+    if (sc) return sc;
+    const ex = typeof currentData.executablePath === "string" ? currentData.executablePath.trim() : "";
+    return ex;
+  })();
+
+  const canRevealInExplorer =
+    Boolean(pathForRevealInExplorer)
+    && typeof window !== "undefined"
+    && !!window.electron
+    && typeof window.electron.showItemInFolder === "function";
+
+  const handleRevealInExplorer = async () => {
+    setRevealPathError(null);
+    if (!pathForRevealInExplorer) return;
+    if (!window.electron?.showItemInFolder) {
+      setRevealPathError("This build cannot open File Explorer from here.");
+      return;
+    }
+    const result = await window.electron.showItemInFolder(pathForRevealInExplorer);
+    if (!result.ok) {
+      setRevealPathError(result.error || "Could not open file location.");
+    }
+  };
 
   // Render app icon with proper fallback
   const renderAppIcon = (app: any, size: string = "w-12 h-12") => {
@@ -124,103 +372,224 @@ export function SelectedAppDetails({
     }
   };
 
-  // Tab configuration
-  const tabs = [
-    { id: 'identity' as TabType, label: 'Identity', icon: User },
-    { id: 'launch' as TabType, label: 'Launch', icon: Sliders },
-    { id: 'content' as TabType, label: 'Content', icon: Package },
-    { id: 'metadata' as TabType, label: 'Metadata', icon: Tag },
-    { id: 'debug' as TabType, label: 'Debug', icon: MoreHorizontal }
-  ];
+  // Render Overview tab (quick actions, add-to-layout when browsing installed apps, path)
+  const renderOverviewTab = () => {
+    const rawExe =
+      typeof currentData.executablePath === "string"
+        ? currentData.executablePath.trim()
+        : "";
+    const showMoveToSection =
+      isProfileSlot
+      && typeof onMoveToMonitor === "function"
+      && typeof onMoveToMinimized === "function";
+    const moveToMonitorTargets = monitorsSortedForAdd.filter(
+      (m) => source !== "monitor" || m.id !== monitorId,
+    );
+    const layoutHasPlacementActions = showMoveToSection || showAddToLayout;
 
-  // Render Identity Tab Content
-  const renderIdentityTab = () => (
+    return (
     <div className="space-y-6">
-      {/* Quick Actions */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Quick Actions</label>
-        <div className="grid grid-cols-2 gap-2">
-          <button className="flex items-center gap-2 px-3 py-2 text-sm bg-flow-surface border border-flow-border text-flow-text-secondary hover:text-flow-text-primary hover:border-flow-border-accent rounded-lg transition-all">
-            <Replace className="w-4 h-4" />
-            Replace App
-          </button>
-          <button className="flex items-center gap-2 px-3 py-2 text-sm bg-flow-surface border border-flow-border text-flow-text-secondary hover:text-flow-text-primary hover:border-flow-border-accent rounded-lg transition-all">
-            <FolderOpen className="w-4 h-4" />
-            Open Location
-          </button>
-          <button 
-            onClick={onDeleteApp}
-            className="flex items-center gap-2 px-3 py-2 text-sm bg-flow-accent-red/10 border border-flow-accent-red/30 text-flow-accent-red hover:bg-flow-accent-red/20 rounded-lg transition-all"
-          >
-            <Trash2 className="w-4 h-4" />
-            Remove App
-          </button>
-          <button className="flex items-center gap-2 px-3 py-2 text-sm bg-flow-accent-blue/10 border border-flow-accent-blue/30 text-flow-accent-blue hover:bg-flow-accent-blue/20 rounded-lg transition-all">
-            <TestTube className="w-4 h-4" />
-            Test Launch
-          </button>
+      <div className="space-y-4">
+        <div>
+          <div className={`${inspectorSectionPrimaryTitleClass} mb-1`}>Layout</div>
+          <p className={`${inspectorHelperTextClass} mt-0.5`}>
+            Move, add, or remove this app on the active profile.
+            {showAddToLayout ? (
+              <>
+                {" "}
+                From the Apps list you can also use{" "}
+                <span className="font-medium text-flow-text-primary">+</span> or drag the icon.
+              </>
+            ) : null}
+            {showMoveToSection && !showAddToLayout ? (
+              <>
+                {" "}
+                {source === "monitor"
+                  ? "Use the buttons below to move to another monitor or the minimized row."
+                  : "Use the buttons below to move onto a monitor."}
+              </>
+            ) : null}
+          </p>
         </div>
+
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-2">
+            <button
+              type="button"
+              disabled
+              aria-disabled="true"
+              title="Coming soon: swap this slot for another app from search."
+              className={inspectorPanelGridButtonDisabledClass}
+            >
+              <Replace className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Replace
+            </button>
+            <button
+              type="button"
+              onClick={() => onDeleteApp?.()}
+              disabled={!onDeleteApp || !isProfileSlot}
+              aria-disabled={!onDeleteApp || !isProfileSlot}
+              title={
+                !isProfileSlot
+                  ? "Only apps on the layout can be removed here"
+                  : onDeleteApp
+                    ? undefined
+                    : "Remove is unavailable"
+              }
+              className={inspectorPanelDangerButtonClass}
+            >
+              <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+              Remove
+            </button>
+          </div>
+
+          {showAddToLayout ? (
+            <div className="flex flex-col gap-1">
+              {monitorsSortedForAdd.length ? (
+                monitorsSortedForAdd.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onAddSidebarAppToMonitor?.(m.id)}
+                    className={inspectorPanelListButtonClass}
+                  >
+                    Add to {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                  </button>
+                ))
+              ) : (
+                <p className="text-xs text-flow-text-muted">No monitors in profile.</p>
+              )}
+              <button
+                type="button"
+                onClick={() => onAddSidebarAppToMinimized?.()}
+                className={inspectorPanelListButtonClass}
+              >
+                Add to minimized row
+              </button>
+            </div>
+          ) : null}
+
+          {showMoveToSection ? (
+            <div className="flex flex-col gap-1">
+              {moveToMonitorTargets.length ? (
+                moveToMonitorTargets.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    onClick={() => onMoveToMonitor?.(m.id)}
+                    className={inspectorPanelListButtonClass}
+                  >
+                    Move to {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                  </button>
+                ))
+              ) : source === "minimized" ? (
+                <p className="text-xs text-flow-text-muted">No monitors in profile.</p>
+              ) : null}
+              {source === "monitor" ? (
+                <button
+                  type="button"
+                  onClick={() => onMoveToMinimized?.()}
+                  className={inspectorPanelListButtonClass}
+                >
+                  Move to minimized row
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+        </div>
+
+        {!layoutHasPlacementActions ? (
+          <p className={inspectorHelperTextClass}>
+            Placement shortcuts appear when this app is on the layout or when browsing installed apps from the sidebar.
+          </p>
+        ) : null}
       </div>
+
+      <p className={inspectorHelperTextClass}>
+        Single-app placement preview is not available yet — use{" "}
+        <span className="font-medium text-flow-text-secondary">Launch profile</span>{" "}
+        in the header to run the full workflow.
+      </p>
 
       {/* Basic Info */}
       <div className="space-y-4">
-        <label className="block text-sm font-medium text-flow-text-secondary">Basic Information</label>
-        
-        <div>
-          <label className="block text-xs font-medium text-flow-text-muted mb-2">App Name</label>
-          <input
-            type="text"
-            value={currentData.name || ''}
-            onChange={(e) => handleFieldUpdate('name', e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-            placeholder="Enter app name"
-          />
-        </div>
+        <label className={inspectorSectionPrimaryTitleClass}>Basic Information</label>
+
+        {!isProfileSlot ? (
+          <p className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-2 text-[11px] leading-snug text-flow-text-muted">
+            This app is not on the current profile layout. Use the + button on its row in the Apps sidebar to place it on a monitor or the minimized row.
+          </p>
+        ) : null}
 
         <div>
-          <label className="block text-xs font-medium text-flow-text-muted mb-2">Executable Path</label>
-          <input
-            type="text"
-            value={currentData.executablePath || 'C:\\Program Files\\App\\app.exe'}
-            onChange={(e) => handleFieldUpdate('executablePath', e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-            placeholder="C:\\Program Files\\App\\app.exe"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-flow-text-muted mb-2">Shortcut path (.lnk)</label>
-          <input
-            type="text"
-            value={currentData.shortcutPath || ''}
-            onChange={(e) => handleFieldUpdate('shortcutPath', e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-            placeholder="C:\\Users\\…\\App.lnk (optional; launch uses shortcut when set)"
-          />
-        </div>
-
-        <div>
-          <label className="block text-xs font-medium text-flow-text-muted mb-2">Launch URL (steam://, etc.)</label>
-          <input
-            type="text"
-            value={currentData.launchUrl || ''}
-            onChange={(e) => handleFieldUpdate('launchUrl', e.target.value)}
-            className="w-full px-3 py-2 text-xs bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-            placeholder="steam://rungameid/… (optional)"
-          />
+          <label className={inspectorFieldLabelClass}>Executable Path</label>
+          {rawExe ? (
+            <ClickCopyPathBlock
+              value={rawExe}
+              notice={identityPathCopyNotice}
+              onCopy={() => void copyIdentityExecutablePath()}
+            />
+          ) : isProfileSlot ? (
+            <input
+              type="text"
+              value={typeof currentData.executablePath === "string" ? currentData.executablePath : ""}
+              onChange={(e) => handleFieldUpdate("executablePath", e.target.value)}
+              className="w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 font-mono text-xs text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+              placeholder="C:\\Program Files\\App\\app.exe"
+            />
+          ) : (
+            <p className="rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-2 text-xs text-flow-text-muted">
+              No executable path set for this app.
+            </p>
+          )}
+          <div className="mt-2 flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => void handleRevealInExplorer()}
+              disabled={!canRevealInExplorer}
+              aria-disabled={!canRevealInExplorer}
+              title={
+                canRevealInExplorer
+                  ? "Show executable or saved shortcut in File Explorer"
+                  : "Set an executable path above to open its location on disk."
+              }
+              className={
+                canRevealInExplorer
+                  ? inspectorPanelCompactButtonClass
+                  : inspectorPanelCompactButtonDisabledClass
+              }
+            >
+              <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
+              Open in Explorer
+            </button>
+          </div>
+          {revealPathError ? (
+            <p className="mt-1.5 text-[11px] leading-snug text-flow-accent-red" role="status">
+              {revealPathError}
+            </p>
+          ) : null}
         </div>
       </div>
     </div>
-  );
+    );
+  };
 
   // Render Launch Tab Content
-  const renderLaunchTab = () => (
+  const renderLaunchTab = () => {
+    if (!isProfileSlot) {
+      return (
+        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-sm text-flow-text-muted leading-relaxed">
+          Launch settings apply after this app is placed on this profile (use + next to the app in the Apps sidebar).
+        </div>
+      );
+    }
+    return (
     <div className="space-y-6">
       {/* Monitor Assignment */}
       <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Monitor Assignment</label>
+        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Monitor Assignment</label>
         <div>
-          <label className="block text-xs font-medium text-flow-text-muted mb-2">Target Monitor</label>
+          <label className={inspectorFieldLabelClass}>Target Monitor</label>
           <select 
             value={currentData.monitorId || monitorId || 'monitor-1'}
             onChange={(e) => handleFieldUpdate('monitorId', e.target.value)}
@@ -237,11 +606,11 @@ export function SelectedAppDetails({
 
       {/* Window Settings */}
       <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Window Settings</label>
+        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Window Settings</label>
         
         <div className="space-y-4">
           <div>
-            <label className="block text-xs font-medium text-flow-text-muted mb-2">Window State</label>
+            <label className={inspectorFieldLabelClass}>Window State</label>
             <select 
               value={currentData.windowState || 'maximized'}
               onChange={(e) => handleFieldUpdate('windowState', e.target.value)}
@@ -255,7 +624,7 @@ export function SelectedAppDetails({
           </div>
 
           <div>
-            <label className="block text-xs font-medium text-flow-text-muted mb-2">Launch Delay (seconds)</label>
+            <label className={inspectorFieldLabelClass}>Launch Delay (seconds)</label>
             <input
               type="number"
               min="0"
@@ -271,7 +640,7 @@ export function SelectedAppDetails({
 
       {/* Launch Options */}
       <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Launch Options</label>
+        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Launch Options</label>
         <div className="space-y-3">
           <div className="flex items-center justify-between p-3 bg-flow-surface rounded-lg border border-flow-border">
             <div>
@@ -322,8 +691,23 @@ export function SelectedAppDetails({
           </div>
         </div>
       </div>
+
+      {/* Custom Launch Arguments */}
+      <div>
+        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
+          Custom Launch Arguments
+        </label>
+        <input
+          type="text"
+          value={currentData.customArgs || ""}
+          onChange={(e) => handleFieldUpdate("customArgs", e.target.value)}
+          placeholder="--profile dev --disable-extensions"
+          className="w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 font-mono text-sm text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+        />
+      </div>
     </div>
-  );
+    );
+  };
 
   // Get browser tabs for this specific app/browser
   const getAppBrowserTabs = () => {
@@ -354,19 +738,20 @@ export function SelectedAppDetails({
   // Handle adding content via paste
   const handlePasteContent = () => {
     if (!pasteInput.trim()) return;
+    if (!isProfileSlot) return;
 
     const trimmedInput = pasteInput.trim();
-    let contentType = pasteType;
-    
-    // Auto-detect type if set to auto
-    if (contentType === 'auto') {
-      if (trimmedInput.match(/^https?:\/\//i)) {
-        contentType = 'link';
-      } else if (trimmedInput.match(/^[a-zA-Z]:\\/i) || trimmedInput.startsWith('/') || trimmedInput.includes('\\')) {
-        contentType = 'file';
-      } else {
-        contentType = 'link'; // Default to link
-      }
+    let contentType: "link" | "file";
+    if (trimmedInput.match(/^https?:\/\//i)) {
+      contentType = "link";
+    } else if (
+      trimmedInput.match(/^[a-zA-Z]:\\/i)
+      || trimmedInput.startsWith("/")
+      || trimmedInput.includes("\\")
+    ) {
+      contentType = "file";
+    } else {
+      contentType = "link";
     }
 
     if (contentType === 'link') {
@@ -471,59 +856,177 @@ export function SelectedAppDetails({
   // Remove associated file
   const removeAssociatedFile = (fileIndex: number) => {
     if (!onUpdateAssociatedFiles) return;
-    
+    if (!isProfileSlot) return;
+
     const currentFiles = currentData.associatedFiles || [];
     const updatedFiles = currentFiles.filter((_: any, index: number) => index !== fileIndex);
     onUpdateAssociatedFiles(updatedFiles);
   };
 
+  const tabMatchesThisApp = (t: {
+    monitorId?: string;
+    browser?: string;
+    appInstanceId?: string;
+  }) => (
+    source === "monitor"
+    && Boolean(monitorId)
+    && t.monitorId === monitorId
+    && t.browser === data.name
+    && t.appInstanceId === data.instanceId
+  );
+
+  const reorderBrowserTabs = (fromIndex: number, toIndex: number) => {
+    if (fromIndex === toIndex) return;
+    if (source === "monitor" && onUpdateBrowserTabs) {
+      const mineInOrder = browserTabs.filter(tabMatchesThisApp);
+      if (
+        fromIndex < 0
+        || toIndex < 0
+        || fromIndex >= mineInOrder.length
+        || toIndex >= mineInOrder.length
+      ) return;
+      const reordered = [...mineInOrder];
+      const [item] = reordered.splice(fromIndex, 1);
+      reordered.splice(toIndex, 0, item);
+      let i = 0;
+      const newGlobal = browserTabs.map((t) => (tabMatchesThisApp(t) ? reordered[i++] : t));
+      onUpdateBrowserTabs(newGlobal);
+    } else if (source === "minimized" && onUpdateApp) {
+      const tabs = [...(data.browserTabs || [])];
+      if (
+        fromIndex < 0
+        || toIndex < 0
+        || fromIndex >= tabs.length
+        || toIndex >= tabs.length
+      ) return;
+      const [item] = tabs.splice(fromIndex, 1);
+      tabs.splice(toIndex, 0, item);
+      onUpdateApp({ browserTabs: tabs });
+    }
+  };
+
+  const reorderAssociatedFiles = (fromIndex: number, toIndex: number) => {
+    if (!onUpdateAssociatedFiles || !isProfileSlot || fromIndex === toIndex) return;
+    const list = [...(currentData.associatedFiles || [])];
+    if (
+      fromIndex < 0
+      || toIndex < 0
+      || fromIndex >= list.length
+      || toIndex >= list.length
+    ) return;
+    const [row] = list.splice(fromIndex, 1);
+    list.splice(toIndex, 0, row);
+    onUpdateAssociatedFiles(list);
+  };
+
+  const hasDesktopPicker = Boolean(
+    typeof window !== "undefined"
+    && window.electron?.pickContentLibraryPaths,
+  );
+
+  const handlePickAssociatedPaths = async (mode: "files" | "directory") => {
+    setAddAssocMenuOpen(false);
+    if (!onUpdateAssociatedFiles || !isProfileSlot) return;
+    const pick = window.electron?.pickContentLibraryPaths;
+    if (!pick) {
+      window.alert("Desktop file picker is not available in this environment.");
+      return;
+    }
+    try {
+      const res = await pick({ mode });
+      if (res.canceled || !res.entries?.length) return;
+      const dirs = res.entries.filter((e) => e.kind === "directory");
+      const files = res.entries.filter((e) => e.kind === "file");
+      if (dirs.length && files.length) {
+        window.alert("Choose only files or only folders in the same pick — not both.");
+        return;
+      }
+      const currentFiles = currentData.associatedFiles || [];
+      const stamp = Date.now();
+      const additions: Array<{
+        id: string;
+        name: string;
+        path: string;
+        type: string;
+        url?: string;
+        associatedApp: string;
+        useDefaultApp: boolean;
+      }> = [];
+      if (files.length) {
+        for (let i = 0; i < files.length; i++) {
+          const fp = files[i].path;
+          const bn = associationBaseName(fp);
+          additions.push({
+            id: `picked-file-${stamp}-${i}`,
+            name: bn,
+            path: fp,
+            type: associationExtType(bn),
+            associatedApp: defaultAppForAssociationFile(bn),
+            useDefaultApp: true,
+          });
+        }
+      }
+      if (dirs.length) {
+        for (let i = 0; i < dirs.length; i++) {
+          const dp = dirs[i].path;
+          const bn = associationBaseName(dp);
+          additions.push({
+            id: `picked-folder-${stamp}-${i}`,
+            name: bn,
+            path: dp,
+            type: "folder",
+            associatedApp: "File Explorer",
+            useDefaultApp: true,
+          });
+        }
+      }
+      onUpdateAssociatedFiles([...currentFiles, ...additions]);
+    } catch {
+      window.alert("Could not open the file picker.");
+    }
+  };
+
   // Render Content Tab Content
   const renderContentTab = () => {
+    if (!isProfileSlot) {
+      return (
+        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-sm text-flow-text-muted leading-relaxed">
+          Files and URLs apply after this app is placed on this profile. Custom launch arguments are on the Launch tab.
+        </div>
+      );
+    }
     const isBrowser = type === 'browser' || data.name?.toLowerCase().includes('chrome') || data.name?.toLowerCase().includes('browser') || data.name?.toLowerCase().includes('firefox') || data.name?.toLowerCase().includes('safari') || data.name?.toLowerCase().includes('edge');
     const appBrowserTabs = getAppBrowserTabs();
 
     return (
-      <div className="space-y-6">
+      <div className="flex min-h-0 flex-1 flex-col gap-6">
         {/* Quick Add Section */}
-        <div>
-          <label className="block text-sm font-medium text-flow-text-secondary mb-3">Quick Add Content</label>
-          <div className="p-4 bg-flow-surface rounded-lg border border-flow-border space-y-3">
+        <div className="shrink-0">
+          <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
+            Quick Add Content
+          </label>
+          <div className="space-y-2 rounded-lg border border-flow-border bg-flow-surface p-4">
             <div>
-              <label className="block text-xs font-medium text-flow-text-muted mb-2">Paste File Path or URL</label>
+              <label className={inspectorFieldLabelClass}>
+                Paste file path or URL (auto-detected)
+              </label>
               <div className="flex gap-2">
                 <input
                   type="text"
                   value={pasteInput}
                   onChange={(e) => setPasteInput(e.target.value)}
                   placeholder="C:\\path\\to\\file.txt or https://example.com"
-                  className="flex-1 px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-                  onKeyDown={(e) => e.key === 'Enter' && handlePasteContent()}
+                  className="flex-1 rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-sm text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+                  onKeyDown={(e) => e.key === "Enter" && handlePasteContent()}
                 />
                 <button
+                  type="button"
                   onClick={handlePasteContent}
                   disabled={!pasteInput.trim()}
-                  className="px-3 py-2 bg-flow-accent-blue hover:bg-flow-accent-blue-hover disabled:opacity-50 disabled:cursor-not-allowed text-white rounded-lg text-sm transition-colors"
+                  className="rounded-lg bg-flow-accent-blue px-3 py-2 text-sm text-white transition-colors hover:bg-flow-accent-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
-                  <Plus className="w-4 h-4" />
+                  <Plus className="h-4 w-4" />
                 </button>
-              </div>
-            </div>
-            <div className="flex items-center gap-3">
-              <label className="text-xs font-medium text-flow-text-muted">Type:</label>
-              <div className="flex gap-2">
-                {['auto', 'file', 'link'].map((typeOption) => (
-                  <button
-                    key={typeOption}
-                    onClick={() => setPasteType(typeOption as any)}
-                    className={`px-2 py-1 text-xs rounded transition-colors ${
-                      pasteType === typeOption
-                        ? 'bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30'
-                        : 'bg-flow-bg-primary text-flow-text-secondary hover:bg-flow-surface border border-flow-border'
-                    }`}
-                  >
-                    {typeOption === 'auto' ? 'Auto' : typeOption === 'file' ? 'File' : 'Link'}
-                  </button>
-                ))}
               </div>
             </div>
           </div>
@@ -531,18 +1034,44 @@ export function SelectedAppDetails({
 
         {/* Browser Tabs (for browser apps) */}
         {isBrowser && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="text-sm font-medium text-flow-text-secondary">Browser Tabs</label>
+          <div className="max-h-48 shrink-0 overflow-hidden">
+            <div className="mb-3 flex items-center justify-between">
+              <label className={inspectorSectionPrimaryEmphasisClass}>Browser Tabs</label>
               <span className="text-xs text-flow-text-muted">
-                {appBrowserTabs.length} tab{appBrowserTabs.length !== 1 ? 's' : ''}
+                {appBrowserTabs.length} tab{appBrowserTabs.length !== 1 ? "s" : ""}
               </span>
             </div>
-            
+
             {appBrowserTabs.length > 0 ? (
-              <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-elegant">
+              <div className="scrollbar-elegant max-h-40 space-y-2 overflow-y-auto">
                 {appBrowserTabs.map((tab: any, index: number) => (
-                  <div key={index} className="flex items-center gap-3 p-3 bg-flow-surface rounded-lg border border-flow-border group">
+                  <div
+                    key={tab.id || `tab-${index}-${tab.url}`}
+                    onDragOver={(e) => {
+                      e.preventDefault();
+                      e.dataTransfer.dropEffect = "move";
+                    }}
+                    onDrop={(e) => {
+                      e.preventDefault();
+                      const from = parseTabDragPayload(e.dataTransfer.getData("text/plain"));
+                      if (Number.isNaN(from)) return;
+                      reorderBrowserTabs(from, index);
+                    }}
+                    className="group flex items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
+                  >
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.setData("text/plain", dragTabPayload(index));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
+                      title="Drag to reorder"
+                      aria-hidden
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
                     <Globe className="w-4 h-4 flex-shrink-0 text-flow-text-muted" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-flow-text-primary truncate">{tab.name}</div>
@@ -550,13 +1079,15 @@ export function SelectedAppDetails({
                     </div>
                     <div className="flex items-center gap-2">
                       {tab.isActive && <div className="w-2 h-2 bg-flow-accent-blue rounded-full" />}
-                      <button 
-                        onClick={() => window.open(tab.url, '_blank')}
+                      <button
+                        type="button"
+                        onClick={() => window.open(tab.url, "_blank", "noopener,noreferrer")}
                         className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       >
                         <ExternalLink className="w-3 h-3" />
                       </button>
-                      <button 
+                      <button
+                        type="button"
                         onClick={() => removeBrowserTab(index)}
                         className="p-1.5 text-flow-text-muted hover:text-flow-accent-red rounded-lg transition-colors opacity-0 group-hover:opacity-100"
                       >
@@ -576,222 +1107,155 @@ export function SelectedAppDetails({
           </div>
         )}
 
-        {/* Associated Content/Files (for all apps, including browsers) */}
-        <div>
-          <div className="flex items-center justify-between mb-3">
-            <label className="text-sm font-medium text-flow-text-secondary">Associated Files & Content</label>
-            <button 
-              onClick={() => setShowFileAssociationModal(true)}
-              className="inline-flex items-center gap-1 px-3 py-1.5 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-white rounded-lg text-xs transition-colors"
-            >
-              <Plus className="w-3 h-3" />
-              Browse Files
-            </button>
+        {/* Associated Content (fills remaining tab height) */}
+        <div className="flex min-h-0 flex-1 flex-col gap-2">
+          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
+            <label className={inspectorSectionPrimaryEmphasisClass}>
+              Associated Content
+            </label>
+            {onUpdateAssociatedFiles && hasDesktopPicker ? (
+              <div className="relative shrink-0" ref={addAssocMenuRef}>
+                <button
+                  type="button"
+                  onClick={() => setAddAssocMenuOpen((o) => !o)}
+                  className={`${inspectorPanelCompactButtonClass} gap-1 px-2.5 py-1.5 text-xs`}
+                >
+                  <Plus className="h-3 w-3 shrink-0" aria-hidden />
+                  Add
+                  <ChevronDown className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
+                </button>
+                {addAssocMenuOpen ? (
+                  <div className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 w-44 min-w-0 py-0.5 shadow-lg">
+                    <button
+                      type="button"
+                      className="flow-menu-item text-xs"
+                      onClick={() => void handlePickAssociatedPaths("files")}
+                    >
+                      <Upload className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
+                      Add files…
+                    </button>
+                    <button
+                      type="button"
+                      className="flow-menu-item text-xs"
+                      onClick={() => void handlePickAssociatedPaths("directory")}
+                    >
+                      <Folder className="h-3.5 w-3.5 shrink-0 text-amber-400/90" aria-hidden />
+                      Add folder…
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            ) : onUpdateAssociatedFiles ? (
+              <span className="text-[11px] text-flow-text-muted">Picker unavailable</span>
+            ) : null}
           </div>
-          
+
           {(currentData.associatedFiles || []).length > 0 ? (
-            <div className="space-y-2 max-h-60 overflow-y-auto scrollbar-elegant">
+            <div className="scrollbar-elegant flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto">
               {(currentData.associatedFiles || []).map((file: any, index: number) => (
-                <div key={index} className="flex items-center gap-3 p-3 bg-flow-surface rounded-lg border border-flow-border group">
-                  {file.type === 'url' || file.url ? (
-                    <Link2 className="w-4 h-4 flex-shrink-0 text-flow-accent-blue" />
+                <div
+                  key={file.id || `assoc-${index}-${file.path || file.url || ""}`}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = "move";
+                  }}
+                  onDrop={(e) => {
+                    e.preventDefault();
+                    const from = parseAssocDragPayload(e.dataTransfer.getData("text/plain"));
+                    if (Number.isNaN(from)) return;
+                    reorderAssociatedFiles(from, index);
+                  }}
+                  className="group flex shrink-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
+                >
+                  <span
+                    draggable
+                    onDragStart={(e) => {
+                      e.stopPropagation();
+                      e.dataTransfer.setData("text/plain", dragAssocPayload(index));
+                      e.dataTransfer.effectAllowed = "move";
+                    }}
+                    className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
+                    title="Drag to reorder"
+                    aria-hidden
+                  >
+                    <GripVertical className="h-4 w-4" />
+                  </span>
+                  {file.type === "url" || file.url ? (
+                    <Link2 className="h-4 w-4 flex-shrink-0 text-flow-accent-blue" />
                   ) : (
-                    <FileIcon type={file.type} className="w-4 h-4 flex-shrink-0" />
+                    <FileIcon type={file.type} className="h-4 w-4 flex-shrink-0" />
                   )}
-                  <div className="flex-1 min-w-0">
-                    <div className="text-sm font-medium text-flow-text-primary truncate">{file.name}</div>
-                    <div className="text-xs text-flow-text-muted truncate">{file.path || file.url}</div>
+                  <div className="min-w-0 flex-1">
+                    <div className="truncate text-sm font-medium text-flow-text-primary">{file.name}</div>
+                    <div className="truncate text-xs text-flow-text-muted">{file.path || file.url}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    {(file.url || file.type === 'url') && (
-                      <button 
-                        onClick={() => window.open(file.url || file.path, '_blank')}
-                        className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                    {(file.url || file.type === "url") && (
+                      <button
+                        type="button"
+                        onClick={() => window.open(file.url || file.path, "_blank", "noopener,noreferrer")}
+                        className="rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-blue group-hover:opacity-100"
                       >
-                        <ExternalLink className="w-3 h-3" />
+                        <ExternalLink className="h-3 w-3" />
                       </button>
                     )}
-                    <button 
+                    <button
+                      type="button"
                       onClick={() => removeAssociatedFile(index)}
-                      className="p-1.5 text-flow-text-muted hover:text-flow-accent-red rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                      className="rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-red group-hover:opacity-100"
                     >
-                      <Trash2 className="w-3 h-3" />
+                      <Trash2 className="h-3 w-3" />
                     </button>
                   </div>
                 </div>
               ))}
             </div>
           ) : (
-            <div className="p-6 text-center bg-flow-surface rounded-lg border border-flow-border">
-              <FileText className="w-8 h-8 text-flow-text-muted mx-auto mb-2" />
-              <p className="text-sm text-flow-text-muted">No files or content associated with this app</p>
-              <p className="text-xs text-flow-text-muted mt-1">Paste file paths above to add content</p>
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-flow-border bg-flow-surface p-6 text-center">
+              <FileText className="mx-auto mb-2 h-8 w-8 text-flow-text-muted" />
+              <p className="text-sm text-flow-text-muted">No associated content for this app</p>
+              <p className="mt-1 text-xs text-flow-text-muted">
+                Use Add → files or folder (same as Content sidebar), or paste a path or URL above.
+              </p>
             </div>
           )}
-        </div>
-
-        {/* Custom Launch Arguments */}
-        <div>
-          <label className="block text-sm font-medium text-flow-text-secondary mb-3">Custom Launch Arguments</label>
-          <input
-            type="text"
-            value={currentData.customArgs || ''}
-            onChange={(e) => handleFieldUpdate('customArgs', e.target.value)}
-            placeholder="--profile dev --disable-extensions"
-            className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary font-mono focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-          />
         </div>
       </div>
     );
   };
 
-  // Render Metadata Tab Content
-  const renderMetadataTab = () => (
-    <div className="space-y-6">
-      {/* Tags */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Tags</label>
-        <input
-          type="text"
-          value={currentData.tags || ''}
-          onChange={(e) => handleFieldUpdate('tags', e.target.value)}
-          placeholder="productivity, work, development"
-          className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-        />
-        {currentData.tags && (
-          <div className="flex flex-wrap gap-2 mt-2">
-            {currentData.tags.split(',').map((tag: string, index: number) => (
-              <span key={index} className="inline-flex items-center gap-1 px-2 py-1 bg-flow-accent-blue/20 text-flow-accent-blue rounded-lg text-xs">
-                <Hash className="w-3 h-3" />
-                {tag.trim()}
-              </span>
-            ))}
-          </div>
-        )}
-      </div>
-
-      {/* Notes */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Notes</label>
-        <textarea
-          value={currentData.notes || ''}
-          onChange={(e) => handleFieldUpdate('notes', e.target.value)}
-          placeholder="Add notes or reminders about this app..."
-          rows={4}
-          className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary resize-none focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
-        />
-      </div>
-
-      {/* Preview Settings */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Preview Settings</label>
-        <div className="flex items-center justify-between p-3 bg-flow-surface rounded-lg border border-flow-border">
-          <div>
-            <div className="text-sm font-medium text-flow-text-primary">Preview on Hover</div>
-            <div className="text-xs text-flow-text-muted">Show app in monitor preview when hovering</div>
-          </div>
-          <label className="relative inline-flex items-center cursor-pointer">
-            <input
-              type="checkbox"
-              checked={currentData.previewOnHover || false}
-              onChange={(e) => handleFieldUpdate('previewOnHover', e.target.checked)}
-              className="sr-only peer"
-            />
-            <div className="w-11 h-6 bg-flow-bg-primary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-flow-accent-blue"></div>
-          </label>
-        </div>
-      </div>
-    </div>
-  );
-
-  // Render Debug Tab Content
-  const renderDebugTab = () => (
-    <div className="space-y-6">
-      {/* Test Launch */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Test Launch</label>
-        <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-white rounded-lg text-sm transition-colors">
-          <TestTube className="w-4 h-4" />
-          Launch App with Current Settings
-        </button>
-      </div>
-
-      {/* Movement Actions */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Movement Actions</label>
-        <div className="space-y-2">
-          {source === 'monitor' && onMoveToMinimized && (
-            <button 
-              onClick={onMoveToMinimized}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent rounded-lg transition-all text-sm"
-            >
-              <Minimize2 className="w-4 h-4" />
-              Move to Minimized
-            </button>
-          )}
-          
-          {source === 'minimized' && monitors.map((monitor: any) => (
-            <button 
-              key={monitor.id}
-              onClick={() => onMoveToMonitor && onMoveToMonitor(monitor.id)}
-              className="w-full flex items-center gap-3 px-4 py-3 bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent rounded-lg transition-all text-sm"
-            >
-              <Monitor className="w-4 h-4" />
-              Move to {monitor.name}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Reset Options */}
-      <div>
-        <label className="block text-sm font-medium text-flow-text-secondary mb-3">Reset Options</label>
-        <button className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-flow-accent-red/10 border border-flow-accent-red/30 text-flow-accent-red hover:bg-flow-accent-red/20 rounded-lg text-sm transition-colors">
-          <RotateCcw className="w-4 h-4" />
-          Reset to Default Settings
-        </button>
-      </div>
-    </div>
-  );
-
   const renderTabContent = () => {
     switch (activeTab) {
-      case 'identity': return renderIdentityTab();
-      case 'launch': return renderLaunchTab();
-      case 'content': return renderContentTab();
-      case 'metadata': return renderMetadataTab();
-      case 'debug': return renderDebugTab();
-      default: return renderIdentityTab();
+      case "overview":
+        return renderOverviewTab();
+      case "launch":
+        return renderLaunchTab();
+      case "content":
+        return renderContentTab();
+      default:
+        return renderOverviewTab();
     }
   };
 
   return (
-    <div className="h-full flex flex-col bg-flow-bg-secondary/95">
+    <div className="flex h-full min-h-0 flex-col bg-flow-bg-secondary/95 pt-12">
       {/* App Header - Always visible */}
-      <div className="px-5 py-4 border-b border-flow-border/50 bg-flow-surface/30 backdrop-blur-sm">
+      <div className="border-b border-flow-border/50 bg-flow-surface/30 px-4 py-3 backdrop-blur-sm">
         <div className="flex items-start gap-4">
           {renderAppIcon(currentData)}
           <div className="flex-1 min-w-0">
-            <div className="flex items-center gap-2 mb-1">
-              <span className="text-base font-semibold text-flow-text-primary tracking-tight truncate">
-                {currentData.name}
-              </span>
-              <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium ${
-                source === 'monitor' 
-                  ? 'bg-flow-accent-blue/20 text-flow-accent-blue' 
-                  : 'bg-flow-accent-purple/20 text-flow-accent-purple'
-              }`}>
-                {source === 'monitor' ? 'On Monitor' : 'Minimized'}
-              </span>
-            </div>
-            <p className="text-sm text-flow-text-muted truncate font-mono">
-              {currentData.executablePath || 'Executable path not available'}
+            <h2 className="text-base font-semibold tracking-tight text-flow-text-primary break-words">
+              {currentData.name}
+            </h2>
+            <p
+              className={`mt-1 text-xs font-medium ${
+                source === "sidebar"
+                  ? "text-flow-text-muted"
+                  : "text-flow-text-secondary"
+              }`}
+            >
+              {activeStatusLine}
             </p>
-            {monitorId && (
-              <p className="text-xs text-flow-text-muted mt-1">
-                Monitor: {monitors.find(m => m.id === monitorId)?.name || 'Unknown'}
-              </p>
-            )}
           </div>
         </div>
       </div>
@@ -820,27 +1284,27 @@ export function SelectedAppDetails({
         </div>
       </div>
 
-      {/* Tab Content */}
-      <div className="flex-1 overflow-y-auto scrollbar-elegant">
-        <div className="p-5">
-          {renderTabContent()}
+      {/* Tab Content — Content tab uses flex column so Associated Content can fill height.
+          pr-0 on outer keeps the scrollbar flush with the shell edge; inner pr pads content from the gutter. */}
+      <div className="flex min-h-0 flex-1 flex-col overflow-hidden pl-4 pr-0 py-4">
+        <div
+          className={`min-h-0 flex-1 ${
+            activeTab === "content" && isProfileSlot
+              ? "flex flex-col overflow-hidden"
+              : "overflow-y-auto scrollbar-elegant"
+          }`}
+        >
+          <div
+            className={
+              activeTab === "content" && isProfileSlot
+                ? "flex min-h-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
+                : "pr-3 sm:pr-4"
+            }
+          >
+            {renderTabContent()}
+          </div>
         </div>
       </div>
-
-      {/* File Association Modal */}
-      {showFileAssociationModal && (
-        <AppFileAssociationModal
-          isOpen={showFileAssociationModal}
-          onClose={() => setShowFileAssociationModal(false)}
-          onSave={(files) => {
-            if (onUpdateAssociatedFiles) {
-              onUpdateAssociatedFiles(files);
-            }
-            setShowFileAssociationModal(false);
-          }}
-          currentFiles={currentData.associatedFiles || []}
-        />
-      )}
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal, AlertTriangle } from "lucide-react";
+import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
@@ -82,11 +82,6 @@ export function MinimizedApps({
   isEditMode = false,
   compact = false,
 }: MinimizedAppsProps) {
-  const [pendingRemove, setPendingRemove] = useState<{
-    kind: 'app' | 'file';
-    index: number;
-    name: string;
-  } | null>(null);
   const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
   /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
@@ -193,10 +188,10 @@ export function MinimizedApps({
     suspendDocumentTextSelection();
   };
 
-  // Handle delete with confirmation
-  const handleDelete = (e: React.MouseEvent, appIndex: number, appName: string) => {
+  const handleDelete = (e: React.MouseEvent, appIndex: number) => {
     e.stopPropagation();
-    setPendingRemove({ kind: 'app', index: appIndex, name: appName });
+    e.preventDefault();
+    onRemoveApp?.(appIndex);
   };
 
   // Handle maximize - restore app to its remembered monitor
@@ -389,24 +384,10 @@ export function MinimizedApps({
     document.removeEventListener('mouseup', handleMouseUpForClickDetection);
   };
 
-  // Handle file delete with confirmation
-  const handleFileDelete = (e: React.MouseEvent, fileIndex: number, fileName: string) => {
+  const handleFileDelete = (e: React.MouseEvent, fileIndex: number) => {
     e.stopPropagation();
-    setPendingRemove({ kind: 'file', index: fileIndex, name: fileName });
-  };
-
-  const handleConfirmRemove = () => {
-    if (!pendingRemove) return;
-    if (pendingRemove.kind === 'app') {
-      onRemoveApp?.(pendingRemove.index);
-    } else {
-      onRemoveFile?.(pendingRemove.index);
-    }
-    setPendingRemove(null);
-  };
-
-  const handleCancelRemove = () => {
-    setPendingRemove(null);
+    e.preventDefault();
+    onRemoveFile?.(fileIndex);
   };
 
   // Handle file maximize - restore file to its remembered monitor
@@ -678,6 +659,8 @@ export function MinimizedApps({
                       <div className="absolute -top-2 -right-2 flex gap-1">
                         {onMoveToMonitor && (
                           <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => handleMaximize(e, index)}
                             className="w-6 h-6 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
                             title={`Restore to ${monitorInfo.name}`}
@@ -687,7 +670,9 @@ export function MinimizedApps({
                         )}
                         {onRemoveApp && (
                           <button
-                            onClick={(e) => handleDelete(e, index, app.name)}
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => handleDelete(e, index)}
                             className="w-6 h-6 bg-flow-accent-red hover:bg-red-600 text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
                             title="Remove from minimized"
                           >
@@ -777,6 +762,8 @@ export function MinimizedApps({
                       <div className="absolute -top-2 -right-2 flex gap-1">
                         {onMoveFileToMonitor && (
                           <button
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
                             onClick={(e) => handleFileMaximize(e, index)}
                             className="w-6 h-6 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
                             title={`Open on ${monitorInfo.name}`}
@@ -786,7 +773,9 @@ export function MinimizedApps({
                         )}
                         {onRemoveFile && (
                           <button
-                            onClick={(e) => handleFileDelete(e, index, file.name)}
+                            type="button"
+                            onMouseDown={(e) => e.stopPropagation()}
+                            onClick={(e) => handleFileDelete(e, index)}
                             className="w-6 h-6 bg-flow-accent-red hover:bg-red-600 text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
                             title="Remove from minimized"
                           >
@@ -827,46 +816,6 @@ export function MinimizedApps({
         }}
       >
         <div className="pointer-events-auto">{hoverTipEl}</div>
-      </div>,
-      document.body,
-    )}
-    {pendingRemove && createPortal(
-      <div
-        className="fixed inset-0 z-[10000] flex items-center justify-center bg-black/55 backdrop-blur-sm px-4"
-        onClick={handleCancelRemove}
-      >
-        <div
-          className="w-full max-w-md rounded-xl border border-flow-border bg-flow-surface-elevated shadow-2xl"
-          onClick={(e) => e.stopPropagation()}
-        >
-          <div className="flex items-start gap-3 p-4 border-b border-flow-border/60">
-            <div className="mt-0.5 w-8 h-8 rounded-full bg-flow-accent-red/15 text-flow-accent-red flex items-center justify-center">
-              <AlertTriangle className="w-4 h-4" />
-            </div>
-            <div>
-              <h4 className="text-sm font-semibold text-flow-text-primary">Remove minimized item?</h4>
-              <p className="mt-1 text-xs text-flow-text-muted">
-                "{pendingRemove.name}" will be removed from minimized items.
-              </p>
-            </div>
-          </div>
-          <div className="flex justify-end gap-2 p-3">
-            <button
-              type="button"
-              onClick={handleCancelRemove}
-              className="px-3 py-1.5 rounded-md border border-flow-border text-flow-text-primary hover:bg-flow-surface transition-colors"
-            >
-              Cancel
-            </button>
-            <button
-              type="button"
-              onClick={handleConfirmRemove}
-              className="px-3 py-1.5 rounded-md bg-flow-accent-red text-white hover:bg-red-600 transition-colors"
-            >
-              Remove
-            </button>
-          </div>
-        </div>
       </div>,
       document.body,
     )}

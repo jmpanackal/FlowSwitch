@@ -3,7 +3,6 @@ import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
   Search,
   Settings,
-  Trash2,
   Power,
   Save,
   Move,
@@ -16,6 +15,17 @@ import {
   placeInstalledSidebarAppOnMonitor,
 } from "../utils/sidebarExplicitPlacement";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
+
+type AppType = {
+  name: string;
+  iconPath: string | null;
+  executablePath?: string | null;
+  shortcutPath?: string | null;
+  launchUrl?: string | null;
+  color?: string;
+  category?: string;
+  firstLetter?: string;
+};
 
 interface AppManagerProps {
   profiles: any[];
@@ -30,18 +40,9 @@ interface AppManagerProps {
   /** When both set with `compact`, hides the local search field and uses this query. */
   sidebarSearchQuery?: string;
   onSidebarSearchQueryChange?: (query: string) => void;
+  /** Compact sidebar: open right-hand inspector for this installed app (not on layout). */
+  onInspectInstalledApp?: (app: AppType) => void;
 }
-
-
-
-type AppType = {
-  name: string;
-  iconPath: string | null;
-  executablePath?: string | null;
-  color?: string;
-  category?: string;
-  firstLetter?: string;
-};
 
 const getStableColor = (name: string) => {
   let hash = 0;
@@ -63,9 +64,9 @@ const inferCategory = (name: string) => {
   return "Other";
 };
 
-export function AppManager({ 
-  profiles, 
-  onUpdateProfile, 
+export function AppManager({
+  profiles,
+  onUpdateProfile: _onUpdateProfile,
   onAddApp, 
   onAddAppToMinimized, 
   onDragStart,
@@ -74,6 +75,7 @@ export function AppManager({
   compact = false,
   sidebarSearchQuery,
   onSidebarSearchQueryChange,
+  onInspectInstalledApp,
 }: AppManagerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const sidebarSearchControlled =
@@ -83,10 +85,7 @@ export function AppManager({
   const effectiveSearchTerm = sidebarSearchControlled
     ? sidebarSearchQuery
     : searchTerm;
-  const [selectedApp, setSelectedApp] = useState<any>(null);
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [showAppSettings, setShowAppSettings] = useState(false);
-  const [expandedApp, setExpandedApp] = useState<string | null>(null);
   const [addMenuOpen, setAddMenuOpen] = useState<{
     appName: string;
     anchor: HTMLElement;
@@ -98,6 +97,8 @@ export function AppManager({
       name: app.name,
       iconPath: app.iconPath,
       executablePath: app.executablePath ?? null,
+      shortcutPath: app.shortcutPath ?? null,
+      launchUrl: app.launchUrl ?? null,
       color: getStableColor(app.name),
       category: inferCategory(app.name),
       firstLetter: app.name.charAt(0).toUpperCase(),
@@ -155,79 +156,30 @@ export function AppManager({
     setAddMenuOpen(null);
   }, [currentProfile?.id]);
 
-  const getAppUsage = (appName: string) => {
-    const usage = {
-      profiles: [] as any[],
-      totalInstances: 0,
-      avgVolume: 0,
-      commonBehavior: 'new' as string,
-      runAsAdmin: false,
-      forceCloseOnExit: false,
-      smartSave: false
-    };
-
-    profiles.forEach(profile => {
-      const instances: any[] = [];
-      
-      // Check monitors
-      profile.monitors?.forEach((monitor: any) => {
-        monitor.apps?.forEach((app: any) => {
+  /** Icons for any profile layout slot using this app name (not tied to expansion UI). */
+  const getAppLayoutAggregateFlags = (appName: string) => {
+    let runAsAdmin = false;
+    let forceCloseOnExit = false;
+    let smartSave = false;
+    for (const profile of profiles) {
+      for (const monitor of profile.monitors || []) {
+        for (const app of monitor.apps || []) {
           if (app.name === appName) {
-            instances.push({ ...app, location: monitor.name, type: 'monitor' });
+            if (app.runAsAdmin) runAsAdmin = true;
+            if (app.forceCloseOnExit) forceCloseOnExit = true;
+            if (app.smartSave) smartSave = true;
           }
-        });
-      });
-      
-      // Check minimized apps
-      profile.minimizedApps?.forEach((app: any) => {
-        if (app.name === appName) {
-          instances.push({ ...app, location: 'Minimized', type: 'minimized' });
         }
-      });
-
-      if (instances.length > 0) {
-        usage.profiles.push({ profile, instances });
-        usage.totalInstances += instances.length;
       }
-    });
-
-    // Calculate averages and common settings
-    if (usage.totalInstances > 0) {
-      const allInstances = usage.profiles.flatMap(p => p.instances);
-      
-      const volumes = allInstances.map(i => i.volume || 0);
-      usage.avgVolume = Math.round(volumes.reduce((a, b) => a + b, 0) / volumes.length);
-      
-      const behaviors = allInstances.map(i => i.launchBehavior);
-      usage.commonBehavior = behaviors.sort((a, b) =>
-        behaviors.filter(v => v === a).length - behaviors.filter(v => v === b).length
-      ).pop() || 'new';
-
-      // Check if any instance has special settings
-      usage.runAsAdmin = allInstances.some(i => i.runAsAdmin);
-      usage.forceCloseOnExit = allInstances.some(i => i.forceCloseOnExit);
-      usage.smartSave = allInstances.some(i => i.smartSave);
+      for (const app of profile.minimizedApps || []) {
+        if (app.name === appName) {
+          if (app.runAsAdmin) runAsAdmin = true;
+          if (app.forceCloseOnExit) forceCloseOnExit = true;
+          if (app.smartSave) smartSave = true;
+        }
+      }
     }
-
-    return usage;
-  };
-
-  const removeAppFromProfile = (appName: string, profileId: string) => {
-    const profile = profiles.find(p => p.id === profileId);
-    if (!profile) return;
-
-    const updatedMonitors = profile.monitors.map((monitor: any) => ({
-      ...monitor,
-      apps: monitor.apps.filter((app: any) => app.name !== appName)
-    }));
-
-    const updatedMinimizedApps = profile.minimizedApps?.filter((app: any) => app.name !== appName) || [];
-
-    onUpdateProfile(profileId, {
-      monitors: updatedMonitors,
-      minimizedApps: updatedMinimizedApps,
-      appCount: Math.max(0, profile.appCount - 1)
-    });
+    return { runAsAdmin, forceCloseOnExit, smartSave };
   };
 
   // CUSTOM DRAG SYSTEM - Mouse-based dragging
@@ -353,8 +305,7 @@ export function AppManager({
         <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
           <div className="flex min-h-0 flex-col gap-2 pr-2.5">
           {filteredApps.map((app, index) => {
-            const usage = getAppUsage(app.name);
-            const isExpanded = expandedApp === app.name || expandedApp === 'toggle-all';
+            const layoutFlags = getAppLayoutAggregateFlags(app.name);
             const iconSrc = safeIconSrc(app.iconPath);
             return (
               <div 
@@ -366,6 +317,7 @@ export function AppManager({
                     className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
                     style={{ backgroundColor: `${app.color ?? '#888'}20` }}
                     onMouseDown={(e) => handleMouseDown(e, app)}
+                    onClick={(e) => e.stopPropagation()}
                     title="Drag to add to monitor or minimized apps"
                   >
                     {iconSrc ? (
@@ -400,44 +352,38 @@ export function AppManager({
                       </div>
                     ) : null}
                   </div>
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <h4
-                        className="text-flow-text-primary cursor-pointer text-sm font-medium truncate hover:text-flow-accent-blue"
-                        title={
-                          usage.profiles.length
-                            ? "Show where this app is used in profiles"
-                            : undefined
-                        }
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setAddMenuOpen(null);
-                          setExpandedApp(
-                            isExpanded ? null : app.name,
-                          );
-                        }}
-                        onKeyDown={(e) => {
+                  <div
+                    className={`flex-1 min-w-0${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
+                    onClick={
+                      compact && onInspectInstalledApp
+                        ? () => onInspectInstalledApp(app)
+                        : undefined
+                    }
+                    onKeyDown={
+                      compact && onInspectInstalledApp
+                        ? (e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            setAddMenuOpen(null);
-                            setExpandedApp(
-                              isExpanded ? null : app.name,
-                            );
+                            onInspectInstalledApp(app);
                           }
-                        }}
-                        role={usage.profiles.length ? "button" : undefined}
-                        tabIndex={usage.profiles.length ? 0 : undefined}
-                      >
+                        }
+                        : undefined
+                    }
+                    role={compact && onInspectInstalledApp ? "button" : undefined}
+                    tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
+                  >
+                    <div className="flex items-center gap-2 mb-0.5">
+                      <h4 className="text-flow-text-primary text-sm font-medium truncate">
                         {app.name}
                       </h4>
                       <div className="flex items-center gap-1">
-                        {usage.runAsAdmin && (
+                        {layoutFlags.runAsAdmin && (
                           <span className="text-yellow-400 text-xs" title="Run as Admin">⚡</span>
                         )}
-                        {usage.forceCloseOnExit && (
+                        {layoutFlags.forceCloseOnExit && (
                           <Power className="w-3 h-3 text-flow-accent-red" />
                         )}
-                        {usage.smartSave && (
+                        {layoutFlags.smartSave && (
                           <Save className="w-3 h-3 text-flow-accent-green" />
                         )}
                       </div>
@@ -451,6 +397,7 @@ export function AppManager({
                   <div
                     className="flex shrink-0 items-center gap-0.5 self-center"
                     onMouseDown={stopRowPointerForDrag}
+                    onClick={(e) => e.stopPropagation()}
                   >
                     <div className="relative">
                       <button
@@ -537,111 +484,12 @@ export function AppManager({
                     </div>
                   </div>
                 </div>
-                {/* Expanded Details - CLEAN: More compact */}
-                {isExpanded && usage.profiles.length > 0 && (
-                  <div className="px-3 pb-3 space-y-1">
-                    {usage.profiles.slice(0, 3).map((profileUsage, pIndex) => (
-                      <div key={pIndex} className="flex items-center justify-between text-xs p-2 bg-flow-bg-tertiary rounded">
-                        <div className="flex items-center gap-2 min-w-0 flex-1">
-                          <span className="text-flow-text-primary font-medium truncate">{profileUsage.profile.name}</span>
-                          <div className="flex gap-1">
-                            {profileUsage.instances.slice(0, 2).map((instance: any, iIndex: number) => (
-                              <span key={iIndex} className="px-1 py-0.5 bg-flow-surface text-flow-text-muted rounded text-xs">
-                                {instance.location}
-                              </span>
-                            ))}
-                            {profileUsage.instances.length > 2 && (
-                              <span className="px-1 py-0.5 bg-flow-surface text-flow-text-muted rounded text-xs">
-                                +{profileUsage.instances.length - 2}
-                              </span>
-                            )}
-                          </div>
-                        </div>
-                        <button
-                          onClick={() => removeAppFromProfile(app.name, profileUsage.profile.id)}
-                          className="p-1 hover:bg-flow-accent-red/20 rounded text-flow-accent-red transition-colors flex-shrink-0"
-                          title="Remove from profile"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
-                    ))}
-                    {usage.profiles.length > 3 && (
-                      <div className="text-xs text-flow-text-muted text-center py-1">
-                        +{usage.profiles.length - 3} more profiles
-                      </div>
-                    )}
-                  </div>
-                )}
               </div>
             );
           })}
           </div>
         </div>
         </div>
-
-        {/* App Settings Modal */}
-        {showAppSettings && selectedApp && (
-          <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="scrollbar-elegant max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-flow-border bg-flow-surface-elevated p-4 backdrop-blur-xl">
-              <div className="flex items-center justify-between mb-4">
-                <div className="flex items-center gap-3">
-                  <div 
-                    className="p-2 rounded-lg"
-                    style={{ backgroundColor: `${selectedApp.color}20` }}
-                  >
-                    <Settings className="w-5 h-5 text-white" />
-                  </div>
-                  <div>
-                    <h3 className="text-flow-text-primary font-medium">{selectedApp.name}</h3>
-                    <p className="text-flow-text-muted text-xs">Global app settings</p>
-                  </div>
-                </div>
-                <button 
-                  onClick={() => setShowAppSettings(false)}
-                  className="p-1 hover:bg-flow-surface rounded transition-colors"
-                >
-                  <Save className="w-4 h-4 text-flow-text-muted rotate-45" />
-                </button>
-              </div>
-
-              <div className="space-y-4">
-                {selectedApp.usage.profiles.map((profileUsage: any, index: number) => (
-                  <div key={index} className="bg-flow-surface border border-flow-border rounded-lg p-3">
-                    <h4 className="text-flow-text-primary text-sm mb-2">{profileUsage.profile.name}</h4>
-                    <div className="space-y-2">
-                      {profileUsage.instances.map((instance: any, iIndex: number) => (
-                        <div key={iIndex} className="flex items-center justify-between text-xs">
-                          <div className="flex items-center gap-2">
-                            <span className="text-flow-text-secondary">{instance.location}</span>
-                            <div className="flex items-center gap-1">
-                              {instance.runAsAdmin && <span className="text-yellow-400">⚡</span>}
-                              {instance.forceCloseOnExit && <Power className="w-3 h-3 text-flow-accent-red" />}
-                              {instance.smartSave && <Save className="w-3 h-3 text-flow-accent-green" />}
-                            </div>
-                          </div>
-                          <div className="flex items-center gap-2">
-                            <span className="text-flow-text-muted">{instance.volume || 50}%</span>
-                            <span className="text-flow-text-muted">{instance.launchBehavior}</span>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                ))}
-              </div>
-
-              <div className="flex gap-2 mt-4">
-                <button 
-                  onClick={() => setShowAppSettings(false)}
-                  className="flex-1 px-3 py-2 bg-flow-surface text-flow-text-secondary border border-flow-border rounded-lg text-sm transition-colors"
-                >
-                  Close
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     );
   }

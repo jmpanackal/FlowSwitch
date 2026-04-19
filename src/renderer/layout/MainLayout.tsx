@@ -20,6 +20,8 @@ import {
   type ContentItem,
 } from "./components/ContentManager";
 import {
+  placeInstalledSidebarAppOnMinimized,
+  placeInstalledSidebarAppOnMonitor,
   placeSidebarContentOnMinimized,
   placeSidebarContentOnMonitor,
   placeSidebarLibraryFolderOnMinimized,
@@ -585,9 +587,90 @@ export default function App() {
     [currentProfile],
   );
 
+  /** Installed-app row in the Apps sidebar: inspector only, not a profile layout slot. */
+  const handleSidebarInstalledAppSelect = useCallback(
+    (app: {
+      name: string;
+      iconPath: string | null;
+      executablePath?: string | null;
+      shortcutPath?: string | null;
+      launchUrl?: string | null;
+      color?: string;
+      category?: string;
+      firstLetter?: string;
+    }) => {
+      if (!currentProfile) return;
+      setLibrarySelection(null);
+      setOpenLibraryFolderId(null);
+
+      const nameLc = app.name?.toLowerCase() || "";
+      const isBrowser =
+        nameLc.includes("chrome")
+        || nameLc.includes("browser")
+        || nameLc.includes("firefox")
+        || nameLc.includes("safari")
+        || nameLc.includes("edge");
+
+      setSelectedApp({
+        type: isBrowser ? "browser" : "app",
+        source: "sidebar",
+        data: {
+          name: app.name,
+          iconPath: app.iconPath,
+          executablePath: app.executablePath ?? null,
+          shortcutPath: app.shortcutPath ?? null,
+          launchUrl: app.launchUrl ?? null,
+          color: app.color,
+          category: app.category,
+          browserTabs: [],
+        },
+      });
+      setRightSidebarOpen(true);
+    },
+    [currentProfile],
+  );
+
+  /** Apps sidebar inspector: add installed app to the active profile (same placement as list +). */
+  const handleSidebarInstalledAppPlaceOnMonitor = useCallback(
+    (monitorId: string) => {
+      if (!currentProfile || !selectedApp || selectedApp.source !== "sidebar") return;
+      const d = selectedApp.data;
+      placeInstalledSidebarAppOnMonitor({
+        profile: currentProfile,
+        monitorId,
+        app: {
+          name: d.name,
+          color: d.color,
+          iconPath: d.iconPath ?? null,
+          executablePath: d.executablePath ?? null,
+        },
+        addApp,
+      });
+      clearInspectorSelection();
+    },
+    [currentProfile, selectedApp, addApp, clearInspectorSelection],
+  );
+
+  const handleSidebarInstalledAppPlaceOnMinimized = useCallback(() => {
+    if (!currentProfile || !selectedApp || selectedApp.source !== "sidebar") return;
+    const d = selectedApp.data;
+    placeInstalledSidebarAppOnMinimized({
+      profile: currentProfile,
+      app: {
+        name: d.name,
+        color: d.color,
+        iconPath: d.iconPath ?? null,
+        executablePath: d.executablePath ?? null,
+      },
+      addAppToMinimized,
+    });
+    clearInspectorSelection();
+  }, [currentProfile, selectedApp, addAppToMinimized, clearInspectorSelection]);
+
   // After moves/reorders, list indices change; keep selection index aligned with instanceId.
   useEffect(() => {
     if (!selectedApp || !currentProfile) return;
+    if (selectedApp.source === "sidebar") return;
 
     if (
       selectedApp.source === "monitor" &&
@@ -631,6 +714,7 @@ export default function App() {
   const handleSelectedAppUpdate = useCallback(
     (updates: any) => {
       if (!selectedApp || !currentProfile) return;
+      if (selectedApp.source === "sidebar") return;
 
       console.log("💾 UPDATING SELECTED APP:", updates);
 
@@ -728,6 +812,7 @@ export default function App() {
   const handleSelectedAppAssociatedFiles = useCallback(
     (files: any[]) => {
       if (!selectedApp || !currentProfile) return;
+      if (selectedApp.source === "sidebar") return;
 
       console.log("📁 UPDATING ASSOCIATED FILES:", files);
 
@@ -785,6 +870,7 @@ export default function App() {
 
   const handleSelectedAppDelete = useCallback(() => {
     if (!selectedApp || !currentProfile) return;
+    if (selectedApp.source === "sidebar") return;
 
     console.log("🗑️ DELETING SELECTED APP");
 
@@ -816,6 +902,7 @@ export default function App() {
   const handleSelectedAppMoveToMonitor = useCallback(
     (targetMonitorId: string) => {
       if (!selectedApp || !currentProfile) return;
+      if (selectedApp.source === "sidebar") return;
 
       console.log(
         "📱 MOVING SELECTED APP TO MONITOR:",
@@ -831,24 +918,53 @@ export default function App() {
           selectedApp.appIndex,
           targetMonitorId,
         );
-        // Update selected app to reflect new location
         setSelectedApp((prev) =>
           prev
             ? {
                 ...prev,
                 source: "monitor",
                 monitorId: targetMonitorId,
-                appIndex: undefined, // Will need to find new index
+                appIndex: undefined,
+              }
+            : null,
+        );
+        return;
+      }
+
+      if (
+        selectedApp.source === "monitor" &&
+        selectedApp.monitorId &&
+        selectedApp.appIndex !== undefined
+      ) {
+        if (selectedApp.monitorId === targetMonitorId) return;
+        moveAppBetweenMonitors(
+          currentProfile.id,
+          selectedApp.monitorId,
+          selectedApp.appIndex,
+          targetMonitorId,
+        );
+        setSelectedApp((prev) =>
+          prev
+            ? {
+                ...prev,
+                monitorId: targetMonitorId,
+                appIndex: undefined,
               }
             : null,
         );
       }
     },
-    [selectedApp, currentProfile],
+    [
+      selectedApp,
+      currentProfile,
+      moveMinimizedAppToMonitor,
+      moveAppBetweenMonitors,
+    ],
   );
 
   const handleSelectedAppMoveToMinimized = useCallback(() => {
     if (!selectedApp || !currentProfile) return;
+    if (selectedApp.source === "sidebar") return;
 
     console.log("📦 MOVING SELECTED APP TO MINIMIZED");
 
@@ -1153,6 +1269,7 @@ export default function App() {
                   compact={true}
                   sidebarSearchQuery={sidebarSearchQuery}
                   onSidebarSearchQueryChange={setSidebarSearchQuery}
+                  onInspectInstalledApp={handleSidebarInstalledAppSelect}
                 />
               </div>
             )}
@@ -1557,6 +1674,8 @@ export default function App() {
               && currentProfile ? (
                 <SelectedContentDetails
                   selection={contentInspectorSelection}
+                  libraryItems={contentLibrary.items as ContentItem[]}
+                  libraryFolders={contentLibrary.folders as ContentFolder[]}
                   onChangeDefaultApp={handleLibraryChangeDefaultApp}
                   excludedFromActiveProfile={resolvedLibraryEntryExcluded}
                   onToggleExcludeFromActiveProfile={() => {
@@ -1605,6 +1724,16 @@ export default function App() {
                   }
                   onAddBrowserTab={(tab) =>
                     addBrowserTab(currentProfile?.id || "", tab)
+                  }
+                  onAddSidebarAppToMonitor={
+                    selectedApp.source === "sidebar"
+                      ? handleSidebarInstalledAppPlaceOnMonitor
+                      : undefined
+                  }
+                  onAddSidebarAppToMinimized={
+                    selectedApp.source === "sidebar"
+                      ? handleSidebarInstalledAppPlaceOnMinimized
+                      : undefined
                   }
                 />
               ) : null}
