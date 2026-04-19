@@ -47,6 +47,8 @@ const createIconPathAndAppHelpers = ({
     if (value && typeof value === 'object') {
       return {
         profiles: Array.isArray(value.profiles) ? value.profiles : [],
+        contentLibrary: value.contentLibrary ?? null,
+        contentLibraryExclusions: value.contentLibraryExclusions ?? null,
         storeError: value.storeError || null,
       };
     }

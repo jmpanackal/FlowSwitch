@@ -1,5 +1,9 @@
 import type { Profile } from './profile';
-import type { FlowProfile, ProfileListResult } from './flow-profile';
+import type {
+  FlowProfile,
+  ProfileListResult,
+  ProfileSavePayload,
+} from './flow-profile';
 
 export {};
 
@@ -126,7 +130,15 @@ declare global {
         apps: Array<unknown>;
       }>>;
       listProfiles: () => Promise<ProfileListResult>;
-      saveProfiles: (profiles: FlowProfile[]) => Promise<{ ok: boolean; count?: number; error?: string }>;
+      saveProfiles: (
+        payload: ProfileSavePayload,
+      ) => Promise<{ ok: boolean; count?: number; error?: string }>;
+      pickContentLibraryPaths: (opts?: {
+        mode?: 'files' | 'directory';
+      }) => Promise<{
+        canceled: boolean;
+        entries?: Array<{ path: string; kind: 'file' | 'directory' }>;
+      }>;
       getZoneHistoryStats: () => Promise<{
         ok: boolean;
         stats?: {

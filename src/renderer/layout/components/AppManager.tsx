@@ -1,13 +1,27 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Search, Settings, Trash2, Power, Save, Move, LayoutGrid } from "lucide-react";
+import {
+  Search,
+  Settings,
+  Trash2,
+  Power,
+  Save,
+  Move,
+  LayoutGrid,
+  Plus,
+} from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
+import {
+  placeInstalledSidebarAppOnMinimized,
+  placeInstalledSidebarAppOnMonitor,
+} from "../utils/sidebarExplicitPlacement";
 
 interface AppManagerProps {
   profiles: any[];
   onUpdateProfile: (profileId: string, updates: any) => void;
-  onAddApp?: (profileId: string, monitorId: string, newApp: any) => void;
-  onAddAppToMinimized?: (profileId: string, newApp: any) => void;
+  /** Adds to the active profile; parent closes over `profileId`. */
+  onAddApp?: (monitorId: string, newApp: any) => void;
+  onAddAppToMinimized?: (newApp: any) => void;
   onDragStart?: () => void;
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   currentProfile?: any;
@@ -72,6 +86,7 @@ export function AppManager({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAppSettings, setShowAppSettings] = useState(false);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
+  const [addMenuApp, setAddMenuApp] = useState<string | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
   const installedApps = useInstalledApps();
   const allApps = useMemo<AppType[]>(() => (
@@ -118,6 +133,23 @@ export function AppManager({
     }
     return 0;
   });
+
+  const monitorsSortedForMenu = useMemo(() => {
+    const list = [...(currentProfile?.monitors ?? [])] as {
+      id: string;
+      name?: string;
+      primary?: boolean;
+    }[];
+    list.sort((a, b) => {
+      if (a.primary === b.primary) return 0;
+      return a.primary ? -1 : 1;
+    });
+    return list;
+  }, [currentProfile?.monitors]);
+
+  useEffect(() => {
+    setAddMenuApp(null);
+  }, [currentProfile?.id]);
 
   const getAppUsage = (appName: string) => {
     const usage = {
@@ -235,6 +267,46 @@ export function AppManager({
     }
   };
 
+  const stopRowPointerForDrag = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleAddInstalledToMonitor = (app: AppType, monitorId: string) => {
+    if (!currentProfile || !onAddApp) return;
+    placeInstalledSidebarAppOnMonitor({
+      profile: currentProfile,
+      monitorId,
+      app: {
+        name: app.name,
+        color: app.color,
+        iconPath: app.iconPath,
+        executablePath: app.executablePath ?? undefined,
+      },
+      addApp: (_profileId, mid, newApp) => {
+        onAddApp(mid, newApp);
+      },
+    });
+    setAddMenuApp(null);
+  };
+
+  const handleAddInstalledToMinimized = (app: AppType) => {
+    if (!currentProfile || !onAddAppToMinimized) return;
+    placeInstalledSidebarAppOnMinimized({
+      profile: currentProfile,
+      app: {
+        name: app.name,
+        color: app.color,
+        iconPath: app.iconPath,
+        executablePath: app.executablePath ?? undefined,
+      },
+      addAppToMinimized: (_profileId, newApp) => {
+        onAddAppToMinimized(newApp);
+      },
+    });
+    setAddMenuApp(null);
+  };
+
   if (compact) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
@@ -267,7 +339,10 @@ export function AppManager({
           <div className="mb-3 rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
             <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
               <Move className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={1.75} />
-              <span>Drag apps onto a monitor or into the minimized row.</span>
+              <span>
+                Use <span className="font-medium text-flow-text-primary">+</span> to add to a
+                monitor or minimized row. Drag the app icon to place precisely on the canvas.
+              </span>
             </div>
           </div>
 
@@ -322,7 +397,34 @@ export function AppManager({
                   </div>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-0.5">
-                      <h4 className="text-flow-text-primary text-sm font-medium truncate">{app.name}</h4>
+                      <h4
+                        className="text-flow-text-primary cursor-pointer text-sm font-medium truncate hover:text-flow-accent-blue"
+                        title={
+                          usage.profiles.length
+                            ? "Show where this app is used in profiles"
+                            : undefined
+                        }
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setAddMenuApp(null);
+                          setExpandedApp(
+                            isExpanded ? null : app.name,
+                          );
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter" || e.key === " ") {
+                            e.preventDefault();
+                            setAddMenuApp(null);
+                            setExpandedApp(
+                              isExpanded ? null : app.name,
+                            );
+                          }
+                        }}
+                        role={usage.profiles.length ? "button" : undefined}
+                        tabIndex={usage.profiles.length ? 0 : undefined}
+                      >
+                        {app.name}
+                      </h4>
                       <div className="flex items-center gap-1">
                         {usage.runAsAdmin && (
                           <span className="text-yellow-400 text-xs" title="Run as Admin">⚡</span>
@@ -336,22 +438,91 @@ export function AppManager({
                       </div>
                     </div>
                     <div className="flex items-center gap-2 text-xs text-flow-text-muted">
-                      <span className="px-1.5 py-0.5 bg-flow-bg-tertiary rounded text-xs">{app.category}</span>
-                      {usage.totalInstances > 0 && (
-                        <>
-                          <span>{usage.profiles.length} profiles</span>
-                          <span>{usage.totalInstances} instances</span>
-                        </>
-                      )}
+                      <span className="rounded bg-flow-bg-tertiary px-1.5 py-0.5 text-xs">
+                        {app.category}
+                      </span>
                     </div>
                   </div>
-                  <button
-                    onClick={() => setExpandedApp(isExpanded ? null : app.name)}
-                    className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
-                    title="Toggle details"
+                  <div
+                    className="flex shrink-0 items-center gap-0.5 self-center"
+                    onMouseDown={stopRowPointerForDrag}
                   >
-                    <Settings className="w-3 h-3" />
-                  </button>
+                    <div className="relative">
+                      <button
+                        type="button"
+                        disabled={!currentProfile || !onAddApp}
+                        title={
+                          !currentProfile
+                            ? "Select a profile first"
+                            : "Add to a monitor or minimized row"
+                        }
+                        aria-label={`Add ${app.name} to layout`}
+                        aria-expanded={addMenuApp === app.name}
+                        aria-haspopup="menu"
+                        onClick={(e) => {
+                          stopRowPointerForDrag(e);
+                          setAddMenuApp(
+                            addMenuApp === app.name ? null : app.name,
+                          );
+                        }}
+                        className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+                      >
+                        <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+                      </button>
+                      {addMenuApp === app.name ? (
+                        <div
+                          className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
+                          role="menu"
+                        >
+                          {monitorsSortedForMenu.length ? (
+                            monitorsSortedForMenu.map((m) => (
+                              <button
+                                key={m.id}
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item text-left text-xs"
+                                onClick={(e) => {
+                                  stopRowPointerForDrag(e);
+                                  handleAddInstalledToMonitor(app, m.id);
+                                }}
+                              >
+                                {(m.name || m.id) +
+                                  (m.primary ? " (primary)" : "")}
+                              </button>
+                            ))
+                          ) : (
+                            <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                              No monitors in this profile.
+                            </div>
+                          )}
+                          <div
+                            className="my-0.5 h-px bg-flow-border/50"
+                            role="none"
+                          />
+                          <button
+                            type="button"
+                            role="menuitem"
+                            disabled={!currentProfile || !onAddAppToMinimized}
+                            title={
+                              !currentProfile
+                                ? "Select a profile first"
+                                : undefined
+                            }
+                            className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                            onClick={(e) => {
+                              stopRowPointerForDrag(e);
+                              handleAddInstalledToMinimized(app);
+                            }}
+                          >
+                            Minimized row
+                          </button>
+                          <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
+                            Drag the app icon to drop on a specific tile.
+                          </div>
+                        </div>
+                      ) : null}
+                    </div>
+                  </div>
                 </div>
                 {/* Expanded Details - CLEAN: More compact */}
                 {isExpanded && usage.profiles.length > 0 && (

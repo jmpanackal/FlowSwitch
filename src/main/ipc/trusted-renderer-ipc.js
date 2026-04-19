@@ -3,6 +3,8 @@
 const path = require('path');
 const fs = require('fs');
 const ws = require('windows-shortcuts');
+const { BrowserWindow, dialog } = require('electron');
+
 
 const createHandleTrustedIpc = (ipcMain, isTrustedIpcSender) => (
   (channel, handler) => {
@@ -22,7 +24,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     buildSystemMonitorSnapshot,
     unpackProfilesReadResult,
     readProfilesFromDisk,
-    sanitizeProfilesPayload,
+    sanitizeProfileStorePayload,
     writeProfilesToDisk,
     safeLimitedString,
     MAX_PROFILE_ID_LENGTH,
@@ -76,27 +78,77 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
 
   handleTrustedIpc('profiles:list', async () => {
   try {
-    const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
-    if (storeError) {
-      console.error('[profiles:list] Failed to read profiles from store:', storeError);
+    const disk = readProfilesFromDisk();
+    if (disk.storeError) {
+      console.error('[profiles:list] Failed to read profiles from store:', disk.storeError);
     }
-    return profiles;
+    return {
+      profiles: disk.profiles,
+      contentLibrary: disk.contentLibrary,
+      contentLibraryExclusions: disk.contentLibraryExclusions,
+      storeError: disk.storeError,
+    };
   } catch (error) {
     console.error('[profiles:list] Failed to list profiles:', error);
-    return [];
+    return {
+      profiles: [],
+      contentLibrary: { items: [], folders: [] },
+      contentLibraryExclusions: {},
+      storeError: null,
+    };
   }
 });
 
-  handleTrustedIpc('profiles:save-all', async (_event, profiles) => {
+  handleTrustedIpc('profiles:save-all', async (_event, payload) => {
   try {
-    const sanitizedProfiles = sanitizeProfilesPayload(profiles);
-    const savedProfiles = writeProfilesToDisk(sanitizedProfiles);
+    const safe = sanitizeProfileStorePayload(payload);
+    const savedProfiles = writeProfilesToDisk(safe);
     return { ok: true, count: savedProfiles.length };
   } catch (error) {
     console.error('[profiles:save-all] Failed to save profiles:', error);
     return { ok: false, error: 'Failed to save profiles' };
   }
 });
+
+  handleTrustedIpc('content-library:pick-paths', async (event, opts = {}) => {
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const options = opts && typeof opts === 'object' ? opts : {};
+    const mode = typeof options.mode === 'string' ? options.mode : 'files';
+
+    const buildEntries = (paths) => {
+      if (!paths?.length) return [];
+      return paths.map((p) => {
+        let kind = 'file';
+        try {
+          const st = fs.statSync(p);
+          if (st.isDirectory()) kind = 'directory';
+        } catch {
+          kind = 'file';
+        }
+        return { path: p, kind };
+      });
+    };
+
+    const pack = (result) => {
+      if (result.canceled || !result.filePaths?.length) {
+        return { canceled: true, entries: [] };
+      }
+      return { canceled: false, entries: buildEntries(result.filePaths) };
+    };
+
+    if (mode === 'directory') {
+      const r = await dialog.showOpenDialog(win || undefined, {
+        properties: ['openDirectory'],
+      });
+      return pack(r);
+    }
+
+    // mode === 'files' (default) or unknown → file picker only
+    const r = await dialog.showOpenDialog(win || undefined, {
+      properties: ['openFile', 'multiSelections'],
+    });
+    return pack(r);
+  });
 
   handleTrustedIpc('launch-profile', async (_event, profileId, request = {}) => {
   try {

@@ -43,7 +43,7 @@ const {
   scoreReuseCandidate,
   shouldTriggerAmbiguityFallback,
 } = require('./utils/launch-target-mode');
-const { sanitizeProfilesPayload } = require('./utils/sanitize-profiles-payload');
+const { sanitizeProfileStorePayload } = require('./utils/sanitize-profile-store-payload');
 const {
   buildSystemMonitorSnapshot,
   physicalBoundsFromDip,
@@ -838,7 +838,7 @@ if (shouldBootstrapElectronMain) {
     buildSystemMonitorSnapshot,
     unpackProfilesReadResult,
     readProfilesFromDisk,
-    sanitizeProfilesPayload,
+    sanitizeProfileStorePayload,
     writeProfilesToDisk,
     safeLimitedString,
     MAX_PROFILE_ID_LENGTH,

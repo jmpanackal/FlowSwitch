@@ -187,7 +187,6 @@ export function AppFileWindow({
   onAppSelect,
   onFileSelect
 }: AppFileWindowProps) {
-  const [isHovered, setIsHovered] = useState(false);
   const [isResizing, setIsResizing] = useState(false);
   const [localDragging, setLocalDragging] = useState(false);
   const [isExpanded, setIsExpanded] = useState(false);
@@ -499,7 +498,13 @@ export function AppFileWindow({
             
             {/* Admin indicator if applicable */}
             {file.associatedApp === 'Terminal' && (
-              <Shield className="w-3 h-3 text-yellow-400 mt-1" title="May require Admin" />
+              <span
+                className="mt-1 inline-flex"
+                title="May require admin"
+                aria-label="May require admin"
+              >
+                <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
+              </span>
             )}
           </div>
         </>
@@ -525,7 +530,13 @@ export function AppFileWindow({
             
             {/* Admin indicator */}
             {app.runAsAdmin && (
-              <Shield className="w-3 h-3 text-yellow-400 mt-1" title="Run as Admin" />
+              <span
+                className="mt-1 inline-flex"
+                title="Run as admin"
+                aria-label="Run as admin"
+              >
+                <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
+              </span>
             )}
           </div>
         </>
@@ -998,8 +1009,6 @@ export function AppFileWindow({
           width: `${item.size.width}%`,
           height: `${item.size.height}%`,
         }}
-        onMouseEnter={() => setIsHovered(true)}
-        onMouseLeave={() => setIsHovered(false)}
         draggable={isEditable}
         onDragStart={handleDragStartEvent}
         onDragEnd={handleDragEndEvent}
@@ -1053,30 +1062,38 @@ export function AppFileWindow({
             </div>
           )}
 
-          {/* Settings and Actions */}
-          {(isHovered || showSettings) && isEditable && !isCurrentlyDragging && (
-            <div className="absolute -top-2 -right-2 flex items-center gap-1 z-20">
+          {/* Settings and actions: visible in edit mode (drag remains a power shortcut) */}
+          {isEditable && !isCurrentlyDragging && (
+            <div className="pointer-events-auto absolute -top-2 -right-2 z-20 flex items-center gap-1">
               <button
+                type="button"
                 onClick={handleSettingsClick}
-                className="w-6 h-6 bg-white/20 backdrop-blur-sm border border-white/30 rounded-full flex items-center justify-center text-white/70 hover:bg-white/30 hover:text-white transition-all duration-200"
+                className={`flex h-6 w-6 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white/30 hover:text-white ${
+                  showSettings ? "ring-1 ring-white/50" : ""
+                }`}
                 title="Settings"
+                aria-label="Window settings"
               >
-                <Settings className="w-3 h-3" />
+                <Settings className="h-3 w-3" />
               </button>
               <button
+                type="button"
                 onClick={handleDeleteClick}
-                className="w-6 h-6 bg-red-500/20 backdrop-blur-sm border border-red-500/30 rounded-full flex items-center justify-center text-red-300 hover:bg-red-500/30 hover:text-red-100 transition-all duration-200"
+                className="flex h-6 w-6 items-center justify-center rounded-full border border-red-500/30 bg-red-500/20 text-red-200 backdrop-blur-sm transition-all duration-200 hover:bg-red-500/30 hover:text-red-50"
                 title="Delete"
+                aria-label="Remove from layout"
               >
-                <Trash2 className="w-3 h-3" />
+                <Trash2 className="h-3 w-3" />
               </button>
               {onMoveToMinimized && (
                 <button
+                  type="button"
                   onClick={handleMinimizeClick}
-                  className="w-6 h-6 bg-white/20 backdrop-blur-sm border border-white/30 rounded-full flex items-center justify-center text-white/70 hover:bg-white/30 hover:text-white transition-all duration-200"
+                  className="flex h-6 w-6 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white/30 hover:text-white"
                   title="Minimize"
+                  aria-label="Move to minimized row"
                 >
-                  <Minimize2 className="w-3 h-3" />
+                  <Minimize2 className="h-3 w-3" />
                 </button>
               )}
             </div>
