@@ -139,6 +139,20 @@ declare global {
         canceled: boolean;
         entries?: Array<{ path: string; kind: 'file' | 'directory' }>;
       }>;
+      showItemInFolder: (
+        filePath: string,
+      ) => Promise<{ ok: boolean; error?: string }>;
+      openPathInExplorer: (
+        targetPath: string,
+      ) => Promise<{ ok: boolean; error?: string }>;
+      browseFolderList: (
+        dirPath: string,
+      ) => Promise<{
+        ok: boolean;
+        entries?: Array<{ name: string; isDirectory: boolean }>;
+        truncated?: boolean;
+        error?: string;
+      }>;
       getZoneHistoryStats: () => Promise<{
         ok: boolean;
         stats?: {

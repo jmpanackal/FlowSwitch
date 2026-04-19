@@ -1,4 +1,4 @@
-const { app, BrowserWindow, ipcMain, Menu, session } = require('electron');
+const { app, BrowserWindow, ipcMain, Menu, session, shell } = require('electron');
 const path = require('path');
 const fs = require('fs');
 const { pathToFileURL, fileURLToPath } = require('url');
@@ -490,12 +490,28 @@ const shouldInjectAppCsp = (requestUrl) => {
 const setupSessionSecurity = () => {
   const defaultSession = session.defaultSession;
 
+  const isClipboardPermission = (permission) => {
+    const p = String(permission || '');
+    return (
+      p === 'clipboard-read'
+      || p === 'clipboard-write'
+      || p === 'clipboard-sanitized-read'
+      || p === 'clipboard-sanitized-write'
+    );
+  };
+
   defaultSession.setPermissionRequestHandler((_webContents, permission, callback) => {
+    if (isClipboardPermission(permission)) {
+      callback(true);
+      return;
+    }
     console.warn('[session] blocked permission request:', permission);
     callback(false);
   });
 
-  defaultSession.setPermissionCheckHandler(() => false);
+  defaultSession.setPermissionCheckHandler((_webContents, permission) => (
+    isClipboardPermission(permission)
+  ));
 
   defaultSession.webRequest.onHeadersReceived((details, callback) => {
     if (details.resourceType !== 'mainFrame' || !shouldInjectAppCsp(details.url)) {
@@ -861,6 +877,40 @@ if (shouldBootstrapElectronMain) {
     getRunningWindowProcesses,
     hiddenProcessNamePatterns,
     hiddenWindowTitlePatterns,
+  });
+
+  // Dedicated handler so reveal-in-folder always registers with main ipcMain (avoids ordering issues).
+  ipcMain.handle('show-item-in-folder', async (event, rawPath) => {
+    if (!isTrustedIpcSender(event)) {
+      const senderUrl = String(event?.senderFrame?.url || '');
+      console.warn(`[ipc:show-item-in-folder] Blocked untrusted sender: ${senderUrl || '<empty>'}`);
+      throw new Error('Untrusted renderer origin');
+    }
+    try {
+      const trimmed = typeof rawPath === 'string' ? rawPath.trim() : '';
+      const safePath = safeLimitedString(trimmed, MAX_SHORTCUT_PATH_LENGTH);
+      if (!safePath) return { ok: false, error: 'Invalid path' };
+
+      const resolved = path.resolve(safePath);
+      if (!fs.existsSync(resolved)) {
+        return { ok: false, error: 'Path does not exist' };
+      }
+      let st;
+      try {
+        st = fs.statSync(resolved);
+      } catch {
+        return { ok: false, error: 'Path is not accessible' };
+      }
+      if (!st.isFile()) {
+        return { ok: false, error: 'Path is not a file' };
+      }
+
+      shell.showItemInFolder(resolved);
+      return { ok: true };
+    } catch (err) {
+      console.error('[show-item-in-folder]', err);
+      return { ok: false, error: 'Failed to reveal in Explorer' };
+    }
   });
 
   // Quit the app when all windows are closed (except on macOS)

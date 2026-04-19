@@ -11,7 +11,7 @@ import type { ProfileLayoutDragActions } from "./useLayoutCustomDrag";
 /** Selection state for the right-hand inspector (mirrors prior MainLayout inline type). */
 export type MainLayoutSelectedApp = {
   type: "app" | "browser";
-  source: "monitor" | "minimized";
+  source: "monitor" | "minimized" | "sidebar";
   monitorId?: string;
   appIndex?: number;
   data: any;
