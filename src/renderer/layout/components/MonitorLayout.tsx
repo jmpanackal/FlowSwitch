@@ -1695,7 +1695,7 @@ export function MonitorLayout({
       {/* Minimized Apps: overflow visible so hover popovers are not clipped; min-height fits one full tile row */}
       <div className="flex-shrink-0 border-t border-flow-border/30 min-h-[clamp(7.5rem,12vh,11rem)] overflow-x-hidden overflow-y-visible">
         <div
-          className={`min-h-0 max-h-[min(40vh,18rem)] overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] ${
+          className={`scrollbar-elegant min-h-0 max-h-[min(40vh,18rem)] overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] ${
             densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'
           }`}
         >

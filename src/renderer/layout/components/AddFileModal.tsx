@@ -143,7 +143,7 @@ export function AddFileModal({ isOpen, onClose, onAddFile, commonApps }: AddFile
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-      <div className="bg-flow-bg-secondary border border-flow-border rounded-lg shadow-xl w-full max-w-md max-h-[90vh] overflow-y-auto">
+      <div className="scrollbar-elegant max-h-[90vh] w-full max-w-md overflow-y-auto rounded-lg border border-flow-border bg-flow-bg-secondary shadow-xl">
         <div className="p-6">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-2">

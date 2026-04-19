@@ -463,7 +463,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
                     <div className="text-xs text-flow-text-secondary font-medium mb-2">
                       Selected ({nativeEntries.length}):
                     </div>
-                    <div className="space-y-1 max-h-24 overflow-y-auto">
+                    <div className="scrollbar-elegant max-h-24 space-y-1 overflow-y-auto">
                       {nativeEntries.slice(0, 6).map((e, index) => (
                         <div key={`${e.path}:${index}`} className="flex items-center gap-2 text-xs text-flow-text-muted">
                           {e.kind === 'directory' ? (
@@ -488,7 +488,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
                     <div className="text-xs text-flow-text-secondary font-medium mb-2">
                       Selected ({selectedFiles.length}):
                     </div>
-                    <div className="space-y-1 max-h-20 overflow-y-auto">
+                    <div className="scrollbar-elegant max-h-20 space-y-1 overflow-y-auto">
                       {Array.from(selectedFiles).slice(0, 5).map((file, index) => (
                         <div key={index} className="flex items-center gap-2 text-xs text-flow-text-muted">
                           <File className="w-3 h-3 flex-shrink-0" />

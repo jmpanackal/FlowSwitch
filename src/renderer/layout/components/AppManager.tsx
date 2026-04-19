@@ -15,6 +15,7 @@ import {
   placeInstalledSidebarAppOnMinimized,
   placeInstalledSidebarAppOnMonitor,
 } from "../utils/sidebarExplicitPlacement";
+import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 
 interface AppManagerProps {
   profiles: any[];
@@ -86,7 +87,10 @@ export function AppManager({
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [showAppSettings, setShowAppSettings] = useState(false);
   const [expandedApp, setExpandedApp] = useState<string | null>(null);
-  const [addMenuApp, setAddMenuApp] = useState<string | null>(null);
+  const [addMenuOpen, setAddMenuOpen] = useState<{
+    appName: string;
+    anchor: HTMLElement;
+  } | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
   const installedApps = useInstalledApps();
   const allApps = useMemo<AppType[]>(() => (
@@ -148,7 +152,7 @@ export function AppManager({
   }, [currentProfile?.monitors]);
 
   useEffect(() => {
-    setAddMenuApp(null);
+    setAddMenuOpen(null);
   }, [currentProfile?.id]);
 
   const getAppUsage = (appName: string) => {
@@ -287,7 +291,7 @@ export function AppManager({
         onAddApp(mid, newApp);
       },
     });
-    setAddMenuApp(null);
+    setAddMenuOpen(null);
   };
 
   const handleAddInstalledToMinimized = (app: AppType) => {
@@ -304,7 +308,7 @@ export function AppManager({
         onAddAppToMinimized(newApp);
       },
     });
-    setAddMenuApp(null);
+    setAddMenuOpen(null);
   };
 
   if (compact) {
@@ -322,9 +326,9 @@ export function AppManager({
           <span className="flow-sidebar-meta">{filteredApps.length} available</span>
         </div>
 
-        <div className="flex min-h-0 flex-1 flex-col px-3 pb-3 pt-3">
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col pl-3 pr-0 pb-3 pt-3">
           {!sidebarSearchControlled ? (
-            <div className="relative mb-3">
+            <div className="relative mb-3 shrink-0">
               <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 transform text-flow-text-muted" />
               <input
                 type="text"
@@ -336,7 +340,7 @@ export function AppManager({
             </div>
           ) : null}
 
-          <div className="mb-3 rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
+          <div className="mb-3 shrink-0 rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
             <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
               <Move className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={1.75} />
               <span>
@@ -346,7 +350,8 @@ export function AppManager({
             </div>
           </div>
 
-        <div className="scrollbar-elegant max-h-[60vh] min-h-0 flex-1 space-y-2 overflow-x-hidden overflow-y-auto">
+        <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
+          <div className="flex min-h-0 flex-col gap-2 pr-2.5">
           {filteredApps.map((app, index) => {
             const usage = getAppUsage(app.name);
             const isExpanded = expandedApp === app.name || expandedApp === 'toggle-all';
@@ -406,7 +411,7 @@ export function AppManager({
                         }
                         onClick={(e) => {
                           e.stopPropagation();
-                          setAddMenuApp(null);
+                          setAddMenuOpen(null);
                           setExpandedApp(
                             isExpanded ? null : app.name,
                           );
@@ -414,7 +419,7 @@ export function AppManager({
                         onKeyDown={(e) => {
                           if (e.key === "Enter" || e.key === " ") {
                             e.preventDefault();
-                            setAddMenuApp(null);
+                            setAddMenuOpen(null);
                             setExpandedApp(
                               isExpanded ? null : app.name,
                             );
@@ -457,22 +462,28 @@ export function AppManager({
                             : "Add to a monitor or minimized row"
                         }
                         aria-label={`Add ${app.name} to layout`}
-                        aria-expanded={addMenuApp === app.name}
+                        aria-expanded={addMenuOpen?.appName === app.name}
                         aria-haspopup="menu"
                         onClick={(e) => {
                           stopRowPointerForDrag(e);
-                          setAddMenuApp(
-                            addMenuApp === app.name ? null : app.name,
+                          setAddMenuOpen((prev) =>
+                            prev?.appName === app.name
+                              ? null
+                              : {
+                                  appName: app.name,
+                                  anchor: e.currentTarget as HTMLElement,
+                                },
                           );
                         }}
                         className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
                         <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
                       </button>
-                      {addMenuApp === app.name ? (
-                        <div
-                          className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
-                          role="menu"
+                      {addMenuOpen?.appName === app.name ? (
+                        <SidebarOverlayMenu
+                          open
+                          anchorEl={addMenuOpen.anchor}
+                          onClose={() => setAddMenuOpen(null)}
                         >
                           {monitorsSortedForMenu.length ? (
                             monitorsSortedForMenu.map((m) => (
@@ -480,14 +491,16 @@ export function AppManager({
                                 key={m.id}
                                 type="button"
                                 role="menuitem"
-                                className="flow-menu-item text-left text-xs"
+                                className="flow-menu-item min-w-0 text-left text-xs"
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
                                   handleAddInstalledToMonitor(app, m.id);
                                 }}
                               >
-                                {(m.name || m.id) +
-                                  (m.primary ? " (primary)" : "")}
+                                <span className="truncate">
+                                  {(m.name || m.id) +
+                                    (m.primary ? " (primary)" : "")}
+                                </span>
                               </button>
                             ))
                           ) : (
@@ -516,10 +529,10 @@ export function AppManager({
                           >
                             Minimized row
                           </button>
-                          <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
+                          <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
                             Drag the app icon to drop on a specific tile.
                           </div>
-                        </div>
+                        </SidebarOverlayMenu>
                       ) : null}
                     </div>
                   </div>
@@ -563,13 +576,14 @@ export function AppManager({
               </div>
             );
           })}
+          </div>
         </div>
         </div>
 
         {/* App Settings Modal */}
         {showAppSettings && selectedApp && (
           <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-            <div className="bg-flow-surface-elevated backdrop-blur-xl border border-flow-border rounded-2xl p-4 max-w-md w-full max-h-[80vh] overflow-y-auto">
+            <div className="scrollbar-elegant max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-flow-border bg-flow-surface-elevated p-4 backdrop-blur-xl">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-3">
                   <div 

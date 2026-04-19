@@ -83,7 +83,7 @@ if (shouldBootstrapElectronMain) {
   app.commandLine.appendSwitch('disable-d3d11');
   app.commandLine.appendSwitch(
     'disable-features',
-    'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas',
+    'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas,FluentScrollbar',
   );
 }
 

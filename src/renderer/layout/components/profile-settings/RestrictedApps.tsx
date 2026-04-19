@@ -14,7 +14,7 @@ export function RestrictedApps({ restrictedApps, onToggleApp }: RestrictedAppsPr
         Restricted Applications
       </h4>
       <p className="text-white/60 text-sm">Prevent these apps from being launched in this profile</p>
-      <div className="space-y-2 max-h-32 overflow-y-auto">
+      <div className="scrollbar-elegant max-h-32 space-y-2 overflow-y-auto">
         {commonRestrictedApps.map((appName) => (
           <label key={appName} className="flex items-center gap-3 p-2 bg-white/5 rounded-lg cursor-pointer hover:bg-white/10 transition-colors">
             <input
