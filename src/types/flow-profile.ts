@@ -38,11 +38,26 @@ export type ProfileStoreError = {
   message: string;
 };
 
+/** Global content library (shared across all profiles). */
+export type ContentLibrarySnapshot = {
+  items: unknown[];
+  folders: unknown[];
+};
+
+/** Full document written by `profiles:save-all`. */
+export type ProfileSavePayload = {
+  profiles: FlowProfile[];
+  contentLibrary: ContentLibrarySnapshot;
+  contentLibraryExclusions: Record<string, string[]>;
+};
+
 export type ProfileListResult =
   | FlowProfile[]
   | {
       profiles: FlowProfile[];
       storeError: ProfileStoreError | null;
+      contentLibrary?: ContentLibrarySnapshot;
+      contentLibraryExclusions?: Record<string, string[]>;
     };
 
 export function normalizeFlowProfile(rawProfile: unknown): FlowProfile {

@@ -7,9 +7,12 @@ import {
 } from "react";
 import {
   normalizeFlowProfile,
+  toSerializableProfiles,
+  type ContentLibrarySnapshot,
   type FlowProfile,
   type ProfileStoreError,
   type ProfileListResult,
+  type ProfileSavePayload,
 } from "../../../types/flow-profile";
 
 type UseProfilesPersistenceOptions = {
@@ -17,10 +20,18 @@ type UseProfilesPersistenceOptions = {
   setSelectedProfileId: Dispatch<SetStateAction<string>>;
 };
 
+const emptyLibrary = (): ContentLibrarySnapshot => ({ items: [], folders: [] });
+
 export function useProfilesPersistence({
   setSelectedProfileId,
 }: UseProfilesPersistenceOptions) {
   const [profiles, setProfiles] = useState<FlowProfile[]>([]);
+  const [contentLibrary, setContentLibrary] = useState<ContentLibrarySnapshot>(
+    emptyLibrary,
+  );
+  const [contentLibraryExclusions, setContentLibraryExclusions] = useState<
+    Record<string, string[]>
+  >({});
   const [profilesLoaded, setProfilesLoaded] = useState(false);
   const [profileStoreError, setProfileStoreError] =
     useState<ProfileStoreError | null>(null);
@@ -60,6 +71,27 @@ export function useProfilesPersistence({
           : [];
         setProfiles(normalizedProfiles);
         setSelectedProfileId((prev) => prev || normalizedProfiles[0]?.id || "");
+
+        if (Array.isArray(listResult)) {
+          setContentLibrary(emptyLibrary());
+          setContentLibraryExclusions({});
+        } else {
+          const lib = listResult.contentLibrary;
+          setContentLibrary(
+            lib && typeof lib === "object"
+              ? {
+                items: Array.isArray(lib.items) ? lib.items : [],
+                folders: Array.isArray(lib.folders) ? lib.folders : [],
+              }
+              : emptyLibrary(),
+          );
+          const ex = listResult.contentLibraryExclusions;
+          setContentLibraryExclusions(
+            ex && typeof ex === "object" && !Array.isArray(ex)
+              ? (ex as Record<string, string[]>)
+              : {},
+          );
+        }
       } catch (error) {
         console.error("Failed to load persisted profiles:", error);
         if (!cancelled) {
@@ -71,6 +103,8 @@ export function useProfilesPersistence({
           });
           blockProfileAutosaveAfterStoreErrorRef.current = true;
           setProfiles([]);
+          setContentLibrary(emptyLibrary());
+          setContentLibraryExclusions({});
           setSelectedProfileId("");
         }
       } finally {
@@ -94,8 +128,14 @@ export function useProfilesPersistence({
       return;
     }
 
+    const payload: ProfileSavePayload = {
+      profiles: toSerializableProfiles(profiles),
+      contentLibrary,
+      contentLibraryExclusions,
+    };
+
     const timer = window.setTimeout(() => {
-      void window.electron.saveProfiles(profiles).catch((error) => {
+      void window.electron.saveProfiles(payload).catch((error) => {
         console.error("Failed to save persisted profiles:", error);
       });
     }, 200);
@@ -103,7 +143,7 @@ export function useProfilesPersistence({
     return () => {
       window.clearTimeout(timer);
     };
-  }, [profiles, profilesLoaded]);
+  }, [profiles, contentLibrary, contentLibraryExclusions, profilesLoaded]);
 
   useEffect(() => {
     if (!profilesLoaded) return;
@@ -117,6 +157,10 @@ export function useProfilesPersistence({
   return {
     profiles,
     setProfiles,
+    contentLibrary,
+    setContentLibrary,
+    contentLibraryExclusions,
+    setContentLibraryExclusions,
     profilesLoaded,
     profileStoreError,
     skipNextAutosaveRef,

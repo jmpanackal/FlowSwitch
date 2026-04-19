@@ -6,12 +6,13 @@ import {
   type MutableRefObject,
   type SetStateAction,
 } from "react";
-import type { FlowProfile } from "../../../types/flow-profile";
-import { toSerializableProfiles } from "../../../types/flow-profile";
+import type { FlowProfile, ProfileSavePayload } from "../../../types/flow-profile";
 import type { LaunchFeedbackState } from "./useLaunchFeedback";
 
 type UseProfileLaunchOptions = {
   profiles: FlowProfile[];
+  /** Full store document (profiles + global content library) for pre-launch persist. */
+  buildSavePayload: () => ProfileSavePayload;
   selectedProfileId: string;
   setIsLaunching: Dispatch<SetStateAction<boolean>>;
   setLaunchFeedback: Dispatch<SetStateAction<LaunchFeedbackState>>;
@@ -25,6 +26,7 @@ type UseProfileLaunchOptions = {
 
 export function useProfileLaunch({
   profiles,
+  buildSavePayload,
   selectedProfileId,
   setIsLaunching,
   setLaunchFeedback,
@@ -113,11 +115,8 @@ export function useProfileLaunch({
       };
       try {
         if (window.electron?.saveProfiles) {
-          const serializableProfiles = toSerializableProfiles(
-            profiles,
-          );
           const saveResult = await window.electron.saveProfiles(
-            serializableProfiles,
+            buildSavePayload(),
           );
           if (!saveResult?.ok) {
             launchWallClockStartMsRef.current = null;
@@ -312,6 +311,7 @@ export function useProfileLaunch({
     })();
   }, [
     profiles,
+    buildSavePayload,
     selectedProfileId,
     setIsLaunching,
     setLaunchFeedback,
