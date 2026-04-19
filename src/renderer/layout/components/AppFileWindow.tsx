@@ -1170,7 +1170,7 @@ export function AppFileWindow({
                         <div className="text-xs font-medium text-flow-text-muted mb-3 uppercase tracking-wide">
                           Folder Contents ({file.files.length} items):
                         </div>
-                        <div className="space-y-2 max-h-40 overflow-y-auto">
+                        <div className="scrollbar-elegant max-h-40 space-y-2 overflow-y-auto">
                           {file.files.slice(0, 10).map((subFile: any, index: number) => (
                             <div key={index} className="flex items-center gap-3 p-3 bg-flow-bg-primary rounded-lg border border-flow-border">
                               <FileIcon type={subFile.type || 'default'} className="w-4 h-4 flex-shrink-0" />

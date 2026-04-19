@@ -923,7 +923,7 @@ export default function App() {
   };
 
   return (
-    <div className="h-screen overflow-hidden flow-shell-canvas">
+    <div className="flow-shell-canvas flex h-screen min-h-0 flex-col overflow-hidden">
       {profileStoreError ? (
         <div
           className="shrink-0 px-4 py-2 bg-amber-950/80 border-b border-amber-700/60 text-amber-100 text-xs"
@@ -951,9 +951,9 @@ export default function App() {
         id="flowswitch-import-profile"
         aria-hidden
       />
-      <div className="flex h-[calc(100vh-2.25rem)]">
+      <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left Sidebar - FIXED: Better height management */}
-        <div className="w-[clamp(16rem,24vw,24rem)] min-w-[16rem] flow-shell-nav flex flex-col">
+        <div className="flow-shell-nav flex h-full max-h-full min-h-0 w-[clamp(16rem,24vw,24rem)] min-w-[16rem] shrink-0 flex-col overflow-hidden">
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-nav-tab-strip" role="tablist" aria-label="Sidebar view">
               <button
@@ -1028,8 +1028,8 @@ export default function App() {
             </div>
           </div>
 
-          {/* Sidebar Content - FIXED: Proper flex and overflow handling */}
-          <div className="flex-1 min-h-0 flex flex-col">
+          {/* List region below tabs + search: scrollbars live only inside child views */}
+          <div className="flex min-h-0 flex-1 flex-col border-t border-flow-border/30 bg-flow-bg-primary/15 pt-1">
             {currentView === "profiles" && (
               <div className="flex-1 flex flex-col min-h-0">
                 <div className="flex-shrink-0 border-b border-flow-border/50 p-3">
@@ -1076,8 +1076,8 @@ export default function App() {
                   )}
                 </div>
 
-                <div className="flex-1 overflow-y-auto scrollbar-elegant p-3">
-                  <div className="space-y-2.5">
+                <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain py-3 pl-3 pr-0">
+                  <div className="space-y-2.5 pr-2.5">
                     {filteredProfiles.length === 0 ? (
                       <p className="py-6 text-center text-xs text-flow-text-muted">
                         {profiles.length === 0
@@ -1135,7 +1135,7 @@ export default function App() {
             )}
 
             {currentView === "apps" && (
-              <div className="flex-1 min-h-0">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <AppManager
                   profiles={profiles}
                   onUpdateProfile={updateProfile}
@@ -1158,7 +1158,7 @@ export default function App() {
             )}
 
             {currentView === "content" && (
-              <div className="flex-1 min-h-0">
+              <div className="flex min-h-0 flex-1 flex-col">
                 <ContentManager
                   profiles={profiles}
                   currentProfile={currentProfile}
@@ -1206,7 +1206,7 @@ export default function App() {
 
         {/* Main Content Area with Header and Right Sidebar */}
         <div
-          className={`flex-1 flex flex-col transition-[margin] duration-200 ease-out ${
+          className={`flex min-h-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
             rightSidebarOpen ? "mr-[clamp(18rem,24vw,24rem)]" : "mr-0"
           }`}
         >

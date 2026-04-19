@@ -129,7 +129,7 @@ export function AppSettings({
   };
 
   return (
-    <div className="bg-flow-surface-elevated backdrop-blur-xl border border-flow-border rounded-2xl p-6 max-w-md w-full max-h-[80vh] overflow-y-auto">
+    <div className="scrollbar-elegant max-h-[80vh] w-full max-w-md overflow-y-auto rounded-2xl border border-flow-border bg-flow-surface-elevated p-6 backdrop-blur-xl">
       <div className="flex items-center justify-between mb-6">
         <div className="flex items-center gap-3">
           <div 
@@ -279,7 +279,7 @@ export function AppSettings({
           </div>
 
           {associatedFiles.length > 0 ? (
-            <div className="space-y-2 max-h-32 overflow-y-auto">
+            <div className="scrollbar-elegant max-h-32 space-y-2 overflow-y-auto">
               {associatedFiles.map((file, index) => (
                 <div key={file.id} className="flex items-center gap-3 p-2 bg-flow-surface border border-flow-border rounded-lg">
                   <FileIcon type={file.type} className="w-4 h-4 flex-shrink-0" />

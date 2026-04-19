@@ -344,7 +344,7 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
             </div>
             
             {/* Predefined Layouts */}
-            <div className="space-y-2 max-h-64 overflow-y-auto">
+            <div className="scrollbar-elegant max-h-64 space-y-2 overflow-y-auto">
               <div className="text-flow-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">
                 Predefined Layouts
               </div>

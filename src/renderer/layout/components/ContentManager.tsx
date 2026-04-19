@@ -2,6 +2,7 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, ChevronRight, ChevronDown, Folder, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3 } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AddContentModal } from "./AddContentModal";
+import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
@@ -220,9 +221,10 @@ export function ContentManager({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'link' | 'file'>('link');
   const [appDropdownOpen, setAppDropdownOpen] = useState<string | null>(null);
-  const [compactAddMenuKey, setCompactAddMenuKey] = useState<string | null>(
-    null,
-  );
+  const [compactAddMenu, setCompactAddMenu] = useState<{
+    key: string;
+    anchor: HTMLElement;
+  } | null>(null);
   const libraryHydratedRef = useRef(false);
   const lastExternalLibrarySigRef = useRef("");
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -302,7 +304,7 @@ export function ContentManager({
   }, [currentProfile?.id, externalContentItems, externalContentFolders]);
 
   useEffect(() => {
-    setCompactAddMenuKey(null);
+    setCompactAddMenu(null);
   }, [currentProfile?.id]);
 
   useEffect(() => {
@@ -732,13 +734,13 @@ export function ContentManager({
   const handleAddContentToMonitor = (item: ContentItem, monitorId: string) => {
     if (!onPlaceContentOnMonitor) return;
     onPlaceContentOnMonitor(monitorId, item);
-    setCompactAddMenuKey(null);
+    setCompactAddMenu(null);
   };
 
   const handleAddContentToMinimized = (item: ContentItem) => {
     if (!onPlaceContentOnMinimized) return;
     onPlaceContentOnMinimized(item);
-    setCompactAddMenuKey(null);
+    setCompactAddMenu(null);
   };
 
   const handleAddLibraryFolderToMonitor = (
@@ -747,13 +749,13 @@ export function ContentManager({
   ) => {
     if (!onPlaceLibraryFolderOnMonitor) return;
     onPlaceLibraryFolderOnMonitor(monitorId, folder);
-    setCompactAddMenuKey(null);
+    setCompactAddMenu(null);
   };
 
   const handleAddLibraryFolderToMinimized = (folder: ContentFolder) => {
     if (!onPlaceLibraryFolderOnMinimized) return;
     onPlaceLibraryFolderOnMinimized(folder);
-    setCompactAddMenuKey(null);
+    setCompactAddMenu(null);
   };
 
   /** Compact sidebar: + menu for a content item */
@@ -775,21 +777,26 @@ export function ContentManager({
                 : "Add to a monitor or minimized row"
             }
             aria-label={`Add ${item.name} to layout`}
-            aria-expanded={compactAddMenuKey === k}
+            aria-expanded={compactAddMenu?.key === k}
             aria-haspopup="menu"
             onClick={(e) => {
               stopContentRowPointer(e);
               setAppDropdownOpen(null);
-              setCompactAddMenuKey(compactAddMenuKey === k ? null : k);
+              setCompactAddMenu((prev) =>
+                prev?.key === k
+                  ? null
+                  : { key: k, anchor: e.currentTarget as HTMLElement },
+              );
             }}
             className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
           </button>
-          {compactAddMenuKey === k ? (
-            <div
-              className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
-              role="menu"
+          {compactAddMenu?.key === k ? (
+            <SidebarOverlayMenu
+              open
+              anchorEl={compactAddMenu.anchor}
+              onClose={() => setCompactAddMenu(null)}
             >
               {monitorsSortedForMenu.length ? (
                 monitorsSortedForMenu.map((m) => (
@@ -797,13 +804,15 @@ export function ContentManager({
                     key={m.id}
                     type="button"
                     role="menuitem"
-                    className="flow-menu-item text-left text-xs"
+                    className="flow-menu-item min-w-0 text-left text-xs"
                     onClick={(e) => {
                       stopContentRowPointer(e);
                       handleAddContentToMonitor(item, m.id);
                     }}
                   >
-                    {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                    <span className="truncate">
+                      {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                    </span>
                   </button>
                 ))
               ) : (
@@ -825,11 +834,11 @@ export function ContentManager({
               >
                 Minimized row
               </button>
-              <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
-                Drag the row to place on a specific tile. Click the row to see
-                full path and change “Opens with” in the panel.
+              <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
+                Drag the row to drop on a tile. Row click: path and “Opens with”
+                in the panel.
               </div>
-            </div>
+            </SidebarOverlayMenu>
           ) : null}
         </div>
       </div>
@@ -850,21 +859,26 @@ export function ContentManager({
             disabled={!currentProfile}
             title="Add folder contents as one layout tile"
             aria-label={`Add folder ${folder.name} to layout`}
-            aria-expanded={compactAddMenuKey === k}
+            aria-expanded={compactAddMenu?.key === k}
             aria-haspopup="menu"
             onClick={(e) => {
               stopContentRowPointer(e);
               setAppDropdownOpen(null);
-              setCompactAddMenuKey(compactAddMenuKey === k ? null : k);
+              setCompactAddMenu((prev) =>
+                prev?.key === k
+                  ? null
+                  : { key: k, anchor: e.currentTarget as HTMLElement },
+              );
             }}
             className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
             <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
           </button>
-          {compactAddMenuKey === k ? (
-            <div
-              className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
-              role="menu"
+          {compactAddMenu?.key === k ? (
+            <SidebarOverlayMenu
+              open
+              anchorEl={compactAddMenu.anchor}
+              onClose={() => setCompactAddMenu(null)}
             >
               {monitorsSortedForMenu.length ? (
                 monitorsSortedForMenu.map((m) => (
@@ -872,13 +886,15 @@ export function ContentManager({
                     key={m.id}
                     type="button"
                     role="menuitem"
-                    className="flow-menu-item text-left text-xs"
+                    className="flow-menu-item min-w-0 text-left text-xs"
                     onClick={(e) => {
                       stopContentRowPointer(e);
                       handleAddLibraryFolderToMonitor(folder, m.id);
                     }}
                   >
-                    {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                    <span className="truncate">
+                      {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                    </span>
                   </button>
                 ))
               ) : (
@@ -899,11 +915,10 @@ export function ContentManager({
               >
                 Minimized row
               </button>
-              <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
-                Adds one tile with all files in this folder (including nested
-                folders). Links are skipped.
+              <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
+                One tile: all files in this folder (nested included). Links skipped.
               </div>
-            </div>
+            </SidebarOverlayMenu>
           ) : null}
         </div>
       </div>
@@ -1008,7 +1023,7 @@ export function ContentManager({
                   
                   {appDropdownOpen === folder.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                      <div className="max-h-40 overflow-y-auto">
+                      <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                         {AVAILABLE_APPS.map((app) => (
                           <button
                             key={app}
@@ -1089,7 +1104,7 @@ export function ContentManager({
                   
                   {appDropdownOpen === folder.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                      <div className="max-h-40 overflow-y-auto">
+                      <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                         {AVAILABLE_APPS.map((app) => (
                           <button
                             key={app}
@@ -1178,7 +1193,7 @@ export function ContentManager({
                 
                 {appDropdownOpen === folder.id && (
                   <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                    <div className="max-h-40 overflow-y-auto">
+                    <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                       {AVAILABLE_APPS.map((app) => (
                         <button
                           key={app}
@@ -1287,7 +1302,7 @@ export function ContentManager({
                   
                   {appDropdownOpen === item.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                      <div className="max-h-40 overflow-y-auto">
+                      <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                         {AVAILABLE_APPS.map((app) => (
                           <button
                             key={app}
@@ -1371,7 +1386,7 @@ export function ContentManager({
                   
                   {appDropdownOpen === item.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                      <div className="max-h-40 overflow-y-auto">
+                      <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                         {AVAILABLE_APPS.map((app) => (
                           <button
                             key={app}
@@ -1458,7 +1473,7 @@ export function ContentManager({
                 
                 {appDropdownOpen === item.id && (
                   <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
-                    <div className="max-h-40 overflow-y-auto">
+                    <div className="scrollbar-elegant max-h-40 overflow-y-auto">
                       {AVAILABLE_APPS.map((app) => (
                         <button
                           key={app}
@@ -1666,7 +1681,7 @@ export function ContentManager({
       </div>
 
       <div
-        className={`space-y-3 ${compact ? "mb-3 px-3 pt-3" : "mb-4"}`}
+        className={`space-y-3 ${compact ? "mb-3 shrink-0 px-3 pt-3" : "mb-4"}`}
       >
         {!sidebarSearchControlled ? (
           <div className="relative">
@@ -1775,7 +1790,7 @@ export function ContentManager({
       {breadcrumbs.length > 1 && selectedType === 'all' && (
         <div
           className={`flex items-center gap-1 border border-flow-border bg-flow-surface p-2 rounded-lg ${
-            compact ? "mx-3 mb-3" : "mb-4"
+            compact ? "mx-3 mb-3 shrink-0" : "mb-4"
           }`}
         >
           <Home className="w-3 h-3 text-flow-text-muted" />
@@ -1799,12 +1814,17 @@ export function ContentManager({
 
 
 
-      {/* Content List - Smart scrolling with elegant scrollbar, no horizontal scroll */}
+      {/* Content list: compact = fill sidebar remainder, scroll only when rows overflow; non-compact = capped height */}
       <div
-        className={`${viewMode === "simplified" ? "space-y-1" : "space-y-2"} max-h-[60vh] overflow-x-hidden overflow-y-auto scrollbar-elegant ${
-          compact ? "min-h-0 flex-1 px-3 pb-3" : ""
-        }`}
+        className={
+          compact
+            ? "scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pl-3 pb-3 pr-0"
+            : "scrollbar-elegant max-h-[60vh] overflow-x-hidden overflow-y-auto"
+        }
       >
+        <div
+          className={`${viewMode === "simplified" ? "space-y-1" : "space-y-2"}${compact ? " pr-2.5" : ""}`}
+        >
         {displayFolders.length === 0 && displayContent.length === 0 ? (
           <div className="text-center py-8">
             <FileText className="w-8 h-8 text-flow-text-muted mx-auto mb-2" />
@@ -1831,6 +1851,7 @@ export function ContentManager({
             {displayContent.map((item) => renderContentItem(item))}
           </>
         )}
+        </div>
       </div>
 
       {/* Add Content Modal */}

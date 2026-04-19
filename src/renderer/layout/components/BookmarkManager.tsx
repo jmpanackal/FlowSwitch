@@ -114,7 +114,7 @@ export function BookmarkManager({
         </div>
 
         {/* Compact Bookmark List */}
-        <div className="space-y-2 max-h-96 overflow-y-auto">
+        <div className="scrollbar-elegant max-h-96 space-y-2 overflow-y-auto">
           {filteredBookmarks.map((bookmark) => {
             const isBeingDragged = draggedBookmark?.id === bookmark.id;
             

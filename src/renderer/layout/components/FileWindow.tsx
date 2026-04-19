@@ -200,7 +200,7 @@ export function FileWindow({
 
           {/* Expanded Folder Contents */}
           {file.isFolder && isExpanded && file.files && (
-            <div className="absolute top-full left-0 right-0 bg-flow-surface border border-flow-border rounded-lg shadow-lg mt-1 p-2 z-20 max-h-32 overflow-y-auto">
+            <div className="scrollbar-elegant absolute left-0 right-0 top-full z-20 mt-1 max-h-32 overflow-y-auto rounded-lg border border-flow-border bg-flow-surface p-2 shadow-lg">
               <div className="space-y-1">
                 {file.files.slice(0, 5).map((subFile: any, index: number) => (
                   <div key={index} className="flex items-center gap-2 text-xs">

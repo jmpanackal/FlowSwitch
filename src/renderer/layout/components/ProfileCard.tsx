@@ -238,7 +238,7 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
       {showDetails && !showActions && !profile.isActive && (
         <div className="absolute top-0 left-full ml-4 w-80 p-4 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-50">
           <h4 className="text-[11px] font-semibold uppercase tracking-wider text-flow-text-secondary mb-3">Apps &amp; layout</h4>
-          <div className="space-y-3 max-h-64 overflow-y-auto">
+          <div className="scrollbar-elegant max-h-64 space-y-3 overflow-y-auto">
             {(Array.isArray(profile.monitors) ? profile.monitors : []).map((monitor, index) => (
               <div key={monitor?.id || index} className="space-y-2">
                 <div className="flex items-center gap-2 text-flow-text-secondary text-sm">
