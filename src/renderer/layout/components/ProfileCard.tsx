@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Monitor, Folder, Globe, MoreVertical, Copy, Edit, Trash2, Settings, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
+import { Monitor, Folder, Globe, MoreVertical, Copy, Edit, Trash2, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
 import { formatUnit } from "../../utils/pluralize";
@@ -155,33 +155,41 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
           </div>
         </div>
 
-        {/* Profile Actions Menu */}
+        {/* Profile actions: always visible for discoverability and keyboard paths */}
         {!disabled && (
-          <div className="absolute top-3 right-3">
+          <div className="absolute top-3 right-3 flex items-center gap-0.5">
+            {onSettings ? (
+              <button
+                type="button"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onSettings();
+                }}
+                className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                aria-label={`Edit ${profile.name}`}
+                title="Edit profile"
+              >
+                <Edit className="h-3.5 w-3.5" />
+              </button>
+            ) : null}
             <div className="relative">
               <button
+                type="button"
                 onClick={(e) => {
                   e.stopPropagation();
                   setShowActions(!showActions);
                 }}
-                className={`p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-flow-surface transition-all ${
-                  profile.isActive ? 'opacity-100' : ''
-                }`}
+                className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                aria-expanded={showActions}
+                aria-haspopup="menu"
+                aria-label={`More actions for ${profile.name}`}
+                title="More"
               >
-                <MoreVertical className="w-3 h-3 text-flow-text-muted" />
+                <MoreVertical className="h-3 w-3" />
               </button>
             
               {showActions && (
                 <div className="absolute top-6 right-0 w-48 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-10 py-1">
-                  {onSettings && (
-                    <button
-                      onClick={(e) => handleActionClick(e, onSettings)}
-                      className="w-full flex items-center gap-2 px-3 py-2 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary text-sm transition-colors"
-                    >
-                      <Settings className="w-3 h-3" />
-                      Settings
-                    </button>
-                  )}
                   {onSetOnStartup && (
                     <button
                       onClick={(e) => handleActionClick(e, onSetOnStartup)}

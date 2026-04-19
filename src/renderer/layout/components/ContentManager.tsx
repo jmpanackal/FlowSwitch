@@ -1,5 +1,5 @@
-import { useState, useRef, useEffect } from "react";
-import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, Play, ChevronRight, ChevronDown, Folder, FolderPlus, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3 } from "lucide-react";
+import { useState, useRef, useEffect, useMemo } from "react";
+import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, ChevronRight, ChevronDown, Folder, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3 } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AddContentModal } from "./AddContentModal";
 import {
@@ -8,20 +8,22 @@ import {
 } from "../utils/documentTextSelection";
 
 // Enhanced content types for the unified system
-interface ContentFolder {
+export interface ContentFolder {
   id: string;
   name: string;
   type: 'folder';
   parentId?: string;
   contentType: 'link' | 'file' | 'mixed';
   children: string[]; // IDs of child items and folders
+  /** When set, this folder represents a single on-disk directory (children may be empty). */
+  diskPath?: string;
   isExpanded?: boolean;
   isFavorite?: boolean;
   lastUsed?: string;
   defaultApp: string; // App to open folder with
 }
 
-interface ContentItem {
+export interface ContentItem {
   id: string;
   type: 'link' | 'file';
   name: string;
@@ -47,14 +49,40 @@ interface ContentManagerProps {
   onUpdateProfile?: (profileId: string, updates: any) => void;
   onCustomDragStart: (data: any, sourceType: 'sidebar' | 'monitor' | 'minimized', sourceId: string, startPos: { x: number; y: number }, preview?: React.ReactNode) => void;
   onDragStart?: () => void;
+  /** Places a content item on a monitor (parent supplies profile-scoped mutations). */
+  onPlaceContentOnMonitor?: (monitorId: string, item: ContentItem) => void;
+  onPlaceContentOnMinimized?: (item: ContentItem) => void;
+  onPlaceLibraryFolderOnMonitor?: (
+    monitorId: string,
+    folder: ContentFolder,
+  ) => void;
+  onPlaceLibraryFolderOnMinimized?: (folder: ContentFolder) => void;
+  /** Compact sidebar: open right inspector instead of cramming metadata in the list. */
+  onInspectLibrarySelection?: (
+    payload:
+      | { kind: "item"; item: ContentItem }
+      | { kind: "folder"; folder: ContentFolder },
+  ) => void;
+  /** When set, navigates into this folder then clears (e.g. from inspector “Open folder”). */
+  openLibraryFolderId?: string | null;
+  onConsumedOpenLibraryFolder?: () => void;
+  /** Global library rows visible for the active profile (parent filters exclusions). */
+  externalContentItems?: ContentItem[];
+  externalContentFolders?: ContentFolder[];
+  onPersistContentLibrary?: (next: {
+    items: ContentItem[];
+    folders: ContentFolder[];
+  }) => void;
+  /** IDs hidden for the active profile only (global library still contains them). */
+  excludedContentIds?: string[];
   compact?: boolean;
   /** When both set with `compact`, hides the local search field and uses this query. */
   sidebarSearchQuery?: string;
   onSidebarSearchQueryChange?: (query: string) => void;
 }
 
-// Available apps for users to choose from
-const AVAILABLE_APPS = [
+// Available apps for users to choose from (exported for library inspector)
+export const AVAILABLE_APPS = [
   // Browsers
   'Chrome',
   'Firefox', 
@@ -154,7 +182,18 @@ export function ContentManager({
   currentProfile, 
   onUpdateProfile, 
   onCustomDragStart, 
-  onDragStart, 
+  onDragStart,
+  onPlaceContentOnMonitor,
+  onPlaceContentOnMinimized,
+  onPlaceLibraryFolderOnMonitor,
+  onPlaceLibraryFolderOnMinimized,
+  onInspectLibrarySelection,
+  openLibraryFolderId,
+  onConsumedOpenLibraryFolder,
+  externalContentItems,
+  externalContentFolders,
+  onPersistContentLibrary,
+  excludedContentIds,
   compact = false,
   sidebarSearchQuery,
   onSidebarSearchQueryChange,
@@ -181,15 +220,75 @@ export function ContentManager({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'link' | 'file'>('link');
   const [appDropdownOpen, setAppDropdownOpen] = useState<string | null>(null);
+  const [compactAddMenuKey, setCompactAddMenuKey] = useState<string | null>(
+    null,
+  );
+  const libraryHydratedRef = useRef(false);
+  const lastExternalLibrarySigRef = useRef("");
+  const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const compactItemMenuKey = (id: string) => `item:${id}`;
+  const compactFolderMenuKey = (id: string) => `folder:${id}`;
+
+  const monitorsSortedForMenu = useMemo(() => {
+    const list = [...(currentProfile?.monitors ?? [])] as {
+      id: string;
+      name?: string;
+      primary?: boolean;
+    }[];
+    list.sort((a, b) => {
+      if (a.primary === b.primary) return 0;
+      return a.primary ? -1 : 1;
+    });
+    return list;
+  }, [currentProfile?.monitors]);
 
   useEffect(() => {
+    if (externalContentItems == null || externalContentFolders == null) {
+      libraryHydratedRef.current = false;
+    }
+
     if (!currentProfile) {
       setContent([]);
       setFolders([]);
       setCurrentFolderId(null);
+      lastExternalLibrarySigRef.current = "";
       return;
     }
 
+    if (
+      externalContentItems != null
+      && externalContentFolders != null
+    ) {
+      const sig = [
+        externalContentItems.length,
+        externalContentFolders.length,
+        externalContentItems
+          .map(
+            (i) =>
+              `${i.id}:${i.defaultApp}:${i.type}:${i.path ?? ""}:${i.url ?? ""}:${i.name}`,
+          )
+          .join("|"),
+        externalContentFolders
+          .map(
+            (f) =>
+              `${f.id}:${f.defaultApp}:${f.name}:${f.diskPath ?? ""}:${(f.children || []).join(",")}`,
+          )
+          .join("|"),
+      ].join("::");
+      if (lastExternalLibrarySigRef.current !== sig) {
+        lastExternalLibrarySigRef.current = sig;
+        setContent(externalContentItems);
+        setFolders(externalContentFolders);
+      }
+      libraryHydratedRef.current = true;
+      setCurrentFolderId((prev) => {
+        if (!prev) return null;
+        return externalContentFolders.some((f) => f.id === prev) ? prev : null;
+      });
+      return;
+    }
+
+    lastExternalLibrarySigRef.current = "";
     const profileContent = Array.isArray(currentProfile.contentItems)
       ? currentProfile.contentItems
       : [];
@@ -200,15 +299,39 @@ export function ContentManager({
     setContent(profileContent);
     setFolders(profileFolders);
     setCurrentFolderId(null);
+  }, [currentProfile?.id, externalContentItems, externalContentFolders]);
+
+  useEffect(() => {
+    setCompactAddMenuKey(null);
   }, [currentProfile?.id]);
 
   useEffect(() => {
-    if (!currentProfile?.id || !onUpdateProfile) return;
+    if (!openLibraryFolderId) return;
+    setCurrentFolderId(openLibraryFolderId);
+    onConsumedOpenLibraryFolder?.();
+  }, [openLibraryFolderId, onConsumedOpenLibraryFolder]);
+
+  useEffect(() => {
+    if (!currentProfile?.id) return;
+
+    if (onPersistContentLibrary) {
+      if (!libraryHydratedRef.current) return;
+      if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+      persistTimerRef.current = setTimeout(() => {
+        persistTimerRef.current = null;
+        onPersistContentLibrary({ items: content, folders: folders });
+      }, 350);
+      return () => {
+        if (persistTimerRef.current) clearTimeout(persistTimerRef.current);
+      };
+    }
+
+    if (!onUpdateProfile) return;
     onUpdateProfile(currentProfile.id, {
       contentItems: content,
       contentFolders: folders,
     });
-  }, [content, folders, currentProfile?.id, onUpdateProfile]);
+  }, [content, folders, currentProfile?.id, onUpdateProfile, onPersistContentLibrary]);
 
   // Timer and state for click vs drag detection
   const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -294,6 +417,10 @@ export function ContentManager({
         return shouldShow;
       });
     }
+
+    const excluded = new Set(excludedContentIds || []);
+    displayFolders = displayFolders.filter((f) => !excluded.has(f.id));
+    displayContent = displayContent.filter((i) => !excluded.has(i.id));
 
     console.log(`📊 Display results: ${displayFolders.length} folders, ${displayContent.length} items`);
 
@@ -501,38 +628,28 @@ export function ContentManager({
     console.log('🎯 CONTENT CLICKED:', item.name, 'type:', item.type);
     
     if (item.type === 'folder') {
-      // Navigate into folder (only if not filtering by specific type)
+      if (compact && onInspectLibrarySelection) {
+        onInspectLibrarySelection({
+          kind: "folder",
+          folder: item as ContentFolder,
+        });
+        return;
+      }
       if (selectedType === 'all' || selectedType === 'folder') {
         console.log('📁 NAVIGATING INTO FOLDER:', item.id);
         setCurrentFolderId(item.id);
       }
     } else {
       const contentItem = item as ContentItem;
+      if (compact && onInspectLibrarySelection) {
+        onInspectLibrarySelection({ kind: "item", item: contentItem });
+        return;
+      }
       if (contentItem.type === 'link' && contentItem.url) {
         console.log('🔗 Opening link:', contentItem.url);
-        // In a real app, this would open the link
       } else if (contentItem.type === 'file' && contentItem.path) {
         console.log('📁 Opening file:', contentItem.path);
-        // In a real app, this would open the file
       }
-    }
-  };
-
-  const handleDirectOpen = (e: React.MouseEvent, item: ContentItem) => {
-    e.stopPropagation();
-    
-    if (item.type === 'link' && item.url) {
-      console.log('🚀 Direct open link:', item.url);
-      // Update last used
-      setContent(prev => prev.map(c => 
-        c.id === item.id ? { ...c, lastUsed: new Date().toISOString().split('T')[0] } : c
-      ));
-    } else if (item.type === 'file' && item.path) {
-      console.log('🚀 Direct open file:', item.path);
-      // Update last used
-      setContent(prev => prev.map(c => 
-        c.id === item.id ? { ...c, lastUsed: new Date().toISOString().split('T')[0] } : c
-      ));
     }
   };
 
@@ -556,8 +673,25 @@ export function ContentManager({
   };
 
   const handleAddContent = (contentData: any) => {
+    if (contentData.libraryDiskFolder && contentData.diskPath) {
+      const folderId = `folder-${Date.now()}`;
+      const newFolder: ContentFolder = {
+        id: folderId,
+        name: String(contentData.name || "Folder").trim() || "Folder",
+        type: "folder",
+        contentType: "mixed",
+        children: [],
+        defaultApp: contentData.defaultApp || "File Explorer",
+        diskPath: String(contentData.diskPath).trim(),
+        parentId: currentFolderId ?? undefined,
+        isFavorite: false,
+      };
+      setFolders((prev) => [...prev, newFolder]);
+      return;
+    }
+
     const newItem: ContentItem = {
-      id: `${contentData.type}-${Date.now()}`,
+      id: `${contentData.type}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
       type: contentData.type,
       name: contentData.name,
       url: contentData.url,
@@ -588,6 +722,192 @@ export function ContentManager({
       console.log('✅ Changed default app for content', itemId, 'to', newDefaultApp);
     }
     setAppDropdownOpen(null);
+  };
+
+  const stopContentRowPointer = (e: React.SyntheticEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleAddContentToMonitor = (item: ContentItem, monitorId: string) => {
+    if (!onPlaceContentOnMonitor) return;
+    onPlaceContentOnMonitor(monitorId, item);
+    setCompactAddMenuKey(null);
+  };
+
+  const handleAddContentToMinimized = (item: ContentItem) => {
+    if (!onPlaceContentOnMinimized) return;
+    onPlaceContentOnMinimized(item);
+    setCompactAddMenuKey(null);
+  };
+
+  const handleAddLibraryFolderToMonitor = (
+    folder: ContentFolder,
+    monitorId: string,
+  ) => {
+    if (!onPlaceLibraryFolderOnMonitor) return;
+    onPlaceLibraryFolderOnMonitor(monitorId, folder);
+    setCompactAddMenuKey(null);
+  };
+
+  const handleAddLibraryFolderToMinimized = (folder: ContentFolder) => {
+    if (!onPlaceLibraryFolderOnMinimized) return;
+    onPlaceLibraryFolderOnMinimized(folder);
+    setCompactAddMenuKey(null);
+  };
+
+  /** Compact sidebar: + menu for a content item */
+  const renderCompactAddToolbar = (item: ContentItem) => {
+    if (!compact || !onPlaceContentOnMonitor) return null;
+    const k = compactItemMenuKey(item.id);
+    return (
+      <div
+        className="flex shrink-0 items-center gap-0.5 self-center"
+        onMouseDown={stopContentRowPointer}
+      >
+        <div className="relative">
+          <button
+            type="button"
+            disabled={!currentProfile}
+            title={
+              !currentProfile
+                ? "Select a profile first"
+                : "Add to a monitor or minimized row"
+            }
+            aria-label={`Add ${item.name} to layout`}
+            aria-expanded={compactAddMenuKey === k}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              stopContentRowPointer(e);
+              setAppDropdownOpen(null);
+              setCompactAddMenuKey(compactAddMenuKey === k ? null : k);
+            }}
+            className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+          </button>
+          {compactAddMenuKey === k ? (
+            <div
+              className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
+              role="menu"
+            >
+              {monitorsSortedForMenu.length ? (
+                monitorsSortedForMenu.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="menuitem"
+                    className="flow-menu-item text-left text-xs"
+                    onClick={(e) => {
+                      stopContentRowPointer(e);
+                      handleAddContentToMonitor(item, m.id);
+                    }}
+                  >
+                    {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                  No monitors in this profile.
+                </div>
+              )}
+              <div className="my-0.5 h-px bg-flow-border/50" role="none" />
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!currentProfile || !onPlaceContentOnMinimized}
+                title={!currentProfile ? "Select a profile first" : undefined}
+                className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={(e) => {
+                  stopContentRowPointer(e);
+                  handleAddContentToMinimized(item);
+                }}
+              >
+                Minimized row
+              </button>
+              <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
+                Drag the row to place on a specific tile. Click the row to see
+                full path and change “Opens with” in the panel.
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
+  };
+
+  const renderCompactFolderAddToolbar = (folder: ContentFolder) => {
+    if (!compact || !onPlaceLibraryFolderOnMonitor) return null;
+    const k = compactFolderMenuKey(folder.id);
+    return (
+      <div
+        className="flex shrink-0 items-center gap-0.5 self-center"
+        onMouseDown={stopContentRowPointer}
+      >
+        <div className="relative">
+          <button
+            type="button"
+            disabled={!currentProfile}
+            title="Add folder contents as one layout tile"
+            aria-label={`Add folder ${folder.name} to layout`}
+            aria-expanded={compactAddMenuKey === k}
+            aria-haspopup="menu"
+            onClick={(e) => {
+              stopContentRowPointer(e);
+              setAppDropdownOpen(null);
+              setCompactAddMenuKey(compactAddMenuKey === k ? null : k);
+            }}
+            className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          >
+            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+          </button>
+          {compactAddMenuKey === k ? (
+            <div
+              className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 max-h-56 min-w-[11rem] overflow-y-auto py-0.5"
+              role="menu"
+            >
+              {monitorsSortedForMenu.length ? (
+                monitorsSortedForMenu.map((m) => (
+                  <button
+                    key={m.id}
+                    type="button"
+                    role="menuitem"
+                    className="flow-menu-item text-left text-xs"
+                    onClick={(e) => {
+                      stopContentRowPointer(e);
+                      handleAddLibraryFolderToMonitor(folder, m.id);
+                    }}
+                  >
+                    {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                  </button>
+                ))
+              ) : (
+                <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                  No monitors in this profile.
+                </div>
+              )}
+              <div className="my-0.5 h-px bg-flow-border/50" role="none" />
+              <button
+                type="button"
+                role="menuitem"
+                disabled={!currentProfile || !onPlaceLibraryFolderOnMinimized}
+                className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                onClick={(e) => {
+                  stopContentRowPointer(e);
+                  handleAddLibraryFolderToMinimized(folder);
+                }}
+              >
+                Minimized row
+              </button>
+              <div className="border-t border-flow-border/40 px-3 py-2 text-[10px] leading-snug text-flow-text-muted">
+                Adds one tile with all files in this folder (including nested
+                folders). Links are skipped.
+              </div>
+            </div>
+          ) : null}
+        </div>
+      </div>
+    );
   };
 
   // Get icon for content item
@@ -633,6 +953,29 @@ export function ContentManager({
   // Render folder based on view mode
   const renderFolder = (folder: ContentFolder) => {
     const baseClasses = "group relative cursor-pointer";
+
+    if (compact) {
+      return (
+        <div key={folder.id} className={baseClasses}>
+          <div className="flow-card-quiet rounded-lg">
+            <div
+              className="flex cursor-pointer items-center gap-3 p-3"
+              onClick={() => handleContentClick(folder)}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
+                <Folder className="h-4 w-4 text-amber-400" aria-hidden />
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate text-sm font-medium text-flow-text-primary">
+                  {folder.name}
+                </h3>
+              </div>
+              {renderCompactFolderAddToolbar(folder)}
+            </div>
+          </div>
+        </div>
+      );
+    }
     
     if (viewMode === 'simplified') {
       return (
@@ -887,6 +1230,31 @@ export function ContentManager({
   // Render content item based on view mode
   const renderContentItem = (item: ContentItem) => {
     const baseClasses = "group relative cursor-grab active:cursor-grabbing";
+
+    if (compact) {
+      return (
+        <div key={item.id} className={baseClasses}>
+          <div className="flow-card-quiet rounded-lg">
+            <div
+              className="flex cursor-grab items-center gap-3 p-3 active:cursor-grabbing"
+              onMouseDown={(e) => handleMouseDown(e, item)}
+              onMouseEnter={() => setHoveredItem(item.id)}
+              onMouseLeave={() => setHoveredItem(null)}
+            >
+              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
+                {getContentIcon(item)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <h3 className="truncate text-sm font-medium text-flow-text-primary">
+                  {item.name}
+                </h3>
+              </div>
+              {renderCompactAddToolbar(item)}
+            </div>
+          </div>
+        </div>
+      );
+    }
     
     if (viewMode === 'simplified') {
       return (
@@ -941,18 +1309,6 @@ export function ContentManager({
                   )}
                 </div>
               </div>
-            </div>
-            <div className="flex-shrink-0 flex items-center gap-1">
-              <button
-                onClick={(e) => handleToggleFavorite(e, item.id)}
-                className={`p-1 rounded transition-colors ${
-                  item.isFavorite 
-                    ? 'text-red-400 hover:text-red-300' 
-                    : 'text-flow-text-muted hover:text-red-400'
-                }`}
-              >
-                <Heart className={`w-3 h-3 ${item.isFavorite ? 'fill-current' : ''}`} />
-              </button>
             </div>
           </div>
         </div>
@@ -1049,25 +1405,6 @@ export function ContentManager({
                 )}
               </div>
             </div>
-
-            <div className="flex-shrink-0 flex items-center gap-1">
-              <button
-                onClick={(e) => handleToggleFavorite(e, item.id)}
-                className={`p-1.5 rounded transition-colors ${
-                  item.isFavorite 
-                    ? 'text-red-400 hover:text-red-300' 
-                    : 'text-flow-text-muted hover:text-red-400'
-                }`}
-              >
-                <Heart className={`w-4 h-4 ${item.isFavorite ? 'fill-current' : ''}`} />
-              </button>
-              <button
-                onClick={(e) => handleDirectOpen(e, item)}
-                className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue rounded transition-colors"
-              >
-                <Play className="w-4 h-4" />
-              </button>
-            </div>
           </div>
           
           {hoveredItem === item.id && (
@@ -1154,25 +1491,6 @@ export function ContentManager({
                 </span>
               )}
             </div>
-          </div>
-
-          <div className="flex-shrink-0 flex items-center gap-1">
-            <button
-              onClick={(e) => handleToggleFavorite(e, item.id)}
-              className={`p-1 rounded transition-colors ${
-                item.isFavorite 
-                  ? 'text-red-400 hover:text-red-300' 
-                  : 'text-flow-text-muted hover:text-red-400'
-              }`}
-            >
-              <Heart className={`w-3 h-3 ${item.isFavorite ? 'fill-current' : ''}`} />
-            </button>
-            <button
-              onClick={(e) => handleDirectOpen(e, item)}
-              className="p-1 text-flow-text-muted hover:text-flow-accent-blue rounded transition-colors"
-            >
-              <Play className="w-3 h-3" />
-            </button>
           </div>
         </div>
 
@@ -1339,7 +1657,7 @@ export function ContentManager({
                   className="flow-menu-item text-xs"
                 >
                   <Upload className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
-                  Add File/Folder
+                  Add files…
                 </button>
               </div>
             )}
@@ -1364,6 +1682,23 @@ export function ContentManager({
                   : "w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary placeholder-flow-text-muted transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
               }
             />
+          </div>
+        ) : null}
+
+        {compact && onPlaceContentOnMonitor ? (
+          <div className="rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
+            <div className="flex items-start gap-2 text-[11px] text-flow-text-secondary">
+              <ExternalLink
+                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent-blue"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              <span>
+                Click a row for full path and to change <span className="font-medium text-flow-text-primary">Opens with</span>
+                . Use <span className="font-medium text-flow-text-primary">+</span> for a monitor
+                or minimized row. Drag to place precisely.
+              </span>
+            </div>
           </div>
         ) : null}
 

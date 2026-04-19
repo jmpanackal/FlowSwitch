@@ -14,7 +14,21 @@ import { MonitorLayout } from "./components/MonitorLayout";
 import { ProfileSettings } from "./components/ProfileSettings";
 import { CreateProfileModal } from "./components/CreateProfileModal";
 import { AppManager } from "./components/AppManager";
-import { ContentManager } from "./components/ContentManager";
+import {
+  ContentManager,
+  type ContentFolder,
+  type ContentItem,
+} from "./components/ContentManager";
+import {
+  placeSidebarContentOnMinimized,
+  placeSidebarContentOnMonitor,
+  placeSidebarLibraryFolderOnMinimized,
+  placeSidebarLibraryFolderOnMonitor,
+} from "./utils/sidebarExplicitPlacement";
+import {
+  SelectedContentDetails,
+  type LibrarySelection,
+} from "./components/SelectedContentDetails";
 import { SelectedAppDetails } from "./components/SelectedAppDetails";
 import {
   Play,
@@ -37,7 +51,12 @@ import {
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
-import type { FlowProfile } from "../../types/flow-profile";
+import type { FlowProfile, ProfileSavePayload } from "../../types/flow-profile";
+import { toSerializableProfiles } from "../../types/flow-profile";
+import {
+  deleteLibraryFolder,
+  deleteLibraryItem,
+} from "./utils/contentLibraryMutations";
 import { useProfilesPersistence } from "./hooks/useProfilesPersistence";
 import { useLaunchFeedback } from "./hooks/useLaunchFeedback";
 import { useProfileLaunch } from "./hooks/useProfileLaunch";
@@ -69,6 +88,10 @@ export default function App() {
   const {
     profiles,
     setProfiles,
+    contentLibrary,
+    setContentLibrary,
+    contentLibraryExclusions,
+    setContentLibraryExclusions,
     profilesLoaded,
     profileStoreError,
     skipNextAutosaveRef,
@@ -96,6 +119,11 @@ export default function App() {
 
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
+  const [librarySelection, setLibrarySelection] =
+    useState<LibrarySelection | null>(null);
+  const [openLibraryFolderId, setOpenLibraryFolderId] = useState<
+    string | null
+  >(null);
 
   // CUSTOM DRAG SYSTEM STATE
   const [dragState, setDragState] = useState<DragState>({
@@ -121,6 +149,44 @@ export default function App() {
   const currentProfile = profiles.find(
     (p) => p.id === selectedProfile,
   ) || null;
+
+  const excludedContentIdSet = useMemo(() => {
+    if (!selectedProfile) return new Set<string>();
+    return new Set(contentLibraryExclusions[selectedProfile] || []);
+  }, [
+    selectedProfile,
+    selectedProfile
+      ? (contentLibraryExclusions[selectedProfile] || []).join("|")
+      : "",
+  ]);
+
+  const resolvedLibrarySelection = useMemo((): LibrarySelection | null => {
+    if (!librarySelection) return null;
+    const items = contentLibrary.items as ContentItem[];
+    const fds = contentLibrary.folders as ContentFolder[];
+    if (librarySelection.kind === "item") {
+      const it = items.find((i) => i.id === librarySelection.item.id);
+      return it ? { kind: "item" as const, item: it } : null;
+    }
+    const fd = fds.find((f) => f.id === librarySelection.folder.id);
+    return fd ? { kind: "folder" as const, folder: fd } : null;
+  }, [librarySelection, contentLibrary.items, contentLibrary.folders]);
+
+  /** Avoid empty inspector while library arrays briefly disagree with selection (persist/sync races). */
+  const contentInspectorSelection = useMemo((): LibrarySelection | null => {
+    if (!librarySelection) return null;
+    if (resolvedLibrarySelection) return resolvedLibrarySelection;
+    return librarySelection;
+  }, [librarySelection, resolvedLibrarySelection]);
+
+  const resolvedLibraryEntryExcluded = useMemo(() => {
+    if (!selectedProfile || !contentInspectorSelection) return false;
+    return (contentLibraryExclusions[selectedProfile] || []).includes(
+      contentInspectorSelection.kind === "item"
+        ? contentInspectorSelection.item.id
+        : contentInspectorSelection.folder.id,
+    );
+  }, [selectedProfile, contentInspectorSelection, contentLibraryExclusions]);
 
   useEffect(() => {
     setSidebarSearchQuery("");
@@ -212,8 +278,66 @@ export default function App() {
     profileDragActionsRef,
   });
 
+  const buildSavePayload = useCallback((): ProfileSavePayload => ({
+    profiles: toSerializableProfiles(profiles),
+    contentLibrary,
+    contentLibraryExclusions,
+  }), [profiles, contentLibrary, contentLibraryExclusions]);
+
+  const handlePersistContentLibrary = useCallback(
+    (next: { items: ContentItem[]; folders: ContentFolder[] }) => {
+      setContentLibrary({ items: next.items, folders: next.folders });
+    },
+    [setContentLibrary],
+  );
+
+  const handleDeleteLibraryEntry = useCallback(
+    (scope: "item" | "folder", id: string) => {
+      if (
+        librarySelection
+        && ((librarySelection.kind === "item" && librarySelection.item.id === id)
+          || (librarySelection.kind === "folder" && librarySelection.folder.id === id))
+      ) {
+        setRightSidebarOpen(false);
+        setLibrarySelection(null);
+      }
+      setContentLibrary((prev) => {
+        const items = prev.items as ContentItem[];
+        const folders = prev.folders as ContentFolder[];
+        const out =
+          scope === "folder"
+            ? deleteLibraryFolder(folders, items, id)
+            : deleteLibraryItem(items, folders, id);
+        return { ...prev, items: out.items, folders: out.folders };
+      });
+      setContentLibraryExclusions((ex) => {
+        const next: Record<string, string[]> = {};
+        for (const [pid, arr] of Object.entries(ex)) {
+          next[pid] = (arr || []).filter((x) => x !== id);
+        }
+        return next;
+      });
+    },
+    [librarySelection],
+  );
+
+  const handleToggleContentExclusionForEntry = useCallback(
+    (entryId: string) => {
+      if (!selectedProfile) return;
+      setContentLibraryExclusions((prev) => {
+        const cur = [...(prev[selectedProfile] || [])];
+        const ix = cur.indexOf(entryId);
+        if (ix >= 0) cur.splice(ix, 1);
+        else cur.push(entryId);
+        return { ...prev, [selectedProfile]: cur };
+      });
+    },
+    [selectedProfile],
+  );
+
   const { handleLaunch, handleCancelLaunch } = useProfileLaunch({
     profiles,
+    buildSavePayload,
     selectedProfileId: selectedProfile,
     setIsLaunching,
     setLaunchFeedback,
@@ -228,8 +352,142 @@ export default function App() {
   // SELECTED APP HANDLERS
   const handleClearAppSelection = useCallback(() => {
     setSelectedApp(null);
+    setLibrarySelection(null);
+    setOpenLibraryFolderId(null);
     setRightSidebarOpen(false);
   }, []);
+
+  const handlePlaceContentOnMonitor = useCallback(
+    (monitorId: string, item: ContentItem) => {
+      if (!currentProfile) return;
+      placeSidebarContentOnMonitor({
+        profile: currentProfile,
+        monitorId,
+        item,
+        addApp,
+        addBrowserTab,
+      });
+    },
+    [currentProfile, addApp, addBrowserTab],
+  );
+
+  const handlePlaceContentOnMinimized = useCallback(
+    (item: ContentItem) => {
+      if (!currentProfile) return;
+      placeSidebarContentOnMinimized({
+        profile: currentProfile,
+        item,
+        addAppToMinimized,
+        addBrowserTab,
+      });
+    },
+    [currentProfile, addAppToMinimized, addBrowserTab],
+  );
+
+  const handleConsumedOpenLibraryFolder = useCallback(() => {
+    setOpenLibraryFolderId(null);
+  }, []);
+
+  const handleInspectLibrarySelection = useCallback(
+    (payload: LibrarySelection) => {
+      setLibrarySelection(payload);
+      setSelectedApp(null);
+      setRightSidebarOpen(true);
+    },
+    [],
+  );
+
+  const handleLibraryChangeDefaultApp = useCallback(
+    (id: string, nextApp: string, scope: "item" | "folder") => {
+      setContentLibrary((prev) => {
+        if (scope === "item") {
+          return {
+            ...prev,
+            items: (prev.items as ContentItem[]).map((it) =>
+              it.id === id ? { ...it, defaultApp: nextApp } : it,
+            ),
+          };
+        }
+        return {
+          ...prev,
+          folders: (prev.folders as ContentFolder[]).map((f) =>
+            f.id === id ? { ...f, defaultApp: nextApp } : f,
+          ),
+        };
+      });
+    },
+    [setContentLibrary],
+  );
+
+  const clearInspectorSelection = useCallback(() => {
+    setRightSidebarOpen(false);
+    setSelectedApp(null);
+    setLibrarySelection(null);
+    setOpenLibraryFolderId(null);
+  }, []);
+
+  const handleLibraryPlaceOnMonitor = useCallback(
+    (monitorId: string) => {
+      if (!currentProfile || !contentInspectorSelection) return;
+      if (contentInspectorSelection.kind === "item") {
+        placeSidebarContentOnMonitor({
+          profile: currentProfile,
+          monitorId,
+          item: contentInspectorSelection.item,
+          addApp,
+          addBrowserTab,
+        });
+      } else {
+        placeSidebarLibraryFolderOnMonitor({
+          profile: currentProfile,
+          monitorId,
+          folder: contentInspectorSelection.folder,
+          folders: contentLibrary.folders as ContentFolder[],
+          libraryItems: contentLibrary.items as ContentItem[],
+          addApp,
+        });
+      }
+      clearInspectorSelection();
+    },
+    [
+      currentProfile,
+      contentInspectorSelection,
+      contentLibrary.folders,
+      contentLibrary.items,
+      addApp,
+      addBrowserTab,
+      clearInspectorSelection,
+    ],
+  );
+
+  const handleLibraryPlaceOnMinimized = useCallback(() => {
+    if (!currentProfile || !contentInspectorSelection) return;
+    if (contentInspectorSelection.kind === "item") {
+      placeSidebarContentOnMinimized({
+        profile: currentProfile,
+        item: contentInspectorSelection.item,
+        addAppToMinimized,
+        addBrowserTab,
+      });
+    } else {
+      placeSidebarLibraryFolderOnMinimized({
+        profile: currentProfile,
+        folder: contentInspectorSelection.folder,
+        folders: contentLibrary.folders as ContentFolder[],
+        libraryItems: contentLibrary.items as ContentItem[],
+        addAppToMinimized,
+      });
+    }
+    clearInspectorSelection();
+  }, [
+    currentProfile,
+    contentInspectorSelection,
+    contentLibrary.folders,
+    contentLibrary.items,
+    addAppToMinimized,
+    addBrowserTab,
+    clearInspectorSelection,
+  ]);
 
   const handleAppSelect = useCallback(
     (
@@ -249,6 +507,9 @@ export default function App() {
       });
 
       if (!currentProfile) return;
+
+      setLibrarySelection(null);
+      setOpenLibraryFolderId(null);
 
       // Determine if this is a browser app
       const isBrowser =
@@ -615,9 +876,8 @@ export default function App() {
   }, [selectedApp, currentProfile]);
 
   const handleCloseSidebar = useCallback(() => {
-    setRightSidebarOpen(false);
-    setSelectedApp(null);
-  }, []);
+    clearInspectorSelection();
+  }, [clearInspectorSelection]);
 
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
@@ -647,6 +907,8 @@ export default function App() {
 
       // Clear any selected app when switching profiles
       setSelectedApp(null);
+      setLibrarySelection(null);
+      setOpenLibraryFolderId(null);
       setRightSidebarOpen(false);
 
       console.log("🎉 PROFILE SWITCH COMPLETED:", profileId);
@@ -903,6 +1165,36 @@ export default function App() {
                   onUpdateProfile={updateProfile}
                   onDragStart={handleDragStart}
                   onCustomDragStart={handleCustomDragStart}
+                  onPlaceContentOnMonitor={handlePlaceContentOnMonitor}
+                  onPlaceContentOnMinimized={handlePlaceContentOnMinimized}
+                  onPlaceLibraryFolderOnMonitor={(monitorId, folder) => {
+                    if (!currentProfile) return;
+                    placeSidebarLibraryFolderOnMonitor({
+                      profile: currentProfile,
+                      monitorId,
+                      folder,
+                      folders: contentLibrary.folders as ContentFolder[],
+                      libraryItems: contentLibrary.items as ContentItem[],
+                      addApp,
+                    });
+                  }}
+                  onPlaceLibraryFolderOnMinimized={(folder) => {
+                    if (!currentProfile) return;
+                    placeSidebarLibraryFolderOnMinimized({
+                      profile: currentProfile,
+                      folder,
+                      folders: contentLibrary.folders as ContentFolder[],
+                      libraryItems: contentLibrary.items as ContentItem[],
+                      addAppToMinimized,
+                    });
+                  }}
+                  onInspectLibrarySelection={handleInspectLibrarySelection}
+                  openLibraryFolderId={openLibraryFolderId}
+                  onConsumedOpenLibraryFolder={handleConsumedOpenLibraryFolder}
+                  externalContentItems={contentLibrary.items as ContentItem[]}
+                  externalContentFolders={contentLibrary.folders as ContentFolder[]}
+                  excludedContentIds={Array.from(excludedContentIdSet)}
+                  onPersistContentLibrary={handlePersistContentLibrary}
                   compact={true}
                   sidebarSearchQuery={sidebarSearchQuery}
                   onSidebarSearchQueryChange={setSidebarSearchQuery}
@@ -1260,36 +1552,68 @@ export default function App() {
 
             {/* Sidebar Content - Now contains app header */}
             <div className="flex-1 overflow-hidden">
-              <SelectedAppDetails
-                selectedApp={selectedApp}
-                onClose={handleCloseSidebar}
-                onUpdateApp={handleSelectedAppUpdate}
-                onUpdateAssociatedFiles={
-                  handleSelectedAppAssociatedFiles
-                }
-                onDeleteApp={handleSelectedAppDelete}
-                onMoveToMonitor={handleSelectedAppMoveToMonitor}
-                onMoveToMinimized={
-                  handleSelectedAppMoveToMinimized
-                }
-                monitors={currentProfile?.monitors || []}
-                browserTabs={currentProfile?.browserTabs || []}
-                onUpdateBrowserTabs={(tabs) =>
-                  updateBrowserTabs(
-                    currentProfile?.id || "",
-                    tabs,
-                  )
-                }
-                onAddBrowserTab={(tab) =>
-                  addBrowserTab(currentProfile?.id || "", tab)
-                }
-              />
+              {librarySelection
+              && contentInspectorSelection
+              && currentProfile ? (
+                <SelectedContentDetails
+                  selection={contentInspectorSelection}
+                  onChangeDefaultApp={handleLibraryChangeDefaultApp}
+                  excludedFromActiveProfile={resolvedLibraryEntryExcluded}
+                  onToggleExcludeFromActiveProfile={() => {
+                    if (!contentInspectorSelection) return;
+                    handleToggleContentExclusionForEntry(
+                      contentInspectorSelection.kind === "item"
+                        ? contentInspectorSelection.item.id
+                        : contentInspectorSelection.folder.id,
+                    );
+                  }}
+                  onDeleteFromLibrary={() => {
+                    if (!contentInspectorSelection) return;
+                    handleDeleteLibraryEntry(
+                      contentInspectorSelection.kind === "item"
+                        ? "item"
+                        : "folder",
+                      contentInspectorSelection.kind === "item"
+                        ? contentInspectorSelection.item.id
+                        : contentInspectorSelection.folder.id,
+                    );
+                  }}
+                  onPlaceOnMonitor={handleLibraryPlaceOnMonitor}
+                  onPlaceOnMinimized={handleLibraryPlaceOnMinimized}
+                  monitors={currentProfile.monitors || []}
+                />
+              ) : selectedApp ? (
+                <SelectedAppDetails
+                  selectedApp={selectedApp}
+                  onClose={handleCloseSidebar}
+                  onUpdateApp={handleSelectedAppUpdate}
+                  onUpdateAssociatedFiles={
+                    handleSelectedAppAssociatedFiles
+                  }
+                  onDeleteApp={handleSelectedAppDelete}
+                  onMoveToMonitor={handleSelectedAppMoveToMonitor}
+                  onMoveToMinimized={
+                    handleSelectedAppMoveToMinimized
+                  }
+                  monitors={currentProfile?.monitors || []}
+                  browserTabs={currentProfile?.browserTabs || []}
+                  onUpdateBrowserTabs={(tabs) =>
+                    updateBrowserTabs(
+                      currentProfile?.id || "",
+                      tabs,
+                    )
+                  }
+                  onAddBrowserTab={(tab) =>
+                    addBrowserTab(currentProfile?.id || "", tab)
+                  }
+                />
+              ) : null}
             </div>
           </div>
         )}
 
         {/* Right Sidebar Toggle Button (when closed) */}
-        {!rightSidebarOpen && selectedApp && (
+        {!rightSidebarOpen && (selectedApp || librarySelection) ? (
           <button
             type="button"
             onClick={() => setRightSidebarOpen(true)}
@@ -1298,11 +1622,15 @@ export default function App() {
               top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
               transform: "translateY(-50%)",
             }}
-            title="Open App Details"
+            title={
+              librarySelection
+                ? "Open library item details"
+                : "Open app details"
+            }
           >
             <ChevronLeft className="w-4 h-4" />
           </button>
-        )}
+        ) : null}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
         {dragState.isDragging && dragState.dragData && (
