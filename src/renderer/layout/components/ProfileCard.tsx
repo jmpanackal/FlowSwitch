@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from "react";
-import { Monitor, Folder, Globe, MoreVertical, Copy, Edit, Trash2, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
+import { useState } from "react";
+import { Monitor, Globe, MoreVertical, Copy, Edit, Trash2, Download, Zap, ZapOff, Clock, Layers } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
 import { formatUnit } from "../../utils/pluralize";
@@ -47,27 +47,8 @@ interface ProfileCardProps {
 }
 
 export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelete, onExport, onSetOnStartup, disabled = false }: ProfileCardProps) {
-  const [showDetails, setShowDetails] = useState(false);
   const [showActions, setShowActions] = useState(false);
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const clearHoverTimer = () => {
-    if (hoverTimerRef.current) {
-      clearTimeout(hoverTimerRef.current);
-      hoverTimerRef.current = null;
-    }
-  };
-
-  useEffect(() => () => clearHoverTimer(), []);
-
-  const renderPreviewAppIcon = (app: any) => {
-    const IconComponent = app?.icon;
-    if (typeof IconComponent === "function") {
-      return <IconComponent className="w-2 h-2 text-white" />;
-    }
-    return <Folder className="w-2 h-2 text-white" />;
-  };
-  
   const handleActionClick = (e: React.MouseEvent, action: () => void) => {
     e.stopPropagation();
     action();
@@ -78,17 +59,6 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
     <div className="relative">
       <div
         onClick={disabled ? undefined : onClick}
-        onMouseEnter={() => {
-          if (disabled) return;
-          clearHoverTimer();
-          hoverTimerRef.current = setTimeout(() => {
-            setShowDetails(true);
-          }, 150);
-        }}
-        onMouseLeave={() => {
-          clearHoverTimer();
-          if (!disabled) setShowDetails(false);
-        }}
         className={`relative p-3.5 rounded-xl transition-all duration-150 ease-out group border ${
           disabled
             ? 'bg-flow-surface/80 border-flow-border/50 opacity-60 cursor-not-allowed'
@@ -112,14 +82,14 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
             )}
           </div>
         )}
-        
+
         <div className="flex items-start gap-3">
           <div className={`p-2 rounded-lg transition-colors duration-150 ${
             profile.isActive ? 'bg-flow-accent-blue/15' : 'bg-flow-bg-tertiary/80 group-hover:bg-flow-surface'
           }`}>
             <ProfileIconGlyph icon={profile.icon} className="w-4 h-4" />
           </div>
-          
+
           <div className="flex-1 min-w-0">
             <div className="flex items-center gap-2 mb-1">
               <h3 className={`text-sm font-semibold tracking-tight truncate ${
@@ -131,9 +101,9 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
                 </span>
               )}
             </div>
-            
+
             <p className="text-flow-text-muted text-[11px] leading-snug mb-3 line-clamp-2">{profile.description}</p>
-            
+
             <div className="grid grid-cols-2 gap-2 text-xs">
               <div className="flex items-center gap-1 text-flow-text-muted">
                 <Layers className="w-3 h-3" />
@@ -187,7 +157,7 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
               >
                 <MoreVertical className="h-3 w-3" />
               </button>
-            
+
               {showActions && (
                 <div className="absolute top-6 right-0 w-48 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-10 py-1">
                   {onSetOnStartup && (
@@ -233,63 +203,6 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
           </div>
         )}
       </div>
-      
-      {/* Hover details tooltip */}
-      {showDetails && !showActions && !profile.isActive && (
-        <div className="absolute top-0 left-full ml-4 w-80 p-4 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-50">
-          <h4 className="text-[11px] font-semibold uppercase tracking-wider text-flow-text-secondary mb-3">Apps &amp; layout</h4>
-          <div className="scrollbar-elegant max-h-64 space-y-3 overflow-y-auto">
-            {(Array.isArray(profile.monitors) ? profile.monitors : []).map((monitor, index) => (
-              <div key={monitor?.id || index} className="space-y-2">
-                <div className="flex items-center gap-2 text-flow-text-secondary text-sm">
-                  <Monitor className="w-3 h-3" />
-                  <span>{monitor?.name || `Monitor ${index + 1}`}</span>
-                  {monitor.primary && (
-                    <span className="inline-flex items-center gap-1 px-2 py-1 text-xs font-medium rounded-full bg-flow-accent-blue/20 text-flow-accent-blue border border-flow-accent-blue/30">Primary</span>
-                  )}
-                </div>
-                <div className="flex flex-wrap gap-1.5 ml-4">
-                  {(Array.isArray(monitor?.apps) ? monitor.apps : []).slice(0, 6).map((app, appIndex) => (
-                    <div key={appIndex} className="flex items-center gap-1.5 px-2 py-1 bg-flow-surface rounded text-xs text-flow-text-muted">
-                      <div 
-                        className="w-3 h-3 rounded flex items-center justify-center"
-                        style={{ backgroundColor: `${app?.color || "#64748b"}40` }}
-                      >
-                        {renderPreviewAppIcon(app)}
-                      </div>
-                      <span>{app?.name || "Unknown app"}</span>
-                    </div>
-                  ))}
-                  {(Array.isArray(monitor?.apps) ? monitor.apps.length : 0) > 6 && (
-                    <span className="text-xs text-flow-text-muted px-2 py-1">
-                      +{(Array.isArray(monitor?.apps) ? monitor.apps.length : 0) - 6} more
-                    </span>
-                  )}
-                </div>
-              </div>
-            ))}
-            
-            {profile.minimizedApps && profile.minimizedApps.length > 0 && (
-              <div className="space-y-2 pt-2 border-t border-flow-border">
-                <div className="text-flow-text-secondary text-sm">Minimized Apps</div>
-                <div className="flex flex-wrap gap-1.5">
-                  {profile.minimizedApps.map((app, appIndex) => (
-                    <div key={appIndex} className="flex items-center gap-1.5 px-2 py-1 bg-flow-surface rounded text-xs text-flow-text-muted">
-                      <div 
-                        className="w-3 h-3 rounded flex items-center justify-center"
-                        style={{ backgroundColor: `${app?.color || "#64748b"}40` }}
-                      >
-                        {renderPreviewAppIcon(app)}
-                      </div>
-                      <span>{app?.name || "Unknown app"}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
     </div>
   );
 }
