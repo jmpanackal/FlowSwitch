@@ -601,7 +601,6 @@ export default function App() {
       launchUrl?: string | null;
       color?: string;
       category?: string;
-      firstLetter?: string;
     }) => {
       if (!currentProfile) return;
       setLibrarySelection(null);

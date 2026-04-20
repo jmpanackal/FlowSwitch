@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { X, Search, Plus, Monitor, Settings } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
@@ -68,7 +68,12 @@ export function AddAppModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonitor, setSelectedMonitor] = useState(monitorId || (monitors.length > 0 ? monitors[0].id : ''));
   const [selectedApp, setSelectedApp] = useState<any>(null);
-  const installedApps = useInstalledApps();
+  const [installedListVersion, setInstalledListVersion] = useState(0);
+  useEffect(() => {
+    if (!isOpen) return;
+    setInstalledListVersion((n) => n + 1);
+  }, [isOpen]);
+  const installedApps = useInstalledApps({ installedListVersion });
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
       return {

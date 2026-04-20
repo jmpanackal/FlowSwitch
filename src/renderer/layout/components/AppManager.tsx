@@ -24,7 +24,6 @@ type AppType = {
   launchUrl?: string | null;
   color?: string;
   category?: string;
-  firstLetter?: string;
 };
 
 interface AppManagerProps {
@@ -101,7 +100,6 @@ export function AppManager({
       launchUrl: app.launchUrl ?? null,
       color: getStableColor(app.name),
       category: inferCategory(app.name),
-      firstLetter: app.name.charAt(0).toUpperCase(),
     }))
   ), [installedApps]);
 
@@ -194,7 +192,6 @@ export function AppManager({
       executablePath: app.executablePath ?? null,
       color: app.color,
       category: app.category,
-      firstLetter: app.firstLetter
     };
     const previewIconSrc = safeIconSrc(app.iconPath);
 
@@ -321,36 +318,30 @@ export function AppManager({
                     title="Drag to add to monitor or minimized apps"
                   >
                     {iconSrc ? (
-                      <img
-                        src={iconSrc}
-                        alt={app.name}
-                        className="w-6 h-6 object-contain rounded"
-                        draggable={false}
-                        onError={e => {
-                          // Hide broken image and show explicit fallback element.
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as HTMLElement | null;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    {/* Fallback: Lucide icon or first letter */}
-                    {'firstLetter' in app && app.firstLetter ? (
-                      <span className="absolute bottom-0 right-0 bg-gray-800 text-white text-[10px] font-bold rounded px-1 pb-0.5 leading-none border border-white/10 pointer-events-none">
-                        {app.firstLetter}
-                      </span>
-                    ) : null}
-                    {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
-                    {iconSrc ? (
-                      <div
-                        data-icon-fallback="true"
-                        style={{ display: 'none' }}
-                        className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
-                      >
-                        {app.firstLetter ? app.firstLetter : <Settings className="w-3 h-3 text-white" />}
-                      </div>
-                    ) : null}
+                      <>
+                        <img
+                          src={iconSrc}
+                          alt={app.name}
+                          className="w-6 h-6 object-contain rounded"
+                          draggable={false}
+                          onError={e => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as HTMLElement | null;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div
+                          data-icon-fallback="true"
+                          style={{ display: 'none' }}
+                          className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
+                        >
+                          <Settings className="w-3 h-3 text-white" aria-hidden />
+                        </div>
+                      </>
+                    ) : (
+                      <Settings className="w-4 h-4 text-white opacity-90" aria-hidden />
+                    )}
                   </div>
                   <div
                     className={`flex-1 min-w-0${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
