@@ -9,12 +9,7 @@ I will normalize, label, and review items later.
 Add new ideas here as raw bullets.
 After review, move them to `Reviewed Raw Archive` and keep this section small.
 
-- check computer temps/task manager consumption or overall machine load and use it to adapt launch behavior or warn users when launch workload may over-tax CPU/memory.
-- support for ultra wide monitors along with presets for window layouts for ultrawides
-- Change what is pinned to the taskbar per profile
-- Option to restrict profiles at times or based on other criteria to prevent distractions or for kids
-- Standardize styling for reused features like dropdowns, settings modals, etc
-- What if the whole header section was a big launch button since that is the primary function users will be doing? Or just a very large launch button. Or if the launch button said Launch 'name of profie here' to make it even more obvious
+_(empty — last intake reviewed 2026-04-19, see Archive Batch B)_
 
 ## Reviewed Raw Archive (Reference Only)
 
@@ -72,6 +67,18 @@ Do not include these in the next review pass unless they are explicitly reopened
 - Business focused variant of flow switch: Use AI to generate an example workspace monitor layout and app selection based on prompts. For example, the user will have all their apps and files and bookmarked links tagged or sorted in some way, they will prompt the ai to create a workspace with certain conditions, it will generate an example layout with apps files tabs setup optimally and the user can create a profile out of that and configure/launch it. FOR EXAMPLE: Let’s say a user is working and gets a slack message saying a feature they previously worked on has a bug that needs to be fixed. The user can paste that prompt into the AI and say create a workspace based on this, and paste the message. Assuming the AI has learned what apps tabs files are related to that, it will populate the monitor layout preview with the relevant content things. I would love a feature like that for work and I’m sure it has many other possible uses (very far down the line if even possible)
 - Add a GeForce overlay type feature so users can quickly hotkey to open a profile selector with just monitor layouts next to profile names for quick switching between profiles
 
+### Archive Batch B (reviewed 2026-04-19)
+
+- check computer temps/task manager consumption or overall machine load and use it to adapt launch behavior or warn users when launch workload may over-tax CPU/memory.
+- support for ultra wide monitors along with presets for window layouts for ultrawides
+- Change what is pinned to the taskbar per profile
+- Option to restrict profiles at times or based on other criteria to prevent distractions or for kids
+- Standardize styling for reused features like dropdowns, settings modals, etc
+- What if the whole header section was a big launch button since that is the primary function users will be doing? Or just a very large launch button. Or if the launch button said Launch 'name of profie here' to make it even more obvious
+- use dot styling background like google stitch and floating sidebars to create a working space effect
+- rename profiles by clicking onn their name in the header and it lets you edit in place and clicking off saves the new name
+- fix display of content bubble tooltips in Monitor layout on hover or remove the on hover text
+
 ## Reviewed / Formalized
 
 This section converts raw inbox notes into a normalized product backlog.
@@ -83,6 +90,7 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 - Several ideas overlap and should be treated as single initiatives (for example launch progress + launch modal + completion feedback).
 - A few items are high upside but low readiness and should remain exploratory (AI workspace generation, mobile companion).
 - UI polish requests are useful but should follow core reliability and workflow completion work.
+- **Batch B themes (2026-04-19):** primary-action clarity in the shell (header/launch CTA), design-system consistency for shared controls, MLP tooltip hygiene, ultrawide/template ergonomics, and **evaluate-don’t-commit** items: OS-level taskbar pin state per profile, time/rule-based profile gating, and system-load-aware launch (telemetry cost, accuracy, and user trust).
 
 ### Formalized Backlog (Now / Next / Later)
 
@@ -128,7 +136,9 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 - Scope:
   - per-window status styling in preview (not launched, launched, minimized, failed, needs confirmation)
   - keep visual system minimal to avoid clutter
-- Done when: runtime state is understandable from preview at a glance.
+  - fix or remove ambiguous “content bubble” tooltips on hover in monitor layout (clipped layout, redundant copy, or wrong layering)
+- Merged inbox items: Batch B MLP tooltip/bubble behavior.
+- Done when: runtime state is understandable from preview at a glance and hover affordances do not fight the layout editor.
 
 1. Reapply layout without relaunch
 
@@ -147,8 +157,9 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - taskbar/tray right-click profile switch
   - hotkeys for profile launch and quick selector overlay
   - explicit "run on startup" option per profile
-- Merged inbox items: create from anywhere, taskbar switching, hotkeys, startup run, GeForce-style quick switcher.
-- Done when: launching/switching profiles requires minimal navigation friction.
+  - inline rename for active profile from header (click name, edit in place, blur/click-out to save) with validation and undo-safe behavior
+- Merged inbox items: create from anywhere, taskbar switching, hotkeys, startup run, GeForce-style quick switcher, Batch B header inline rename.
+- Done when: launching/switching profiles requires minimal navigation friction and renaming a profile is obvious and low-risk.
 
 1. Layout editor ergonomics
 
@@ -158,8 +169,10 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - optional "+" affordance for empty slots in edit mode
   - support vertically stacked monitor arrangements
   - allow monitor tile size tuning in preview
+  - presets/templates for common geometries (including ultrawide) where they reduce setup time without constraining power users
   - fix monitor-layout dropdown click interception bug
   - reorder hover window controls to native order
+- Merged inbox items: Batch B ultrawide presets support.
 - Done when: common edit operations are easy, predictable, and low-friction.
 
 1. Responsive UI behavior at smaller window sizes
@@ -203,14 +216,41 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - move import/export/settings into top-left icon dropdown
   - reevaluate title-bar tabs only if it unlocks clear workflow value
   - add quick create profile affordance in profiles list
-- Done when: top-level controls are discoverable with less visual clutter.
+  - evaluate primary launch CTA clarity: larger launch control, optional dynamic label (for example “Launch [active profile]”), and whether dedicating more header real estate to launch improves discoverability without hiding secondary navigation
+- Merged inbox items: Batch B “whole header as launch” / oversized launch / dynamic launch label ideas (design spike, not a mandate to implement all variants).
+- Done when: top-level controls are discoverable with less visual clutter and the dominant action (launch) is unmistakable.
+
+1. Access rules and distraction boundaries (evaluate)
+
+- Scope:
+  - time windows, calendars, or simple rules that limit which profiles can run or which surfaces stay available
+  - “kids / focus” style modes are attractive but need threat model, bypass resistance, and support burden definition
+- Merged inbox items: Batch B restrict profiles by time/criteria.
+- Recommendation: **evaluate** with user research and platform constraints before a roadmap slot; may overlap with future policy/automation work.
 
 1. Visual style enhancements (defer until workflow polish is stable)
 
 - Scope:
   - icon refresh exploration (light gradient/cloud contour concepts)
-  - optional subtle dot-grid background for editor surface
-- Done when: visual updates reinforce clarity without harming contrast/performance.
+  - optional subtle dot-grid background for monitor layout preview and related “workspace” chrome (for example floating sidebars / canvas framing in the style of tools with dotted canvas chrome) — prototype for legibility and performance impact
+  - shared design tokens and component patterns for repeated UI (dropdowns, modals, settings panels) so styling stays consistent as features grow
+- Merged inbox items: Batch B dot-grid / dotted-canvas workspace feel, Batch B standardize styling across dropdowns and settings modals.
+- Done when: visual updates reinforce clarity without harming contrast/performance and new screens reuse the same interaction/visual language.
+
+1. OS shell integration: taskbar pins per profile (evaluate)
+
+- Scope:
+  - changing Windows taskbar pins per profile is compelling but tightly coupled to OS behavior, undocumented edges, and multi-user expectations
+- Merged inbox items: Batch B taskbar pin changes per profile.
+- Recommendation: **evaluate** feasibility (APIs, stability, restore on switch) before committing; treat as R&D unless a viable approach is proven.
+
+1. System health signals for launch pacing and warnings (evaluate)
+
+- Scope:
+  - surface CPU/memory pressure (and optionally temperature where reliable) to warn before heavy launches or adapt concurrency
+  - define what “adapt” means without surprising users (never silently skip apps)
+- Merged inbox items: Batch B machine load / temps / Task Manager–style signals.
+- Recommendation: **evaluate** signal quality on Windows, privacy/copy, and overlap with existing launch guardrails; implement only if warnings are trustworthy and actionable.
 
 #### Long-Horizon / Incubator (R&D)
 
@@ -231,15 +271,16 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 1. Launch visibility/control (Item 1)
 2. App discovery completeness/hygiene (Item 2)
 3. Launch guardrails + sequence controls (Item 3)
-4. Reapply layout + preview status semantics (Items 5 + 4)
-5. Profile access acceleration + editor ergonomics (Items 6 + 7)
+4. Reapply layout + preview status semantics (Items 5 + 4), including MLP tooltip fix
+5. Profile access acceleration + editor ergonomics (Items 6 + 7), including inline rename and ultrawide preset exploration
 6. Responsive UI pass (Item 8)
-7. Later-phase policy/automation/targets/polish items (9-13)
-8. Incubator exploration only when foundation is stable (14-15)
+7. Later-phase policy, automation, expanded targets, IA (including launch CTA evaluation), access-rule spike, visual system pass, and OS/telemetry evaluation items once core UX is stable
+8. Run evaluate-don’t-commit tracks as time-boxed spikes in parallel where helpful: access rules, taskbar pins per profile, system health signals for launch
+9. Incubator exploration only when foundation is stable (AI workspace blueprints, mobile companion)
 
 ### Notes for Future Spec Work
 
 - Convert each "Now" item into a dedicated design spec before implementation.
 - For each spec, define explicit acceptance criteria and non-goals to avoid scope creep.
 - Track dependencies between launch pipeline changes and renderer status UX so sequencing stays realistic.
-
+- For Batch B **evaluate** items, capture a short decision memo (feasibility, risks, user value) before promoting to P1/P2.
