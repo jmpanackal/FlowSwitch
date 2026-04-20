@@ -1,21 +1,50 @@
-import { useState, useEffect, useMemo, useRef } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import {
   Monitor,
   Grid3X3,
   Zap,
   ChevronDown,
-  GripVertical,
   PenLine,
   Save,
+  MoreHorizontal,
 } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MinimizedApps } from "./MinimizedApps";
-import { AppSettings } from "./AppSettings";
 import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
 import { matchesMonitorAppSelection } from "../utils/appSelection";
+
+/** Floor so monitor cards stay legible; slight overlap is preferable to a pixel-sized cluster. */
+const MIN_MONITOR_PREVIEW_SCALE = 0.32;
+
+/**
+ * Prefer the live inner preview box over React state: after fullscreen / maximize on Electron,
+ * `previewBounds` can lag one or more frames while `getBoundingClientRect()` already matches paint.
+ * Using stale tiny bounds forces every monitor through `minX > maxX` clamp → (50%,50%) stack + wrong scale.
+ */
+function readLivePreviewMeasure(
+  el: HTMLElement | null,
+  fallback: { width: number; height: number },
+): { width: number; height: number } {
+  if (!el) return fallback;
+  const r = el.getBoundingClientRect();
+  let w = Math.round(r.width);
+  let h = Math.round(r.height);
+  // After fullscreen / shell transitions, rect can briefly read ~0 while layout is still valid.
+  if (w <= 10 || h <= 10) {
+    const cw = Math.round(el.clientWidth);
+    const ch = Math.round(el.clientHeight);
+    if (cw > 10 && ch > 10) {
+      w = cw;
+      h = ch;
+    } else {
+      return fallback;
+    }
+  }
+  return { width: w, height: h };
+}
 
 interface App {
   name: string;
@@ -420,36 +449,137 @@ export function MonitorLayout({
     displacementZone: SnapZone | null;
   } | null>(null);
 
-  const [selectedItem, setSelectedItem] = useState<any>(null);
-  const [selectedItemIndex, setSelectedItemIndex] = useState<number>(-1);
-  const [selectedMonitorId, setSelectedMonitorId] = useState<string>('');
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const monitorPreviewRef = useRef<HTMLDivElement | null>(null);
+  const monitorPreviewInnerRef = useRef<HTMLDivElement | null>(null);
   const [previewBounds, setPreviewBounds] = useState({ width: 1, height: 1 });
+  const previewBoundsRef = useRef(previewBounds);
+  previewBoundsRef.current = previewBounds;
   const [monitorPreviewPositions, setMonitorPreviewPositions] = useState<Record<string, { x: number; y: number }>>({});
   const [draggingMonitor, setDraggingMonitor] = useState<{
     monitorId: string;
     startX: number;
     startY: number;
     startPos: { x: number; y: number };
+    /** Freeze auto-scale while dragging so cards do not resize mid-drag. */
+    frozenScale: number;
   } | null>(null);
   const layoutRootRef = useRef<HTMLDivElement | null>(null);
+  const previewScaleRef = useRef(1);
+  const recalculateLayoutPreviewScaleRef = useRef<() => void>(() => {});
+  const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
+  const lastSyncedMonitorLayoutSignatureRef = useRef<string>("");
+  const prevMonitorsIdentityKeyRef = useRef<string | null>(null);
   const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
+  const [monitorEditActionsOpenId, setMonitorEditActionsOpenId] = useState<string | null>(null);
+
+  const setPreviewPositions = (
+    updater:
+      | Record<string, { x: number; y: number }>
+      | ((prev: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>),
+  ) => {
+    setMonitorPreviewPositions((prev) => {
+      const next = typeof updater === "function" ? updater(prev) : updater;
+      previewPositionsRef.current = next;
+      return next;
+    });
+  };
+
+  const remeasurePreviewInnerBounds = useCallback(() => {
+    const inner = monitorPreviewInnerRef.current;
+    const outer = monitorPreviewRef.current;
+    if (!inner) return false;
+
+    const ir = inner.getBoundingClientRect();
+    let w = Math.round(ir.width);
+    let h = Math.round(ir.height);
+    if (w <= 10 || h <= 10) {
+      const cw = Math.round(inner.clientWidth);
+      const ch = Math.round(inner.clientHeight);
+      if (cw > 10 && ch > 10) {
+        w = cw;
+        h = ch;
+      }
+    }
+
+    if (outer) {
+      const or = outer.getBoundingClientRect();
+      const outerH = Math.round(or.height);
+      if (outerH > 120 && h < 12) {
+        return false;
+      }
+    }
+
+    if (w <= 10 || h <= 10) return false;
+    setPreviewBounds((prev) => {
+      if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
+        return prev;
+      }
+      return { width: w, height: h };
+    });
+    queueMicrotask(() => {
+      recalculateLayoutPreviewScaleRef.current();
+    });
+    return true;
+  }, []);
+
+  const scheduleRemeasurePreviewInnerWithRetries = useCallback(() => {
+    if (remeasurePreviewInnerBounds()) return;
+    let left = 28;
+    const step = () => {
+      if (left-- <= 0) return;
+      requestAnimationFrame(() => {
+        if (remeasurePreviewInnerBounds()) return;
+        step();
+      });
+    };
+    step();
+  }, [remeasurePreviewInnerBounds]);
+
+  const monitorsIdentityKey = useMemo(
+    () =>
+      [...monitors]
+        .map((m) => m.id)
+        .sort()
+        .join("|"),
+    [monitors],
+  );
+
+  const monitorLayoutSignature = useMemo(
+    () =>
+      monitors
+        .map(
+          (m) =>
+            `${m.id}:${Math.round(m.layoutPosition?.x ?? -1)}:${Math.round(m.layoutPosition?.y ?? -1)}`,
+        )
+        .sort()
+        .join("|"),
+    [monitors],
+  );
 
   const getMonitorFootprint = (monitor: { orientation?: 'landscape' | 'portrait' }) => {
     const isPortrait = monitor.orientation === 'portrait';
     const widthPx = isPortrait ? (large ? 208 : 160) : (large ? 448 : 320);
     const cardHeightPx = isPortrait ? (large ? 384 : 288) : (large ? 288 : 208);
-    const headerHeightPx = 64;
-    return { widthPx, heightPx: cardHeightPx + headerHeightPx };
+    // Edit mode + compact shell (!large): extra chrome — underestimate => overlap when inspector is open.
+    const inspectorChromePad = !large ? 24 : 0;
+    const multiPad =
+      monitors.length >= 3 ? (isEditMode ? 28 : 10) : monitors.length === 2 ? (isEditMode ? 14 : 0) : 0;
+    const headerHeightPx = isEditMode
+      ? (isPortrait ? 118 : 104) + inspectorChromePad + multiPad
+      : 64;
+    // Small safety pad for meta rows / font metrics vs model
+    const safetyPadPx = 10;
+    return { widthPx, heightPx: cardHeightPx + headerHeightPx + safetyPadPx };
   };
 
   const clampPreviewPosition = (
     monitor: { orientation?: 'landscape' | 'portrait' },
     position: { x: number; y: number },
     previewScale: number,
+    edgeMarginPct: number = 2.1,
   ) => {
-    if (previewBounds.width <= 10 || previewBounds.height <= 10) {
+    const bounds = readLivePreviewMeasure(monitorPreviewInnerRef.current, previewBoundsRef.current);
+    if (bounds.width <= 10 || bounds.height <= 10) {
       return {
         x: Math.max(0, Math.min(100, position.x)),
         y: Math.max(0, Math.min(100, position.y)),
@@ -460,22 +590,17 @@ export function MonitorLayout({
     const footprint = getMonitorFootprint(monitor);
     const effW = footprint.widthPx * scale;
     const effH = footprint.heightPx * scale;
-    const halfWidthPct = ((effW / previewBounds.width) * 100) / 2;
-    const halfHeightPct = ((effH / previewBounds.height) * 100) / 2;
-    const sidePadPct = (8 / previewBounds.width) * 100;
-    const topPadPct = (10 / previewBounds.height) * 100;
-    const bottomPadPct = (8 / previewBounds.height) * 100;
+    const halfWidthPct = ((effW / bounds.width) * 100) / 2;
+    const halfHeightPct = ((effH / bounds.height) * 100) / 2;
+    const marginPct = edgeMarginPct;
 
-    const minX = halfWidthPct + sidePadPct;
-    const maxX = 100 - halfWidthPct - sidePadPct;
-    const minY = halfHeightPct + topPadPct;
-    const maxY = 100 - halfHeightPct - bottomPadPct;
+    const minX = halfWidthPct + marginPct;
+    const maxX = 100 - halfWidthPct - marginPct;
+    const minY = halfHeightPct + marginPct;
+    const maxY = 100 - halfHeightPct - marginPct;
 
     if (minX > maxX || minY > maxY) {
-      return {
-        x: Math.max(0, Math.min(100, position.x)),
-        y: Math.max(0, Math.min(100, position.y)),
-      };
+      return { x: 50, y: 50 };
     }
 
     return {
@@ -484,9 +609,37 @@ export function MonitorLayout({
     };
   };
 
-  const monitorPreviewScale = useMemo(() => {
-    if (monitors.length <= 1) return 1;
-    if (previewBounds.width <= 10 || previewBounds.height <= 10) return 1;
+  const [layoutPreviewScale, setLayoutPreviewScale] = useState(1);
+
+  const recalculateLayoutPreviewScale = useCallback(() => {
+    const clampPreviewScaleValue = (raw: number) => {
+      const v = Number.isFinite(raw) && raw > 0 ? raw : MIN_MONITOR_PREVIEW_SCALE;
+      return Math.min(1, Math.max(MIN_MONITOR_PREVIEW_SCALE, v));
+    };
+
+    const pb = readLivePreviewMeasure(monitorPreviewInnerRef.current, previewBoundsRef.current);
+    const positions = previewPositionsRef.current;
+    if (pb.width <= 10 || pb.height <= 10) {
+      setLayoutPreviewScale(1);
+      return;
+    }
+    if (monitors.length === 0) {
+      setLayoutPreviewScale(1);
+      return;
+    }
+    if (monitors.length === 1) {
+      const m = monitors[0];
+      const fp = getMonitorFootprint(m);
+      const marginFrac = 2.1 / 100;
+      const maxW = pb.width * (1 - 2 * marginFrac);
+      const maxH = pb.height * (1 - 2 * marginFrac);
+      setLayoutPreviewScale(
+        clampPreviewScaleValue(
+          Math.min(1, maxW / Math.max(1, fp.widthPx), maxH / Math.max(1, fp.heightPx)),
+        ),
+      );
+      return;
+    }
 
     let scale = 1;
     for (let iter = 0; iter < 8; iter += 1) {
@@ -496,14 +649,14 @@ export function MonitorLayout({
       let maxBottom = Number.NEGATIVE_INFINITY;
 
       for (const monitor of monitors) {
-        const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
+        const preview = positions[monitor.id] || { x: 50, y: 50 };
         const clamped = clampPreviewPosition(monitor, preview, scale);
         const footprint = getMonitorFootprint(monitor);
         const w = footprint.widthPx * scale;
         const h = footprint.heightPx * scale;
 
-        const centerX = (clamped.x / 100) * previewBounds.width;
-        const centerY = (clamped.y / 100) * previewBounds.height;
+        const centerX = (clamped.x / 100) * pb.width;
+        const centerY = (clamped.y / 100) * pb.height;
 
         minLeft = Math.min(minLeft, centerX - w / 2);
         minTop = Math.min(minTop, centerY - h / 2);
@@ -512,75 +665,174 @@ export function MonitorLayout({
       }
 
       if (!Number.isFinite(minLeft) || !Number.isFinite(minTop) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
-        return 1;
+        setLayoutPreviewScale(1);
+        return;
       }
 
       const requiredWidth = Math.max(1, maxRight - minLeft);
       const requiredHeight = Math.max(1, maxBottom - minTop);
-      const availableWidth = Math.max(1, previewBounds.width - 20);
-      const availableHeight = Math.max(1, previewBounds.height - 20);
+      const marginFrac = 2.1 / 100;
+      const availableWidth = Math.max(1, pb.width * (1 - 2 * marginFrac));
+      const availableHeight = Math.max(1, pb.height * (1 - 2 * marginFrac));
 
       const fitScale = Math.min(1, availableWidth / requiredWidth, availableHeight / requiredHeight);
-      const nextScale = Math.max(0.5, fitScale);
+      const nextScale = Math.max(MIN_MONITOR_PREVIEW_SCALE, fitScale);
       if (Math.abs(nextScale - scale) < 0.001) {
-        return nextScale;
+        scale = nextScale;
+        break;
       }
       scale = nextScale;
     }
 
-    return scale;
-  }, [monitors, monitorPreviewPositions, previewBounds, large]);
-
-  const compactPreviewMode = monitorPreviewScale < 0.82;
-  const densePreviewMode = monitorPreviewScale < 0.62 || previewBounds.height < 620;
-  const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
-
-  const setPreviewPositions = (
-    updater: Record<string, { x: number; y: number }>
-    | ((prev: Record<string, { x: number; y: number }>) => Record<string, { x: number; y: number }>),
-  ) => {
-    setMonitorPreviewPositions((prev) => {
-      const next = typeof updater === "function" ? updater(prev) : updater;
-      previewPositionsRef.current = next;
-      return next;
-    });
-  };
-
-  useEffect(() => {
-    const container = monitorPreviewRef.current;
-    if (!container) return;
-
-    let raf = 0;
-    const updateBounds = () => {
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      const w = Math.round(rect.width);
-      const h = Math.round(rect.height);
-      setPreviewBounds((prev) => {
-        if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
-          return prev;
-        }
-        return { width: w, height: h };
+    const gutterPx = Math.max(
+      9,
+      Math.min(18, Math.round(0.012 * pb.width + 0.01 * pb.height)),
+    );
+    const overlapsAtScale = (s: number) => {
+      const rects = monitors.map((monitor) => {
+        const preview = positions[monitor.id] || { x: 50, y: 50 };
+        const clamped = clampPreviewPosition(monitor, preview, s);
+        const footprint = getMonitorFootprint(monitor);
+        const w = footprint.widthPx * s;
+        const h = footprint.heightPx * s;
+        const cx = (clamped.x / 100) * pb.width;
+        const cy = (clamped.y / 100) * pb.height;
+        return {
+          l: cx - w / 2,
+          r: cx + w / 2,
+          t: cy - h / 2,
+          b: cy + h / 2,
+        };
       });
+      for (let i = 0; i < rects.length; i += 1) {
+        for (let j = i + 1; j < rects.length; j += 1) {
+          const a = rects[i];
+          const b = rects[j];
+          const separated =
+            a.r + gutterPx <= b.l ||
+            b.r + gutterPx <= a.l ||
+            a.b + gutterPx <= b.t ||
+            b.b + gutterPx <= a.t;
+          if (!separated) return true;
+        }
+      }
+      return false;
     };
 
+    const fitBBoxCap = scale;
+    let out = fitBBoxCap;
+    let guard = 0;
+    while (overlapsAtScale(out) && out > MIN_MONITOR_PREVIEW_SCALE + 0.002 && guard < 60) {
+      out = Math.max(MIN_MONITOR_PREVIEW_SCALE, out * 0.93);
+      guard += 1;
+    }
+    if (overlapsAtScale(out)) {
+      let loB = MIN_MONITOR_PREVIEW_SCALE;
+      let hiB = out;
+      for (let b = 0; b < 28; b += 1) {
+        const mid = (loB + hiB) / 2;
+        if (overlapsAtScale(mid)) hiB = mid;
+        else loB = mid;
+      }
+      out = loB;
+    } else if (out < fitBBoxCap - 0.004) {
+      let loE = out;
+      let hiE = fitBBoxCap;
+      for (let b = 0; b < 22; b += 1) {
+        const mid = (loE + hiE) / 2;
+        if (!overlapsAtScale(mid)) loE = mid;
+        else hiE = mid;
+      }
+      out = loE;
+    }
+    setLayoutPreviewScale(clampPreviewScaleValue(out));
+  }, [monitors, large, isEditMode]);
+
+  recalculateLayoutPreviewScaleRef.current = recalculateLayoutPreviewScale;
+
+  previewPositionsRef.current = monitorPreviewPositions;
+  previewScaleRef.current = layoutPreviewScale;
+  const displayPreviewScale =
+    draggingMonitor?.frozenScale ?? layoutPreviewScale;
+
+  /** UI chrome only (toolbar copy, meta text) — cards use fixed Tailwind + transform scale only. */
+  const livePreviewChromeBounds = readLivePreviewMeasure(
+    monitorPreviewInnerRef.current,
+    previewBounds,
+  );
+  const compactPreviewMode = layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
+  const densePreviewMode = layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
+  const useCompactMonitorEditChrome = !large || layoutPreviewScale < 0.9;
+
+  useEffect(() => {
+    const inner = monitorPreviewInnerRef.current;
+    const outer = monitorPreviewRef.current;
+    if (!inner) return;
+
+    let raf = 0;
     const schedule = () => {
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         raf = 0;
-        updateBounds();
+        scheduleRemeasurePreviewInnerWithRetries();
       });
     };
 
-    updateBounds();
-    const observer = new ResizeObserver(schedule);
-    observer.observe(container);
+    scheduleRemeasurePreviewInnerWithRetries();
+    const innerObserver = new ResizeObserver(schedule);
+    innerObserver.observe(inner);
+    const outerObserver = outer ? new ResizeObserver(schedule) : null;
+    if (outer && outerObserver) {
+      outerObserver.observe(outer);
+    }
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
-      observer.disconnect();
+      innerObserver.disconnect();
+      outerObserver?.disconnect();
     };
-  }, []);
+  }, [scheduleRemeasurePreviewInnerWithRetries]);
+
+  /** Re-measure after inspector / edit chrome changes layout (margin transition on shell). */
+  useEffect(() => {
+    const bump = () => {
+      scheduleRemeasurePreviewInnerWithRetries();
+      window.setTimeout(() => remeasurePreviewInnerBounds(), 60);
+      window.setTimeout(() => remeasurePreviewInnerBounds(), 220);
+    };
+    bump();
+    const t0 = window.setTimeout(bump, 0);
+    const t1 = window.setTimeout(bump, 120);
+    const t2 = window.setTimeout(bump, 280);
+    return () => {
+      window.clearTimeout(t0);
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [large, isEditMode, remeasurePreviewInnerBounds, scheduleRemeasurePreviewInnerWithRetries]);
+
+  /** Electron often under-notifies inner layout after fullscreen; window resize fires reliably. */
+  useEffect(() => {
+    const onShellLayout = () => {
+      if (document.visibilityState === "hidden") return;
+      requestAnimationFrame(() => {
+        scheduleRemeasurePreviewInnerWithRetries();
+        window.setTimeout(() => remeasurePreviewInnerBounds(), 40);
+        window.setTimeout(() => remeasurePreviewInnerBounds(), 200);
+        window.setTimeout(() => scheduleRemeasurePreviewInnerWithRetries(), 420);
+      });
+    };
+    window.addEventListener("resize", onShellLayout);
+    window.addEventListener("focus", onShellLayout);
+    document.addEventListener("fullscreenchange", onShellLayout);
+    document.addEventListener("visibilitychange", onShellLayout);
+    return () => {
+      window.removeEventListener("resize", onShellLayout);
+      window.removeEventListener("focus", onShellLayout);
+      document.removeEventListener("fullscreenchange", onShellLayout);
+      document.removeEventListener("visibilitychange", onShellLayout);
+    };
+  }, [remeasurePreviewInnerBounds, scheduleRemeasurePreviewInnerWithRetries]);
 
   useEffect(() => {
     const root = layoutRootRef.current;
@@ -609,12 +861,42 @@ export function MonitorLayout({
   useEffect(() => {
     if (draggingMonitor) return;
     if (monitors.length === 0) {
+      lastSyncedMonitorLayoutSignatureRef.current = "";
+      prevMonitorsIdentityKeyRef.current = "";
       setPreviewPositions({});
       return;
     }
 
     if (monitors.length === 1) {
-      setPreviewPositions({ [monitors[0].id]: { x: 50, y: 50 } });
+      lastSyncedMonitorLayoutSignatureRef.current = monitorLayoutSignature;
+      const solo: Record<string, { x: number; y: number }> = {
+        [monitors[0].id]: { x: 50, y: 50 },
+      };
+      setPreviewPositions(solo);
+      previewPositionsRef.current = solo;
+      const identityChanged = prevMonitorsIdentityKeyRef.current !== monitorsIdentityKey;
+      prevMonitorsIdentityKeyRef.current = monitorsIdentityKey;
+      if (identityChanged) {
+        queueMicrotask(() => {
+          recalculateLayoutPreviewScale();
+        });
+      }
+      return;
+    }
+
+    const signatureFromProps = monitorLayoutSignature;
+    const signatureChanged =
+      lastSyncedMonitorLayoutSignatureRef.current !== signatureFromProps;
+
+    if (!signatureChanged) {
+      setPreviewPositions((prev) => {
+        const next: Record<string, { x: number; y: number }> = {};
+        for (const monitor of monitors) {
+          const p = prev[monitor.id] || { x: 50, y: 50 };
+          next[monitor.id] = clampPreviewPosition(monitor, p, layoutPreviewScale);
+        }
+        return next;
+      });
       return;
     }
 
@@ -652,25 +934,84 @@ export function MonitorLayout({
       };
     });
 
+    // Profiles saved with every monitor at ~the same % (e.g. 50,50) give almost no drag room — spread gently.
+    if (allPercentCoordinates && rawPositions.length > 1) {
+      const cx =
+        rawPositions.reduce((sum, p) => sum + p.x, 0) / rawPositions.length;
+      const cy =
+        rawPositions.reduce((sum, p) => sum + p.y, 0) / rawPositions.length;
+      const maxDist = Math.max(
+        ...rawPositions.map((p) => Math.hypot(p.x - cx, p.y - cy)),
+      );
+      if (maxDist < 16) {
+        const n = rawPositions.length;
+        const step = n <= 1 ? 0 : Math.min(38, 76 / Math.max(1, n - 1));
+        rawPositions.forEach((pos, index) => {
+          const x = 50 + (index - (n - 1) / 2) * step;
+          normalized[pos.id] = {
+            x: Math.round(x * 10) / 10,
+            y: Math.min(86, Math.max(14, cy)),
+          };
+        });
+      }
+    }
+
     const clampedPositions: Record<string, { x: number; y: number }> = {};
     for (const monitor of monitors) {
       const nextPosition = normalized[monitor.id] || { x: 50, y: 50 };
-      clampedPositions[monitor.id] = clampPreviewPosition(monitor, nextPosition, monitorPreviewScale);
+      clampedPositions[monitor.id] = clampPreviewPosition(monitor, nextPosition, layoutPreviewScale);
     }
     setPreviewPositions(clampedPositions);
-  }, [monitors, previewBounds.width, previewBounds.height, draggingMonitor, monitorPreviewScale]);
+    previewPositionsRef.current = clampedPositions;
+    lastSyncedMonitorLayoutSignatureRef.current = signatureFromProps;
+    const identityChanged = prevMonitorsIdentityKeyRef.current !== monitorsIdentityKey;
+    prevMonitorsIdentityKeyRef.current = monitorsIdentityKey;
+    if (identityChanged) {
+      queueMicrotask(() => {
+        recalculateLayoutPreviewScale();
+      });
+    }
+  }, [
+    monitorLayoutSignature,
+    previewBounds.width,
+    previewBounds.height,
+    layoutPreviewScale,
+    large,
+    draggingMonitor,
+    monitors,
+    isEditMode,
+    monitorsIdentityKey,
+    recalculateLayoutPreviewScale,
+  ]);
+
+  useLayoutEffect(() => {
+    recalculateLayoutPreviewScale();
+  }, [
+    previewBounds.width,
+    previewBounds.height,
+    large,
+    isEditMode,
+    recalculateLayoutPreviewScale,
+  ]);
+
+  useEffect(() => {
+    if (!isEditMode) {
+      setMonitorEditActionsOpenId(null);
+    }
+  }, [isEditMode]);
 
   useEffect(() => {
     if (!draggingMonitor) return;
 
     const handleMouseMove = (event: MouseEvent) => {
-      const container = monitorPreviewRef.current;
+      const container = monitorPreviewInnerRef.current;
       if (!container) return;
-      const rect = container.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
+      const cw = container.clientWidth;
+      const ch = container.clientHeight;
+      if (cw <= 0 || ch <= 0) return;
 
-      const deltaXPct = ((event.clientX - draggingMonitor.startX) / rect.width) * 100;
-      const deltaYPct = ((event.clientY - draggingMonitor.startY) / rect.height) * 100;
+      const deltaXPct = ((event.clientX - draggingMonitor.startX) / cw) * 100;
+      const deltaYPct = ((event.clientY - draggingMonitor.startY) / ch) * 100;
 
       const monitor = monitors.find((item) => item.id === draggingMonitor.monitorId);
       if (!monitor) return;
@@ -679,7 +1020,12 @@ export function MonitorLayout({
         x: draggingMonitor.startPos.x + deltaXPct,
         y: draggingMonitor.startPos.y + deltaYPct,
       };
-      const clamped = clampPreviewPosition(monitor, nextPosition, monitorPreviewScale);
+      const clamped = clampPreviewPosition(
+        monitor,
+        nextPosition,
+        draggingMonitor.frozenScale,
+        0.35,
+      );
 
       setPreviewPositions((prev) => ({
         ...prev,
@@ -688,12 +1034,14 @@ export function MonitorLayout({
     };
 
     const handleMouseUp = () => {
-      setDraggingMonitor(null);
-      if (!onUpdateMonitorPositions) return;
-
+      if (!onUpdateMonitorPositions) {
+        requestAnimationFrame(() => setDraggingMonitor(null));
+        return;
+      }
+      const sc = previewScaleRef.current;
       const positions = monitors.map((monitor) => {
         const preview = previewPositionsRef.current[monitor.id] || { x: 50, y: 50 };
-        const clamped = clampPreviewPosition(monitor, preview, monitorPreviewScale);
+        const clamped = clampPreviewPosition(monitor, preview, sc);
         return {
           id: monitor.id,
           layoutPosition: {
@@ -703,6 +1051,7 @@ export function MonitorLayout({
         };
       });
       onUpdateMonitorPositions(positions);
+      requestAnimationFrame(() => setDraggingMonitor(null));
     };
 
     window.addEventListener('mousemove', handleMouseMove);
@@ -712,7 +1061,7 @@ export function MonitorLayout({
       window.removeEventListener('mousemove', handleMouseMove);
       window.removeEventListener('mouseup', handleMouseUp);
     };
-  }, [draggingMonitor, monitors, onUpdateMonitorPositions, previewBounds, monitorPreviewScale]);
+  }, [draggingMonitor, monitors, onUpdateMonitorPositions, previewBounds.width, previewBounds.height]);
 
   // Handle updating associated files for an app
   const handleUpdateAssociatedFiles = (monitorId: string, appIndex: number, files: any[]) => {
@@ -1332,12 +1681,12 @@ export function MonitorLayout({
   };
 
   return (
-    <div ref={layoutRootRef} className="h-full flex flex-col relative min-h-0">
+    <div ref={layoutRootRef} className="relative flex h-full min-h-0 min-w-0 flex-col">
       {/* Preview toolbar — layout editing lives here (not profile preferences) */}
       <div
         className={`flex-shrink-0 ${
           layoutToolbarConnected
-            ? `-mx-4 bg-flow-bg-secondary/90 px-4 pb-3 pt-2.5 md:-mx-6 md:px-6 xl:-mx-8 xl:px-8 ${
+            ? `bg-flow-bg-secondary/90 px-0 pb-3 pt-2.5 ${
                 densePreviewMode ? "mb-2" : compactPreviewMode ? "mb-3" : "mb-4"
               }`
             : `rounded-xl border border-white/[0.06] bg-white/[0.03] px-4 py-3 ${
@@ -1345,41 +1694,48 @@ export function MonitorLayout({
               }`
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden sm:gap-3">
             <Monitor
               className={`shrink-0 text-flow-accent-blue/90 ${densePreviewMode ? "h-4 w-4" : "h-5 w-5"}`}
               strokeWidth={1.75}
             />
-            <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="min-w-0 flex-1 shrink">
               <h3
-                className={`font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
+                className={`truncate font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
               >
                 Monitor layout
               </h3>
-              <p className="text-[11px] text-flow-text-muted">
-                Drag apps on monitors · use Edit layout to change positions
+              <p
+                className="truncate text-[11px] text-flow-text-muted"
+                title={
+                  densePreviewMode
+                    ? "Drag apps on monitors · use Edit layout to change positions"
+                    : undefined
+                }
+              >
+                {densePreviewMode
+                  ? "Drag apps · Edit layout for positions"
+                  : "Drag apps on monitors · use Edit layout to change positions"}
               </p>
             </div>
             {isEditMode ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-lg bg-flow-accent-blue/15 px-2.5 py-1">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-flow-accent-blue" />
-                  <span className="text-xs font-medium text-flow-accent-blue">
-                    Editing layout
-                  </span>
-                  {dragState?.isDragging && (
-                    <span className="text-xs font-medium text-flow-accent-blue/90">
+              <div className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
+                <div className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-lg bg-flow-accent-blue/15 px-2 py-1 sm:max-w-none sm:px-2.5">
+                  <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
+                  <span className="truncate text-xs font-medium text-flow-accent-blue">Editing layout</span>
+                  {dragState?.isDragging ? (
+                    <span className="hidden truncate text-xs font-medium text-flow-accent-blue/90 sm:inline">
                       · {dragState.dragData?.name || "Item"}
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <span className="text-[11px] text-flow-text-muted">
+                <span className="hidden truncate text-[11px] text-flow-text-muted md:inline">
                   Apps only — files become content
                 </span>
               </div>
             ) : (
-              <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
+              <span className="shrink-0 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
                 View mode
               </span>
             )}
@@ -1416,40 +1772,39 @@ export function MonitorLayout({
 
       {/* Monitor Layout Section - Flex-1 with overflow for scrolling if needed */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <div className={`h-full ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
+        <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative h-full min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
           >
+            <div
+              ref={monitorPreviewInnerRef}
+              className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
+            >
             {monitors.map((monitor) => {
               const isPortrait = monitor.orientation === 'portrait';
+              // Fixed card sizes must match getMonitorFootprint — scaling is continuous via transform only.
               const baseWidth = isPortrait
-                ? (densePreviewMode
-                  ? 'w-28 min-w-28'
-                  : compactPreviewMode
-                    ? 'w-32 min-w-32'
-                    : (large ? 'w-52 min-w-52 flex-shrink-0' : 'w-40 min-w-40 flex-shrink-0'))
-                : (densePreviewMode
-                  ? 'w-56 min-w-56'
-                  : compactPreviewMode
-                    ? 'w-64 min-w-64'
-                    : (large ? 'w-[28rem] min-w-[28rem] flex-shrink' : 'w-80 min-w-72 flex-shrink'));
+                ? (large ? 'w-52 min-w-52 flex-shrink-0' : 'w-40 min-w-40 flex-shrink-0')
+                : (large ? 'w-[28rem] min-w-[28rem] flex-shrink-0' : 'w-80 min-w-72 flex-shrink-0');
               const baseHeight = isPortrait
-                ? (densePreviewMode ? 'h-48' : compactPreviewMode ? 'h-56' : (large ? 'h-96' : 'h-72'))
-                : (densePreviewMode ? 'h-36' : compactPreviewMode ? 'h-44' : (large ? 'h-72' : 'h-52'));
+                ? (large ? 'h-96' : 'h-72')
+                : (large ? 'h-72' : 'h-52');
+              const stackGapPx = Math.max(5, Math.round(4 + 12 * displayPreviewScale));
               const totalItems = monitor.apps.length; // Only count apps now
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
-              const clampedPreview = clampPreviewPosition(monitor, preview, monitorPreviewScale);
+              const clampedPreview = clampPreviewPosition(monitor, preview, displayPreviewScale);
               
               return (
                 <div
                   key={monitor.id}
-                  className={`${densePreviewMode ? 'space-y-2' : compactPreviewMode ? 'space-y-3' : 'space-y-4'} absolute`}
+                  className="monitor-layout-preview-scaled absolute flex flex-col"
                   style={{
                     left: `${clampedPreview.x}%`,
                     top: `${clampedPreview.y}%`,
-                    transform: `translate(-50%, -50%) scale(${monitorPreviewScale})`,
-                    transformOrigin: 'center center',
+                    transform: `translate3d(-50%, -50%, 0) scale(${displayPreviewScale})`,
+                    transformOrigin: "center center",
+                    gap: `${stackGapPx}px`,
                   }}
                 >
                   {/* Monitor header - Improved */}
@@ -1463,44 +1818,138 @@ export function MonitorLayout({
                         startX: event.clientX,
                         startY: event.clientY,
                         startPos: clampedPreview,
+                        frozenScale: previewScaleRef.current,
                       });
                     }}
                   >
                     {isEditMode ? (
-                      <div className={`flex flex-wrap items-center justify-center gap-2 mb-1 mx-auto ${baseWidth}`}>
-                        <div className="inline-flex items-center gap-1 text-white text-sm font-medium rounded px-2 py-1 transition-colors cursor-grab active:cursor-grabbing bg-white/5 hover:bg-white/10 whitespace-nowrap">
-                          <GripVertical className="w-3.5 h-3.5 text-white/70" />
-                          <span className="whitespace-nowrap">{monitor.name}</span>
-                        </div>
-                        {monitor.systemName && (
-                          <span className="text-[11px] text-white/55 whitespace-nowrap">({monitor.systemName})</span>
-                        )}
-                        {onUpdateMonitorLayout && (
-                          <div className="relative shrink-0">
-                            <MonitorLayoutConfig
-                              monitor={{
-                                id: monitor.id,
-                                name: monitor.name,
-                                orientation: monitor.orientation || 'landscape',
-                                predefinedLayout: monitor.predefinedLayout,
-                                apps: monitor.apps
-                              }}
-                              onLayoutChange={onUpdateMonitorLayout}
-                              isDropdown={true}
-                            />
+                      useCompactMonitorEditChrome ? (
+                        <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
+                          <div className="flex min-w-0 items-center justify-center gap-1.5">
+                            <div
+                              className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
+                              title={monitor.name}
+                            >
+                              <span className="flex shrink-0 flex-col gap-[3px] py-px" aria-hidden>
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                              </span>
+                              <span className="truncate">{monitor.name}</span>
+                            </div>
+                            {(onUpdateMonitorLayout || (totalItems > 0 && onAutoSnapApps)) ? (
+                              <div className="relative shrink-0">
+                                <button
+                                  type="button"
+                                  aria-label={`Monitor actions for ${monitor.name}`}
+                                  aria-expanded={monitorEditActionsOpenId === monitor.id}
+                                  title="Layout preset and tools"
+                                  className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/15"
+                                  onMouseDown={(e) => e.stopPropagation()}
+                                  onClick={() =>
+                                    setMonitorEditActionsOpenId((id) =>
+                                      id === monitor.id ? null : monitor.id,
+                                    )
+                                  }
+                                >
+                                  <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
+                                </button>
+                                {monitorEditActionsOpenId === monitor.id ? (
+                                  <>
+                                    <div
+                                      className="fixed inset-0 z-[45]"
+                                      aria-hidden
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                      onClick={() => setMonitorEditActionsOpenId(null)}
+                                    />
+                                    <div
+                                      className="absolute right-0 top-full z-[50] mt-1 flex min-w-[12rem] flex-col gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary p-2 shadow-lg"
+                                      onMouseDown={(e) => e.stopPropagation()}
+                                    >
+                                      {onUpdateMonitorLayout ? (
+                                        <MonitorLayoutConfig
+                                          monitor={{
+                                            id: monitor.id,
+                                            name: monitor.name,
+                                            orientation: monitor.orientation || 'landscape',
+                                            predefinedLayout: monitor.predefinedLayout,
+                                            apps: monitor.apps,
+                                          }}
+                                          onLayoutChange={(mid, layout) => {
+                                            onUpdateMonitorLayout(mid, layout);
+                                            setMonitorEditActionsOpenId(null);
+                                          }}
+                                          isDropdown={true}
+                                        />
+                                      ) : null}
+                                      {totalItems > 0 && onAutoSnapApps ? (
+                                        <button
+                                          type="button"
+                                          onClick={() => {
+                                            handleAutoSnap(monitor.id);
+                                            setMonitorEditActionsOpenId(null);
+                                          }}
+                                          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
+                                          title="Auto-snap all windows to closest zones"
+                                        >
+                                          <Zap className="h-3 w-3 shrink-0" />
+                                          Auto-Snap
+                                        </button>
+                                      ) : null}
+                                    </div>
+                                  </>
+                                ) : null}
+                              </div>
+                            ) : null}
                           </div>
-                        )}
-                        {totalItems > 0 && onAutoSnapApps && (
-                          <button
-                            onClick={() => handleAutoSnap(monitor.id)}
-                            className="inline-flex items-center gap-1 px-2 py-1 text-xs bg-flow-accent-purple text-white hover:bg-flow-accent-purple/80 rounded border border-flow-accent-purple/50 transition-colors shadow-sm whitespace-nowrap shrink-0"
-                            title="Auto-snap all windows to closest zones"
-                          >
-                            <Zap className="w-3 h-3" />
-                            Auto-Snap
-                          </button>
-                        )}
-                      </div>
+                        </div>
+                      ) : (
+                        <div className={`mx-auto mb-1 flex flex-wrap items-center justify-center gap-2 ${baseWidth}`}>
+                          <div className="inline-flex max-w-full min-w-0 cursor-grab items-center gap-2 whitespace-nowrap rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2.5 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing">
+                            <span className="flex shrink-0 flex-col gap-[3px] py-px" aria-hidden>
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                            </span>
+                            <span className="whitespace-nowrap">{monitor.name}</span>
+                          </div>
+                          {monitor.systemName ? (
+                            <span className="whitespace-nowrap text-[11px] text-white/55">
+                              ({monitor.systemName})
+                            </span>
+                          ) : null}
+                          {onUpdateMonitorLayout ? (
+                            <div
+                              className="relative shrink-0"
+                              onMouseDown={(e) => e.stopPropagation()}
+                            >
+                              <MonitorLayoutConfig
+                                monitor={{
+                                  id: monitor.id,
+                                  name: monitor.name,
+                                  orientation: monitor.orientation || 'landscape',
+                                  predefinedLayout: monitor.predefinedLayout,
+                                  apps: monitor.apps,
+                                }}
+                                onLayoutChange={onUpdateMonitorLayout}
+                                isDropdown={true}
+                              />
+                            </div>
+                          ) : null}
+                          {totalItems > 0 && onAutoSnapApps ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={() => handleAutoSnap(monitor.id)}
+                              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1 text-xs text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
+                              title="Auto-snap all windows to closest zones"
+                            >
+                              <Zap className="h-3 w-3" />
+                              Auto-Snap
+                            </button>
+                          ) : null}
+                        </div>
+                      )
                     ) : (
                       <div className={`mb-1 mx-auto ${baseWidth}`}>
                         <div className="flex flex-col items-center justify-center gap-1 text-center">
@@ -1632,12 +2081,6 @@ export function MonitorLayout({
                               onCustomDragStart(dragData, 'monitor', monitor.id, startPos);
                               handleItemDragStart(monitor.id, appIndex, 'app');
                             }}
-                            onSettings={() => {
-                              setSelectedItem(app);
-                              setSelectedItemIndex(appIndex);
-                              setSelectedMonitorId(monitor.id);
-                              setIsSettingsOpen(true);
-                            }}
                             onDelete={() => onRemoveApp?.(monitor.id, appIndex)}
                             onResize={(newSize) => onUpdateApp?.(monitor.id, appIndex, { size: newSize })}
                             onMove={(newPosition) => onUpdateApp?.(monitor.id, appIndex, { position: newPosition })}
@@ -1680,6 +2123,7 @@ export function MonitorLayout({
                               appIndex,
                               app,
                             )}
+                            monitorPreviewSurface
                           />
                         ))}
                       </div>
@@ -1688,6 +2132,7 @@ export function MonitorLayout({
                 </div>
               );
             })}
+            </div>
           </div>
         </div>
       </div>
@@ -1719,51 +2164,6 @@ export function MonitorLayout({
           />
         </div>
       </div>
-      
-      {/* App Settings Modal */}
-      {isSettingsOpen && selectedItem && (
-        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-          <AppSettings 
-            app={selectedItem}
-            isOpen={isSettingsOpen}
-            onClose={() => {
-              setIsSettingsOpen(false);
-              setSelectedItem(null);
-              setSelectedItemIndex(-1);
-              setSelectedMonitorId('');
-            }}
-            onSave={(settings) => {
-              if (selectedMonitorId && selectedItemIndex >= 0) {
-                // Only handle apps now
-                if (onUpdateApp) {
-                  onUpdateApp(selectedMonitorId, selectedItemIndex, settings);
-                }
-              }
-            }}
-            onDelete={() => {
-              if (selectedMonitorId && selectedItemIndex >= 0) {
-                onRemoveApp?.(selectedMonitorId, selectedItemIndex);
-                setIsSettingsOpen(false);
-                setSelectedItem(null);
-                setSelectedItemIndex(-1);
-                setSelectedMonitorId('');
-              }
-            }}
-            onMinimize={() => {
-              if (selectedMonitorId && selectedItemIndex >= 0) {
-                onMoveAppToMinimized?.(selectedMonitorId, selectedItemIndex);
-                setIsSettingsOpen(false);
-                setSelectedItem(null);
-                setSelectedItemIndex(-1);
-                setSelectedMonitorId('');
-              }
-            }}
-            isFile={false} // Always apps now
-            filePath={undefined}
-            fileType={undefined}
-          />
-        </div>
-      )}
     </div>
   );
 }

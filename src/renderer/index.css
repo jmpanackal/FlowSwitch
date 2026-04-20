@@ -405,6 +405,11 @@
     overflow: visible !important;
   }
   
+  /* Whole monitor column uses transform: scale(); hint text rasterization without changing layout. */
+  .monitor-layout-preview-scaled {
+    -webkit-font-smoothing: subpixel-antialiased;
+  }
+
   /* Responsive App Window Sizing */
   .app-window {
     container-type: size;

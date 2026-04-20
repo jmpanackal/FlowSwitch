@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from "react";
-import { Settings, Trash2, Move, Shield, Minimize2, Maximize2, File, Folder, FolderOpen, ChevronDown, ChevronRight, Globe, MessageCircle, Code, Music, Calendar, Mail, Terminal, Camera, BarChart3, Play, FileText, Link } from "lucide-react";
+import { Settings, Shield, Minimize2, Maximize2, Minus, Square, X, File, Folder, FolderOpen, ChevronDown, ChevronRight, Globe, MessageCircle, Code, Music, Calendar, Mail, Terminal, Camera, BarChart3, Play, FileText, Link } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AppSettings } from "./AppSettings";
@@ -70,12 +70,12 @@ interface AppFileWindowProps {
   onDrag: (position: { x: number; y: number }) => void;
   onDragEnd: () => void;
   onCustomDragStart?: (startPos: { x: number; y: number }) => void;
-  onSettings: () => void;
+  /** Optional — tile chrome uses minimize / maximize / close instead. */
+  onSettings?: () => void;
   onDelete: () => void;
   onResize: (newSize: { width: number; height: number }) => void;
   onMove: (newPosition: { x: number; y: number }) => void;
   isDragging?: boolean;
-  showSettings?: boolean;
   isEditable?: boolean;
   isSelected?: boolean;
   isSnappedToZone?: boolean;
@@ -86,6 +86,8 @@ interface AppFileWindowProps {
   onUpdateAssociatedFiles?: (files: any[]) => void;
   onAppSelect?: () => void;
   onFileSelect?: () => void;
+  /** Monitor preview uses CSS scale; lighter backdrop avoids extra softness under transform. */
+  monitorPreviewSurface?: boolean;
 }
 
 // App icon mapping - maps app names to their icons and colors
@@ -170,12 +172,10 @@ export function AppFileWindow({
   onDrag,
   onDragEnd,
   onCustomDragStart,
-  onSettings,
   onDelete,
   onResize,
   onMove,
   isDragging = false,
-  showSettings = false,
   isEditable = false,
   isSelected = false,
   isSnappedToZone = false,
@@ -185,7 +185,8 @@ export function AppFileWindow({
   onAssociateFileWithApp,
   onUpdateAssociatedFiles,
   onAppSelect,
-  onFileSelect
+  onFileSelect,
+  monitorPreviewSurface = false,
 }: AppFileWindowProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [localDragging, setLocalDragging] = useState(false);
@@ -196,6 +197,10 @@ export function AppFileWindow({
   
   const fileIconRef = useRef<HTMLDivElement>(null);
   const mainWindowRef = useRef<HTMLDivElement>(null);
+  const restoreLayoutRef = useRef<{
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  } | null>(null);
   
   const dragStateRef = useRef({
     isDragging: false,
@@ -867,27 +872,41 @@ export function AppFileWindow({
     );
   };
 
-  // Button click handlers
-  const handleSettingsClick = (e: React.MouseEvent) => {
-    e.preventDefault();
-    e.stopPropagation();
-    console.log('⚙️ SETTINGS BUTTON CLICKED for:', item.name);
-    onSettings();
-  };
-
   const handleDeleteClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('🗑️ DELETE BUTTON CLICKED for:', item.name);
     onDelete();
   };
 
   const handleMinimizeClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    console.log('📦 MINIMIZE BUTTON CLICKED for:', item.name);
     if (onMoveToMinimized) {
       onMoveToMinimized();
+    }
+  };
+
+  const handleMaximizeToggle = (e: React.MouseEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    if (isFile) return;
+    const w = item.size.width;
+    const h = item.size.height;
+    const maxed = w >= 96 && h >= 96;
+    if (maxed && restoreLayoutRef.current) {
+      const r = restoreLayoutRef.current;
+      onMove(r.position);
+      onResize(r.size);
+      restoreLayoutRef.current = null;
+      return;
+    }
+    if (!maxed) {
+      restoreLayoutRef.current = {
+        position: { ...item.position },
+        size: { ...item.size },
+      };
+      onMove({ x: 50, y: 50 });
+      onResize({ width: 98, height: 98 });
     }
   };
 
@@ -959,6 +978,14 @@ export function AppFileWindow({
     return parts.length > 0 ? parts.join(' ') : 'rounded-none';
   })();
 
+  const closeButtonTopRightRadiusClass =
+    monitorTileRadiusClass === 'rounded-xl' ||
+    monitorTileRadiusClass.includes('rounded-tr-xl')
+      ? 'rounded-tr-xl'
+      : monitorTileRadiusClass.includes('rounded-none')
+        ? 'rounded-none'
+        : 'rounded-tr-md';
+
   /** Near-fullscreen / edge-flush: remove default app-window-content inset so tiles meet the bezel. */
   const flushContentInset =
     !isFile &&
@@ -997,6 +1024,12 @@ export function AppFileWindow({
 
   const fileCount = getFileCount();
 
+  const tileMaximized =
+    !isFile && item.size.width >= 96 && item.size.height >= 96;
+  const showAppTitleBar = isEditable && !isFile && !isCurrentlyDragging;
+  const showFileEditBar = isEditable && isFile && !isCurrentlyDragging;
+  const useStackedChrome = showAppTitleBar || showFileEditBar;
+
   return (
     <>
       <div 
@@ -1008,7 +1041,9 @@ export function AppFileWindow({
           top: `${item.position.y - item.size.height/2}%`,
           width: `${item.size.width}%`,
           height: `${item.size.height}%`,
-        }}
+          containerType: 'size',
+          containerName: 'app-container',
+        } as React.CSSProperties}
         draggable={isEditable}
         onDragStart={handleDragStartEvent}
         onDragEnd={handleDragEndEvent}
@@ -1019,7 +1054,7 @@ export function AppFileWindow({
       >
         <div 
           ref={mainWindowRef}
-          className={`relative w-full h-full ${monitorTileRadiusClass} ring-1 ring-inset transition-all duration-200 select-none ${
+          className={`relative flex h-full min-h-0 w-full flex-col overflow-hidden ${monitorTileRadiusClass} ring-1 ring-inset transition-all duration-200 select-none ${
             isEditable ? 'cursor-move' : 'cursor-pointer'
           } ${
             isCurrentlyDragging
@@ -1028,88 +1063,141 @@ export function AppFileWindow({
                 ? 'ring-2 ring-inset ring-flow-accent-blue/55'
                 : styling.ring
           } ${!isCurrentlyDragging && !isSelected ? styling.innerGlow : ''}`}
-          style={{ 
+          style={{
             backgroundColor: styling.background,
-            backdropFilter: 'blur(8px)'
+            backdropFilter: monitorPreviewSurface ? "none" : "blur(8px)",
           }}
           onMouseDown={handleMouseDown}
           onClick={handleAppClick}
           onMouseEnter={(e) => handleMainWindowHover(e, true)}
           onMouseLeave={(e) => handleMainWindowHover(e, false)}
-          title={isFile ? getTooltipText() : undefined}
+          title={isFile ? getTooltipText() : item.name}
         >
-          {/* FIXED: Simple content centering */}
+          {showAppTitleBar ? (
+            <div
+              className={`pointer-events-auto flex min-h-[22px] max-h-[28px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 ${
+                monitorPreviewSurface ? "" : "backdrop-blur-md"
+              }`}
+            >
+              <div
+                className="min-h-0 min-w-0 flex-1 cursor-move"
+                title={(item as AppItem).name}
+                aria-hidden
+              />
+              <div className="flex shrink-0 items-stretch divide-x divide-white/[0.06]">
+                {onMoveToMinimized ? (
+                  <button
+                    type="button"
+                    onClick={handleMinimizeClick}
+                    className="flex h-full w-7 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+                    title="Minimize to row"
+                    aria-label="Minimize to minimized row"
+                  >
+                    <Minus className="h-3 w-3" strokeWidth={2.25} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleMaximizeToggle}
+                  className="flex h-full w-7 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+                  title={tileMaximized ? 'Restore size' : 'Maximize on monitor'}
+                  aria-label={tileMaximized ? 'Restore window size' : 'Maximize on monitor'}
+                >
+                  {tileMaximized ? (
+                    <Minimize2 className="h-3 w-3" strokeWidth={2} />
+                  ) : (
+                    <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                  )}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleDeleteClick}
+                  className={`flex h-full w-7 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
+                  title="Remove from monitor"
+                  aria-label="Remove from monitor"
+                >
+                  <X className="h-3 w-3" strokeWidth={2.25} />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
+          {showFileEditBar ? (
+            <div
+              className={`pointer-events-auto flex h-[20px] max-h-[20px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/25 ${
+                monitorPreviewSurface ? "" : "backdrop-blur-sm"
+              }`}
+            >
+              <div
+                className="min-h-0 min-w-0 flex-1 cursor-move"
+                title={(item as FileItem).name}
+                aria-hidden
+              />
+              <div className="flex shrink-0 items-center divide-x divide-white/[0.06]">
+                {onMoveToMinimized ? (
+                  <button
+                    type="button"
+                    onClick={handleMinimizeClick}
+                    className="flex h-full w-6 items-center justify-center text-white/45 hover:bg-white/[0.06] hover:text-white/90"
+                    title="Minimize to row"
+                    aria-label="Minimize to minimized row"
+                  >
+                    <Minus className="h-2.5 w-2.5" strokeWidth={2.25} />
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  onClick={handleDeleteClick}
+                  className={`flex h-full w-6 items-center justify-center text-red-500 hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
+                  title="Remove from monitor"
+                  aria-label="Remove from monitor"
+                >
+                  <X className="h-2.5 w-2.5" strokeWidth={2.25} />
+                </button>
+              </div>
+            </div>
+          ) : null}
+
           <div
-            className="app-window-content"
-            style={flushContentInset ? { inset: 0 } : undefined}
+            className={
+              useStackedChrome
+                ? 'relative min-h-0 flex-1'
+                : 'relative h-full min-h-0'
+            }
           >
-            {renderContent()}
+            <div
+              className="app-window-content"
+              style={
+                flushContentInset
+                  ? { inset: 0 }
+                  : useStackedChrome
+                    ? { inset: "2px" }
+                    : undefined
+              }
+            >
+              {renderContent()}
+            </div>
+
+            {isEditable && !isCurrentlyDragging && (
+              <div
+                className="pointer-events-auto absolute bottom-0 right-0 z-20 h-4 w-4 cursor-nw-resize transition-colors duration-200 hover:bg-white/15"
+                onMouseDown={(e) => handleResizeStart(e, 'bottom-right')}
+                title="Resize"
+              >
+                <div className="absolute bottom-1 right-1 h-1 w-1 rounded-full bg-white/60" />
+                <div className="absolute bottom-1 right-2 h-1 w-1 rounded-full bg-white/40" />
+                <div className="absolute bottom-2 right-1 h-1 w-1 rounded-full bg-white/40" />
+              </div>
+            )}
           </div>
-          
-          {/* File Count Indicator for File items (folders) only */}
-          {isFile && fileCount > 1 && (
-            <div className="absolute -top-1 -right-1 min-w-[18px] h-[18px] px-1 bg-sky-500 border-2 border-white rounded-full flex items-center justify-center shadow-sm backdrop-blur-sm z-10">
-              <span className="text-white text-xs font-semibold leading-none" style={{ fontSize: '10px' }}>
+
+          {isFile && fileCount > 1 && !showFileEditBar ? (
+            <div className="pointer-events-none absolute -top-1 -right-1 z-10 flex h-[18px] min-w-[18px] items-center justify-center rounded-full border-2 border-white bg-sky-500 px-1 shadow-sm backdrop-blur-sm">
+              <span className="text-[10px] font-semibold leading-none text-white">
                 {fileCount > 99 ? '99+' : fileCount}
               </span>
             </div>
-          )}
-          
-          {/* Drag indicator */}
-          {isEditable && !isCurrentlyDragging && (
-            <div className="absolute top-1 left-1 text-white/60 hover:text-white/80 pointer-events-none">
-              <Move className="w-3 h-3" />
-            </div>
-          )}
-
-          {/* Settings and actions: visible in edit mode (drag remains a power shortcut) */}
-          {isEditable && !isCurrentlyDragging && (
-            <div className="pointer-events-auto absolute -top-2 -right-2 z-20 flex items-center gap-1">
-              <button
-                type="button"
-                onClick={handleSettingsClick}
-                className={`flex h-6 w-6 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white/30 hover:text-white ${
-                  showSettings ? "ring-1 ring-white/50" : ""
-                }`}
-                title="Settings"
-                aria-label="Window settings"
-              >
-                <Settings className="h-3 w-3" />
-              </button>
-              <button
-                type="button"
-                onClick={handleDeleteClick}
-                className="flex h-6 w-6 items-center justify-center rounded-full border border-red-500/30 bg-red-500/20 text-red-200 backdrop-blur-sm transition-all duration-200 hover:bg-red-500/30 hover:text-red-50"
-                title="Delete"
-                aria-label="Remove from layout"
-              >
-                <Trash2 className="h-3 w-3" />
-              </button>
-              {onMoveToMinimized && (
-                <button
-                  type="button"
-                  onClick={handleMinimizeClick}
-                  className="flex h-6 w-6 items-center justify-center rounded-full border border-white/30 bg-white/20 text-white/80 backdrop-blur-sm transition-all duration-200 hover:bg-white/30 hover:text-white"
-                  title="Minimize"
-                  aria-label="Move to minimized row"
-                >
-                  <Minimize2 className="h-3 w-3" />
-                </button>
-              )}
-            </div>
-          )}
-          
-          {/* Resize handles */}
-          {isEditable && !isCurrentlyDragging && (
-            <div className="absolute bottom-0 right-0 w-4 h-4 cursor-nw-resize hover:bg-white/20 transition-colors duration-200"
-                 onMouseDown={(e) => handleResizeStart(e, 'bottom-right')}
-                 title="Resize"
-            >
-              <div className="absolute bottom-1 right-1 w-1 h-1 bg-white/60 rounded-full" />
-              <div className="absolute bottom-1 right-2 w-1 h-1 bg-white/40 rounded-full" />
-              <div className="absolute bottom-2 right-1 w-1 h-1 bg-white/40 rounded-full" />
-            </div>
-          )}
+          ) : null}
         </div>
       </div>
       
