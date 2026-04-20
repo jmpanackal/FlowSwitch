@@ -463,20 +463,13 @@ export function MonitorLayout({
     if (!inner) return false;
 
     const ir = inner.getBoundingClientRect();
-    let w = Math.round(ir.width);
-    let h = Math.round(ir.height);
+    const w = Math.round(ir.width);
+    const h = Math.round(ir.height);
 
     if (outer) {
       const or = outer.getBoundingClientRect();
-      const outerW = Math.round(or.width);
       const outerH = Math.round(or.height);
-      const approxInnerW = Math.max(1, outerW - 36);
-      const approxInnerH = Math.max(1, outerH - 36);
-      const innerLooksStarved =
-        outerW > 320 &&
-        outerH > 220 &&
-        (w < approxInnerW * 0.42 || h < approxInnerH * 0.42);
-      if (innerLooksStarved) {
+      if (outerH > 120 && h < 12) {
         return false;
       }
     }
@@ -493,7 +486,7 @@ export function MonitorLayout({
 
   const scheduleRemeasurePreviewInnerWithRetries = useCallback(() => {
     if (remeasurePreviewInnerBounds()) return;
-    let left = 14;
+    let left = 28;
     const step = () => {
       if (left-- <= 0) return;
       requestAnimationFrame(() => {
@@ -777,17 +770,23 @@ export function MonitorLayout({
   /** Electron often under-notifies inner layout after fullscreen; window resize fires reliably. */
   useEffect(() => {
     const onShellLayout = () => {
+      if (document.visibilityState === "hidden") return;
       requestAnimationFrame(() => {
         scheduleRemeasurePreviewInnerWithRetries();
         window.setTimeout(() => remeasurePreviewInnerBounds(), 40);
         window.setTimeout(() => remeasurePreviewInnerBounds(), 200);
+        window.setTimeout(() => scheduleRemeasurePreviewInnerWithRetries(), 420);
       });
     };
     window.addEventListener("resize", onShellLayout);
+    window.addEventListener("focus", onShellLayout);
     document.addEventListener("fullscreenchange", onShellLayout);
+    document.addEventListener("visibilitychange", onShellLayout);
     return () => {
       window.removeEventListener("resize", onShellLayout);
+      window.removeEventListener("focus", onShellLayout);
       document.removeEventListener("fullscreenchange", onShellLayout);
+      document.removeEventListener("visibilitychange", onShellLayout);
     };
   }, [remeasurePreviewInnerBounds, scheduleRemeasurePreviewInnerWithRetries]);
 
@@ -1734,11 +1733,11 @@ export function MonitorLayout({
         <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative box-border h-full min-w-0 min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
           >
             <div
               ref={monitorPreviewInnerRef}
-              className="absolute inset-[clamp(5px,0.9vmin,12px)] min-h-0 min-w-0"
+              className="absolute inset-0 min-h-0 min-w-0 overflow-hidden"
             >
             {monitors.map((monitor) => {
               const isPortrait = monitor.orientation === 'portrait';
