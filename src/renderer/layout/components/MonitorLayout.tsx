@@ -2123,6 +2123,7 @@ export function MonitorLayout({
                               appIndex,
                               app,
                             )}
+                            monitorPreviewShellScale={displayPreviewScale}
                           />
                         ))}
                       </div>

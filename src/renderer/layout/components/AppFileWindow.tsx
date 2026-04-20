@@ -86,6 +86,11 @@ interface AppFileWindowProps {
   onUpdateAssociatedFiles?: (files: any[]) => void;
   onAppSelect?: () => void;
   onFileSelect?: () => void;
+  /**
+   * Monitor layout preview scales the whole monitor with CSS `transform`.
+   * Apply the inverse scale to icon/name content so text and bitmap icons stay sharp.
+   */
+  monitorPreviewShellScale?: number;
 }
 
 // App icon mapping - maps app names to their icons and colors
@@ -183,7 +188,8 @@ export function AppFileWindow({
   onAssociateFileWithApp,
   onUpdateAssociatedFiles,
   onAppSelect,
-  onFileSelect
+  onFileSelect,
+  monitorPreviewShellScale,
 }: AppFileWindowProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [localDragging, setLocalDragging] = useState(false);
@@ -1027,6 +1033,14 @@ export function AppFileWindow({
   const showFileEditBar = isEditable && isFile && !isCurrentlyDragging;
   const useStackedChrome = showAppTitleBar || showFileEditBar;
 
+  const previewContentCounterScale =
+    typeof monitorPreviewShellScale === "number" &&
+    Number.isFinite(monitorPreviewShellScale) &&
+    monitorPreviewShellScale > 0.001 &&
+    Math.abs(monitorPreviewShellScale - 1) > 0.001
+      ? 1 / monitorPreviewShellScale
+      : null;
+
   return (
     <>
       <div 
@@ -1156,13 +1170,19 @@ export function AppFileWindow({
           >
             <div
               className="app-window-content"
-              style={
-                flushContentInset
+              style={{
+                ...(flushContentInset
                   ? { inset: 0 }
                   : useStackedChrome
-                    ? { inset: '2px' }
-                    : undefined
-              }
+                    ? { inset: "2px" }
+                    : {}),
+                ...(previewContentCounterScale
+                  ? {
+                      transform: `scale(${previewContentCounterScale})`,
+                      transformOrigin: "center center",
+                    }
+                  : {}),
+              }}
             >
               {renderContent()}
             </div>
