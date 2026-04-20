@@ -4,7 +4,6 @@ import {
   Grid3X3,
   Zap,
   ChevronDown,
-  GripVertical,
   PenLine,
   Save,
   MoreHorizontal,
@@ -31,9 +30,19 @@ function readLivePreviewMeasure(
 ): { width: number; height: number } {
   if (!el) return fallback;
   const r = el.getBoundingClientRect();
-  const w = Math.round(r.width);
-  const h = Math.round(r.height);
-  if (w <= 10 || h <= 10) return fallback;
+  let w = Math.round(r.width);
+  let h = Math.round(r.height);
+  // After fullscreen / shell transitions, rect can briefly read ~0 while layout is still valid.
+  if (w <= 10 || h <= 10) {
+    const cw = Math.round(el.clientWidth);
+    const ch = Math.round(el.clientHeight);
+    if (cw > 10 && ch > 10) {
+      w = cw;
+      h = ch;
+    } else {
+      return fallback;
+    }
+  }
   return { width: w, height: h };
 }
 
@@ -481,8 +490,16 @@ export function MonitorLayout({
     if (!inner) return false;
 
     const ir = inner.getBoundingClientRect();
-    const w = Math.round(ir.width);
-    const h = Math.round(ir.height);
+    let w = Math.round(ir.width);
+    let h = Math.round(ir.height);
+    if (w <= 10 || h <= 10) {
+      const cw = Math.round(inner.clientWidth);
+      const ch = Math.round(inner.clientHeight);
+      if (cw > 10 && ch > 10) {
+        w = cw;
+        h = ch;
+      }
+    }
 
     if (outer) {
       const or = outer.getBoundingClientRect();
@@ -959,6 +976,7 @@ export function MonitorLayout({
     previewBounds.width,
     previewBounds.height,
     layoutPreviewScale,
+    large,
     draggingMonitor,
     monitors,
     isEditMode,
@@ -1663,7 +1681,7 @@ export function MonitorLayout({
   };
 
   return (
-    <div ref={layoutRootRef} className="h-full flex flex-col relative min-h-0">
+    <div ref={layoutRootRef} className="relative flex h-full min-h-0 min-w-0 flex-col">
       {/* Preview toolbar — layout editing lives here (not profile preferences) */}
       <div
         className={`flex-shrink-0 ${
@@ -1676,20 +1694,20 @@ export function MonitorLayout({
               }`
         }`}
       >
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div className="flex min-w-0 flex-wrap items-center gap-3">
+        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 sm:gap-3">
+          <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden sm:gap-3">
             <Monitor
               className={`shrink-0 text-flow-accent-blue/90 ${densePreviewMode ? "h-4 w-4" : "h-5 w-5"}`}
               strokeWidth={1.75}
             />
-            <div className="flex min-w-0 flex-col gap-0.5">
+            <div className="min-w-0 flex-1 shrink">
               <h3
-                className={`font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
+                className={`truncate font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
               >
                 Monitor layout
               </h3>
               <p
-                className="text-[11px] text-flow-text-muted"
+                className="truncate text-[11px] text-flow-text-muted"
                 title={
                   densePreviewMode
                     ? "Drag apps on monitors · use Edit layout to change positions"
@@ -1702,24 +1720,22 @@ export function MonitorLayout({
               </p>
             </div>
             {isEditMode ? (
-              <div className="flex flex-wrap items-center gap-2">
-                <div className="flex items-center gap-2 rounded-lg bg-flow-accent-blue/15 px-2.5 py-1">
-                  <div className="h-2 w-2 animate-pulse rounded-full bg-flow-accent-blue" />
-                  <span className="text-xs font-medium text-flow-accent-blue">
-                    Editing layout
-                  </span>
-                  {dragState?.isDragging && (
-                    <span className="text-xs font-medium text-flow-accent-blue/90">
+              <div className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
+                <div className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-lg bg-flow-accent-blue/15 px-2 py-1 sm:max-w-none sm:px-2.5">
+                  <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
+                  <span className="truncate text-xs font-medium text-flow-accent-blue">Editing layout</span>
+                  {dragState?.isDragging ? (
+                    <span className="hidden truncate text-xs font-medium text-flow-accent-blue/90 sm:inline">
                       · {dragState.dragData?.name || "Item"}
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <span className="text-[11px] text-flow-text-muted">
+                <span className="hidden truncate text-[11px] text-flow-text-muted md:inline">
                   Apps only — files become content
                 </span>
               </div>
             ) : (
-              <span className="rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
+              <span className="shrink-0 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
                 View mode
               </span>
             )}
@@ -1811,10 +1827,14 @@ export function MonitorLayout({
                         <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
                           <div className="flex min-w-0 items-center justify-center gap-1.5">
                             <div
-                              className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-1 rounded bg-white/5 px-2 py-1 text-sm font-medium text-white transition-colors hover:bg-white/10 active:cursor-grabbing"
+                              className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
                               title={monitor.name}
                             >
-                              <GripVertical className="h-3.5 w-3.5 shrink-0 text-white/70" />
+                              <span className="flex shrink-0 flex-col gap-[3px] py-px" aria-hidden>
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                                <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
+                              </span>
                               <span className="truncate">{monitor.name}</span>
                             </div>
                             {(onUpdateMonitorLayout || (totalItems > 0 && onAutoSnapApps)) ? (
@@ -1885,8 +1905,12 @@ export function MonitorLayout({
                         </div>
                       ) : (
                         <div className={`mx-auto mb-1 flex flex-wrap items-center justify-center gap-2 ${baseWidth}`}>
-                          <div className="inline-flex items-center gap-1 whitespace-nowrap rounded px-2 py-1 text-sm font-medium text-white transition-colors cursor-grab bg-white/5 hover:bg-white/10 active:cursor-grabbing">
-                            <GripVertical className="h-3.5 w-3.5 text-white/70" />
+                          <div className="inline-flex max-w-full min-w-0 cursor-grab items-center gap-2 whitespace-nowrap rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2.5 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing">
+                            <span className="flex shrink-0 flex-col gap-[3px] py-px" aria-hidden>
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                              <span className="block h-[2px] w-3 rounded-full bg-white/45" />
+                            </span>
                             <span className="whitespace-nowrap">{monitor.name}</span>
                           </div>
                           {monitor.systemName ? (

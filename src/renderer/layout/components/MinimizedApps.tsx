@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Minimize2, Settings, Trash2, Monitor, ArrowRight, Globe, ExternalLink, Maximize2, File, Package, FolderClosed, MoreHorizontal } from "lucide-react";
+import { Minimize2, Globe, Square, X, Package, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
@@ -157,9 +157,7 @@ export function MinimizedApps({
   // ENHANCED MOUSE SYSTEM - Click vs drag detection for minimized apps
   const handleMouseDown = (e: React.MouseEvent, app: MinimizedApp, index: number) => {
     e.preventDefault();
-    
-    console.log('🖱️ MOUSE DOWN (MINIMIZED APP):', app.name, 'isEditMode:', isEditMode);
-    
+
     // Initialize mouse state
     mouseStateRef.current = {
       isMouseDown: true,
@@ -176,7 +174,6 @@ export function MinimizedApps({
       // In edit mode, set up timer for drag initiation (500ms)
       dragTimerRef.current = setTimeout(() => {
         if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
-          console.log('⏰ DRAG TIMER EXPIRED (MINIMIZED APP) - Initiating drag');
           initiateDrag(e.clientX, e.clientY);
         }
       }, 500);
@@ -197,19 +194,17 @@ export function MinimizedApps({
   // Handle maximize - restore app to its remembered monitor
   const handleMaximize = (e: React.MouseEvent, appIndex: number) => {
     e.stopPropagation();
-    console.log('📱 MAXIMIZING APP:', { appIndex, app: apps[appIndex] });
-    
-    if (onMoveToMonitor) {
-      onMoveToMonitor(appIndex, apps[appIndex].targetMonitor || 'monitor-1');
-    }
+    if (!onMoveToMonitor) return;
+    const app = apps[appIndex];
+    const defaultMonitorId =
+      monitors.find((m) => m.primary)?.id ?? monitors[0]?.id ?? "monitor-1";
+    onMoveToMonitor(appIndex, app.targetMonitor || defaultMonitorId);
   };
 
   // ENHANCED MOUSE SYSTEM - Click vs drag detection for minimized files
   const handleFileMouseDown = (e: React.MouseEvent, file: any, index: number) => {
     e.preventDefault();
-    
-    console.log('🖱️ MOUSE DOWN (MINIMIZED FILE):', file.name, 'isEditMode:', isEditMode);
-    
+
     // Initialize mouse state
     mouseStateRef.current = {
       isMouseDown: true,
@@ -226,7 +221,6 @@ export function MinimizedApps({
       // In edit mode, set up timer for drag initiation (500ms)
       dragTimerRef.current = setTimeout(() => {
         if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
-          console.log('⏰ DRAG TIMER EXPIRED (MINIMIZED FILE) - Initiating drag');
           initiateDrag(e.clientX, e.clientY);
         }
       }, 500);
@@ -393,11 +387,11 @@ export function MinimizedApps({
   // Handle file maximize - restore file to its remembered monitor
   const handleFileMaximize = (e: React.MouseEvent, fileIndex: number) => {
     e.stopPropagation();
-    console.log('📁 MAXIMIZING FILE:', { fileIndex, file: files[fileIndex] });
-    
-    if (onMoveFileToMonitor) {
-      onMoveFileToMonitor(fileIndex, files[fileIndex].targetMonitor || 'monitor-1');
-    }
+    if (!onMoveFileToMonitor) return;
+    const file = files[fileIndex];
+    const defaultMonitorId =
+      monitors.find((m) => m.primary)?.id ?? monitors[0]?.id ?? "monitor-1";
+    onMoveFileToMonitor(fileIndex, file.targetMonitor || defaultMonitorId);
   };
 
   // Cleanup timers on unmount
@@ -582,105 +576,115 @@ export function MinimizedApps({
                   onMouseLeave={clearHover}
                 >
                   {/* App Card */}
-                  <div 
-                    className={`relative flex flex-col items-center ${compact ? 'gap-1 p-1.5' : 'gap-1.5 p-2'} rounded-lg border transition-all duration-200 ${
+                  <div
+                    className={`relative flex flex-col overflow-hidden rounded-lg border transition-all duration-200 ${
                       isSelected
-                        ? 'border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30'
-                        : 'border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent'
+                        ? "border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30"
+                        : "border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent"
                     }`}
-                    style={{ 
-                      cursor: isEditMode ? 'grab' : 'pointer',
+                    style={{
+                      cursor: isEditMode ? "grab" : "pointer",
                     }}
                     onMouseDown={(e) => handleMouseDown(e, app, index)}
                   >
-                    {/* App Icon Container */}
-                    <div 
-                      className={`relative ${compact ? 'w-8 h-8' : 'w-10 h-10'} rounded-lg flex items-center justify-center transition-all duration-200 group-hover:scale-105`}
-                      style={{ 
-                        backgroundColor: `${app.color}20`,
-                        border: `1px solid ${app.color}40`
-                      }}
-                    >
-                      {renderIcon(app)}
-                      
-                      {/* Content Indicator - matching monitor layout style */}
-                      {(() => {
-                        // Get associated files and browser tabs
-                        const files = app.associatedFiles || [];
-                        const tabs = app.browserTabs || [];
-                        const totalContent = files.length + tabs.length;
-                        
-                        if (totalContent === 0) return null;
-                        
-                        // Analyze content types to determine the appropriate color
-                        const hasFolder = files.some(f => f.type === 'folder');
-                        const hasLink = files.some(f => f.type === 'link' || f.type === 'url') || tabs.length > 0;
-                        const hasRegularFiles = files.some(f => f.type !== 'folder' && f.type !== 'link' && f.type !== 'url');
-                        
-                        // Count different content types
-                        const contentTypes = [hasFolder, hasLink, hasRegularFiles].filter(Boolean).length;
-                        
-                        let contentType: string;
-                        
-                        if (contentTypes > 1) {
-                          // Multiple content types = red
-                          contentType = 'content-mixed';
-                        } else if (hasFolder) {
-                          // Only folders = yellow
-                          contentType = 'content-folder';
-                        } else if (hasLink) {
-                          // Only links/browser tabs = blue
-                          contentType = 'content-link';
-                        } else {
-                          // Only regular files = green
-                          contentType = 'content-file';
-                        }
-                        
-                        return (
-                          <div className={`content-indicator ${contentType}`}>
-                            <span className="count">{totalContent}</span>
-                          </div>
-                        );
-                      })()}
-                    </div>
-
-                    {/* App Name */}
-                    <div className="text-center w-full">
-                      <span className={`${compact ? 'text-[11px]' : 'text-xs'} text-flow-text-primary font-medium truncate block`} title={app.name}>
-                        {app.name}
-                      </span>
-                      <span className="text-[10px] text-flow-text-muted truncate block" title={monitorInfo.name}>
-                        {monitorInfo.name}
-                      </span>
-                    </div>
-
-                    {/* Action Buttons */}
-                    {hoveredApp === index && isEditMode && (
-                      <div className="absolute -top-2 -right-2 flex gap-1">
-                        {onMoveToMonitor && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => handleMaximize(e, index)}
-                            className="w-6 h-6 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
-                            title={`Restore to ${monitorInfo.name}`}
-                          >
-                            <Maximize2 className="w-3 h-3" />
-                          </button>
-                        )}
-                        {onRemoveApp && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => handleDelete(e, index)}
-                            className="w-6 h-6 bg-flow-accent-red hover:bg-red-600 text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
-                            title="Remove from minimized"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
+                    {isEditMode ? (
+                      <div className="pointer-events-auto flex min-h-[24px] w-full shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 backdrop-blur-md">
+                        <div className="flex min-h-[24px] w-full items-stretch">
+                          {onMoveToMonitor ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => handleMaximize(e, index)}
+                              className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
+                                onRemoveApp ? "border-r border-white/[0.06]" : ""
+                              }`}
+                              title={`Place on ${monitorInfo.name}`}
+                              aria-label={`Place ${app.name} on ${monitorInfo.name}`}
+                            >
+                              <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                            </button>
+                          ) : null}
+                          {onRemoveApp ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => handleDelete(e, index)}
+                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
+                              title="Remove from minimized row"
+                              aria-label="Remove from minimized row"
+                            >
+                              <X className="h-3 w-3" strokeWidth={2.25} />
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    )}
+                    ) : null}
+                    <div
+                      className={`flex flex-col items-center ${compact ? "gap-1 px-1.5 pb-1.5 pt-1" : "gap-1.5 p-2"}`}
+                    >
+                      {/* App Icon Container */}
+                      <div
+                        className={`relative ${compact ? "h-8 w-8" : "h-10 w-10"} flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105`}
+                        style={{
+                          backgroundColor: `${app.color}20`,
+                          border: `1px solid ${app.color}40`,
+                        }}
+                      >
+                        {renderIcon(app)}
+
+                        {/* Content Indicator - matching monitor layout style */}
+                        {(() => {
+                          const assoc = app.associatedFiles || [];
+                          const tabs = app.browserTabs || [];
+                          const totalContent = assoc.length + tabs.length;
+
+                          if (totalContent === 0) return null;
+
+                          const hasFolder = assoc.some((f) => f.type === "folder");
+                          const hasLink =
+                            assoc.some((f) => f.type === "link" || f.type === "url") || tabs.length > 0;
+                          const hasRegularFiles = assoc.some(
+                            (f) => f.type !== "folder" && f.type !== "link" && f.type !== "url",
+                          );
+
+                          const contentTypes = [hasFolder, hasLink, hasRegularFiles].filter(Boolean).length;
+
+                          let contentType: string;
+
+                          if (contentTypes > 1) {
+                            contentType = "content-mixed";
+                          } else if (hasFolder) {
+                            contentType = "content-folder";
+                          } else if (hasLink) {
+                            contentType = "content-link";
+                          } else {
+                            contentType = "content-file";
+                          }
+
+                          return (
+                            <div className={`content-indicator ${contentType}`}>
+                              <span className="count">{totalContent}</span>
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      {/* App Name */}
+                      <div className="w-full text-center">
+                        <span
+                          className={`${compact ? "text-[11px]" : "text-xs"} block truncate font-medium text-flow-text-primary`}
+                          title={app.name}
+                        >
+                          {app.name}
+                        </span>
+                        <span
+                          className="block truncate text-[10px] text-flow-text-muted"
+                          title={monitorInfo.name}
+                        >
+                          {monitorInfo.name}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );
@@ -725,65 +729,74 @@ export function MinimizedApps({
                   onMouseLeave={clearHover}
                 >
                   {/* File Card */}
-                  <div 
-                    className={`relative flex flex-col items-center gap-1.5 p-2 rounded-lg border transition-all duration-200 ${
+                  <div
+                    className={`relative flex flex-col overflow-hidden rounded-lg border transition-all duration-200 ${
                       isSelected
-                        ? 'border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30'
-                        : 'border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent'
+                        ? "border-flow-accent-blue bg-flow-accent-blue/10 ring-1 ring-flow-accent-blue/30"
+                        : "border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent"
                     }`}
-                    style={{ 
-                      cursor: isEditMode ? 'grab' : 'pointer',
+                    style={{
+                      cursor: isEditMode ? "grab" : "pointer",
                     }}
                     onMouseDown={(e) => handleFileMouseDown(e, file, index)}
                   >
-                    {/* File Icon Container */}
-                    <div 
-                      className="relative w-10 h-10 rounded-lg flex items-center justify-center transition-all duration-200 group-hover:scale-105"
-                      style={{ 
-                        backgroundColor: `${fileColor}20`,
-                        border: `1px solid ${fileColor}40`
-                      }}
-                    >
-                      <FileIcon type={file.type} className="w-5 h-5" />
-                    </div>
-
-                    {/* File Name */}
-                    <div className="text-center w-full">
-                      <span className="text-xs text-flow-text-primary font-medium truncate block" title={file.name}>
-                        {file.name}
-                      </span>
-                      <span className="text-xs text-flow-text-muted truncate block" title={monitorInfo.name}>
-                        {monitorInfo.name}
-                      </span>
-                    </div>
-
-                    {/* Action Buttons */}
-                    {hoveredApp === `file-${index}` && isEditMode && (
-                      <div className="absolute -top-2 -right-2 flex gap-1">
-                        {onMoveFileToMonitor && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => handleFileMaximize(e, index)}
-                            className="w-6 h-6 bg-flow-accent-blue hover:bg-flow-accent-blue-hover text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
-                            title={`Open on ${monitorInfo.name}`}
-                          >
-                            <Maximize2 className="w-3 h-3" />
-                          </button>
-                        )}
-                        {onRemoveFile && (
-                          <button
-                            type="button"
-                            onMouseDown={(e) => e.stopPropagation()}
-                            onClick={(e) => handleFileDelete(e, index)}
-                            className="w-6 h-6 bg-flow-accent-red hover:bg-red-600 text-flow-text-primary rounded-full flex items-center justify-center transition-all duration-200 shadow-md"
-                            title="Remove from minimized"
-                          >
-                            <Trash2 className="w-3 h-3" />
-                          </button>
-                        )}
+                    {isEditMode ? (
+                      <div className="pointer-events-auto flex min-h-[24px] w-full shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 backdrop-blur-md">
+                        <div className="flex min-h-[24px] w-full items-stretch">
+                          {onMoveFileToMonitor ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => handleFileMaximize(e, index)}
+                              className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
+                                onRemoveFile ? "border-r border-white/[0.06]" : ""
+                              }`}
+                              title={`Place on ${monitorInfo.name}`}
+                              aria-label={`Place ${file.name} on ${monitorInfo.name}`}
+                            >
+                              <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                            </button>
+                          ) : null}
+                          {onRemoveFile ? (
+                            <button
+                              type="button"
+                              onMouseDown={(e) => e.stopPropagation()}
+                              onClick={(e) => handleFileDelete(e, index)}
+                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
+                              title="Remove from minimized row"
+                              aria-label="Remove from minimized row"
+                            >
+                              <X className="h-3 w-3" strokeWidth={2.25} />
+                            </button>
+                          ) : null}
+                        </div>
                       </div>
-                    )}
+                    ) : null}
+                    <div
+                      className={`flex flex-col items-center ${compact ? "gap-1 px-1.5 pb-1.5 pt-1" : "gap-1.5 p-2"}`}
+                    >
+                      <div
+                        className={`relative flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105 ${compact ? "h-8 w-8" : "h-10 w-10"}`}
+                        style={{
+                          backgroundColor: `${fileColor}20`,
+                          border: `1px solid ${fileColor}40`,
+                        }}
+                      >
+                        <FileIcon type={file.type} className={compact ? "h-4 w-4" : "h-5 w-5"} />
+                      </div>
+
+                      <div className="w-full text-center">
+                        <span
+                          className={`${compact ? "text-[11px]" : "text-xs"} block truncate font-medium text-flow-text-primary`}
+                          title={file.name}
+                        >
+                          {file.name}
+                        </span>
+                        <span className="block truncate text-[10px] text-flow-text-muted" title={monitorInfo.name}>
+                          {monitorInfo.name}
+                        </span>
+                      </div>
+                    </div>
                   </div>
                 </div>
               );

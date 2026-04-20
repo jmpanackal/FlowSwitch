@@ -1327,7 +1327,7 @@ export default function App() {
 
         {/* Main Content Area with Header and Right Sidebar */}
         <div
-          className={`flex min-h-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
+          className={`flex min-h-0 min-w-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
             rightSidebarOpen ? FLOW_SHELL_INSPECTOR_MARGIN_CLASS : "mr-0"
           }`}
         >
@@ -1490,8 +1490,8 @@ export default function App() {
 
           {/* Main Content Area */}
           {currentProfile && (
-            <main className="flex-1 overflow-hidden relative flow-shell-canvas">
-              <div className="h-full px-4 pb-4 pt-0 md:px-6 md:pb-6 xl:px-8">
+            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden flow-shell-canvas">
+              <div className="h-full min-w-0 px-4 pb-4 pt-0 md:px-6 md:pb-6 xl:px-8">
                 <MonitorLayout
                   monitors={currentProfile.monitors}
                   minimizedApps={currentProfile.minimizedApps}
