@@ -20,6 +20,11 @@ type UseInstalledAppsOptions = {
    * Values > 0 force a bypass of the TTL cache for that fetch.
    */
   installedListVersion?: number;
+  /**
+   * When true, the first time this hook runs it clears the renderer + main installed-app caches
+   * so the sidebar does not keep an empty or pre-fix catalog across hot reloads.
+   */
+  refreshCatalogOnMount?: boolean;
 };
 
 /**
@@ -101,12 +106,14 @@ export function useInstalledApps(
     allowFallbackWithoutElectron = false,
     fallbackApps = [],
     installedListVersion = 0,
+    refreshCatalogOnMount = false,
   } = options;
   const hasElectronBridge = !!window.electron && typeof window.electron.getInstalledApps === 'function';
   const [apps, setApps] = useState<InstalledApp[]>(
     hasElectronBridge ? [] : (allowFallbackWithoutElectron ? fallbackApps : []),
   );
   const prevInstalledListVersion = useRef<number | undefined>(undefined);
+  const refreshOnMountDone = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
@@ -116,6 +123,11 @@ export function useInstalledApps(
       return () => {
         cancelled = true;
       };
+    }
+
+    if (refreshCatalogOnMount && !refreshOnMountDone.current) {
+      refreshOnMountDone.current = true;
+      invalidateInstalledAppsCache();
     }
 
     const v = installedListVersion ?? 0;
@@ -135,7 +147,7 @@ export function useInstalledApps(
     return () => {
       cancelled = true;
     };
-  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge, installedListVersion]);
+  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge, installedListVersion, refreshCatalogOnMount]);
 
   return useMemo(() => apps, [apps]);
 }

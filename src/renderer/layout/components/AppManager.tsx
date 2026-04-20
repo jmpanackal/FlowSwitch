@@ -90,7 +90,7 @@ export function AppManager({
     anchor: HTMLElement;
   } | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
-  const installedApps = useInstalledApps();
+  const installedApps = useInstalledApps({ refreshCatalogOnMount: true });
   const allApps = useMemo<AppType[]>(() => (
     installedApps.map((app) => ({
       name: app.name,

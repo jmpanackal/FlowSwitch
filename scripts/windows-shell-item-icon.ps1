@@ -38,41 +38,96 @@ public static class FlowSwitchShellItemIcon
         public string szTypeName;
     }
 
-    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
-    public static extern IntPtr SHGetFileInfo(
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHGetFileInfoW")]
+    public static extern IntPtr SHGetFileInfoByPath(
         string pszPath,
         uint dwFileAttributes,
         ref SHFILEINFO psfi,
         uint cbFileInfo,
         uint uFlags);
 
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, EntryPoint = "SHGetFileInfoW")]
+    public static extern IntPtr SHGetFileInfoByPidl(
+        IntPtr pszPath,
+        uint dwFileAttributes,
+        ref SHFILEINFO psfi,
+        uint cbFileInfo,
+        uint uFlags);
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode)]
+    public static extern int SHParseDisplayName(
+        string pszName,
+        IntPtr pbc,
+        out IntPtr ppidl,
+        uint sfgaoIn,
+        out uint psfgaoOut);
+
+    [DllImport("user32.dll")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    public static extern bool DestroyIcon(IntPtr hIcon);
+
+    [DllImport("ole32.dll")]
+    public static extern void CoTaskMemFree(IntPtr pv);
+
     const uint SHGFI_ICON = 0x00000100;
     const uint SHGFI_LARGEICON = 0x00000000;
+    const uint SHGFI_PIDL = 0x00000008;
 
     public static byte[] GetPng(string path, int sizePx)
     {
         SHFILEINFO sfi = new SHFILEINFO();
         uint flags = SHGFI_ICON | SHGFI_LARGEICON;
-        IntPtr ret = SHGetFileInfo(path, 0, ref sfi, (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
-        if (sfi.hIcon == IntPtr.Zero)
+        IntPtr ret = IntPtr.Zero;
+        IntPtr pidl = IntPtr.Zero;
+        bool usedPidl = false;
+        if (!string.IsNullOrWhiteSpace(path) && path.StartsWith("shell:", StringComparison.OrdinalIgnoreCase))
         {
+            uint attrs = 0;
+            int parseHr = SHParseDisplayName(path, IntPtr.Zero, out pidl, 0, out attrs);
+            if (parseHr == 0 && pidl != IntPtr.Zero)
+            {
+                usedPidl = true;
+                ret = SHGetFileInfoByPidl(
+                    pidl,
+                    0,
+                    ref sfi,
+                    (uint)Marshal.SizeOf(typeof(SHFILEINFO)),
+                    flags | SHGFI_PIDL
+                );
+            }
+        }
+        if (!usedPidl)
+        {
+            ret = SHGetFileInfoByPath(path, 0, ref sfi, (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
+        }
+        if (sfi.hIcon == IntPtr.Zero || ret == IntPtr.Zero)
+        {
+            if (pidl != IntPtr.Zero) { CoTaskMemFree(pidl); }
             throw new InvalidOperationException("SHGetFileInfo returned no icon (ret=" + ret + ").");
         }
-        using (Icon ico = Icon.FromHandle(sfi.hIcon))
-        using (Bitmap src = ico.ToBitmap())
-        using (Bitmap scaled = new Bitmap(sizePx, sizePx, PixelFormat.Format32bppArgb))
-        using (Graphics g = Graphics.FromImage(scaled))
+        try
         {
-            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            g.SmoothingMode = SmoothingMode.HighQuality;
-            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-            g.Clear(Color.Transparent);
-            g.DrawImage(src, new Rectangle(0, 0, sizePx, sizePx));
-            using (MemoryStream ms = new MemoryStream())
+            using (Icon ico = Icon.FromHandle(sfi.hIcon))
+            using (Bitmap src = ico.ToBitmap())
+            using (Bitmap scaled = new Bitmap(sizePx, sizePx, PixelFormat.Format32bppArgb))
+            using (Graphics g = Graphics.FromImage(scaled))
             {
-                scaled.Save(ms, ImageFormat.Png);
-                return ms.ToArray();
+                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                g.SmoothingMode = SmoothingMode.HighQuality;
+                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                g.Clear(Color.Transparent);
+                g.DrawImage(src, new Rectangle(0, 0, sizePx, sizePx));
+                using (MemoryStream ms = new MemoryStream())
+                {
+                    scaled.Save(ms, ImageFormat.Png);
+                    return ms.ToArray();
+                }
             }
+        }
+        finally
+        {
+            if (sfi.hIcon != IntPtr.Zero) { DestroyIcon(sfi.hIcon); }
+            if (pidl != IntPtr.Zero) { CoTaskMemFree(pidl); }
         }
     }
 }

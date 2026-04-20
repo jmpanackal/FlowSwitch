@@ -3,7 +3,11 @@
 const path = require('path');
 const fs = require('fs');
 const { app, nativeImage } = require('electron');
-const { getShellItemIconDataUrl } = require('./windows-shell-item-icon');
+const {
+  getShellItemIconDataUrl,
+  isSafeWindowsAppsFolderMoniker,
+} = require('./windows-shell-item-icon');
+const { getAppxUserPackageLookup } = require('./windows-appx-user-package-index');
 
 const createIconPathAndAppHelpers = ({
   iconDataUrlCache,
@@ -288,6 +292,220 @@ const createIconPathAndAppHelpers = ({
     ])
   );
 
+  /**
+   * When Uninstall only has InstallLocation (folder), pick a plausible main .exe — common for
+   * per-user installers (Spotify: %LocalAppData%\Spotify with Spotify.exe inside).
+   * Also checks one directory level (and shallow `app-*` children) when the root only has
+   * updaters like Update.exe.
+   */
+  const probeInstallFolderForWindowsExe = (dirRaw) => {
+    if (!dirRaw || process.platform !== 'win32') return null;
+    const expanded = expandWindowsEnvVars(String(dirRaw).trim());
+    if (!expanded) return null;
+    const normalized = normalizePathForWindows(expanded);
+    if (normalized.includes('..')) return null;
+    const folderHint = path.basename(normalized.replace(/[/\\]+$/, '')).toLowerCase();
+
+    const deprioritizeFilename = new Set([
+      'uninstall.exe',
+      'unins000.exe',
+      'unins001.exe',
+      'setup.exe',
+      'update.exe',
+      'discordupdate.exe',
+    ]);
+
+    const listExePathsInDir = (dir) => {
+      let dirents;
+      try {
+        dirents = fs.readdirSync(dir, { withFileTypes: true });
+      } catch {
+        return [];
+      }
+      return dirents
+        .filter((d) => d.isFile() && d.name.toLowerCase().endsWith('.exe'))
+        .map((d) => path.join(dir, d.name));
+    };
+
+    const pickPreferredExe = (exePaths) => {
+      if (!exePaths.length) return null;
+      const lowBase = (p) => path.basename(p).toLowerCase();
+      const hintExe = `${folderHint}.exe`;
+      const byHint = exePaths.find((p) => lowBase(p) === hintExe);
+      if (byHint) return byHint;
+      const byStem = exePaths.find(
+        (p) => path.basename(p, path.extname(p)).toLowerCase() === folderHint,
+      );
+      if (byStem) return byStem;
+      const good = exePaths.filter((p) => !deprioritizeFilename.has(lowBase(p)));
+      if (good.length) return good[0];
+      return exePaths[0];
+    };
+
+    let st;
+    try {
+      st = fs.statSync(normalized);
+    } catch {
+      return null;
+    }
+    if (!st.isDirectory()) return null;
+
+    const rootExePaths = listExePathsInDir(normalized);
+    if (rootExePaths.length) {
+      const pick = pickPreferredExe(rootExePaths);
+      if (!deprioritizeFilename.has(path.basename(pick).toLowerCase())) {
+        return pick;
+      }
+    }
+
+    let dirents;
+    try {
+      dirents = fs.readdirSync(normalized, { withFileTypes: true });
+    } catch {
+      return rootExePaths.length ? pickPreferredExe(rootExePaths) : null;
+    }
+
+    const skipDirs = new Set([
+      'node_modules',
+      '.git',
+      'locales',
+      '__pycache__',
+      'swiftshader',
+    ]);
+
+    const subdirs = dirents
+      .filter(
+        (d) => d.isDirectory()
+          && !d.name.startsWith('.')
+          && !skipDirs.has(d.name.toLowerCase()),
+      )
+      .slice(0, 48);
+
+    let bestDeprioritized = null;
+    for (const sd of subdirs) {
+      const subPath = path.join(normalized, sd.name);
+      const subExes = listExePathsInDir(subPath);
+      if (!subExes.length) continue;
+      const subPick = pickPreferredExe(subExes);
+      if (!subPick) continue;
+      if (!deprioritizeFilename.has(path.basename(subPick).toLowerCase())) {
+        return subPick;
+      }
+      if (!bestDeprioritized) bestDeprioritized = subPick;
+
+      if (/^app-[\d.]+$/i.test(sd.name)) {
+        let nested;
+        try {
+          nested = fs.readdirSync(subPath, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const n of nested) {
+          if (!n.isDirectory()) continue;
+          const deepPath = path.join(subPath, n.name);
+          const deepExes = listExePathsInDir(deepPath);
+          const deepPick = pickPreferredExe(deepExes);
+          if (deepPick && !deprioritizeFilename.has(path.basename(deepPick).toLowerCase())) {
+            return deepPick;
+          }
+        }
+      }
+    }
+
+    if (rootExePaths.length) {
+      return pickPreferredExe(rootExePaths);
+    }
+    return bestDeprioritized;
+  };
+
+  const windowsAppsShimDir = () => path.join(
+    process.env.LOCALAPPDATA || '',
+    'Microsoft',
+    'WindowsApps',
+  );
+
+  /**
+   * Resolve a per-user launcher `.exe` for Store / MSIX apps when ARP `InstallLocation` is not a
+   * readable folder (ACL) or points at `%LocalAppData%\Packages\<PFN>` instead of `Program Files\WindowsApps`.
+   */
+  const inferMsixUserWindowsAppsShimFromPackageDir = (dirRaw) => {
+    if (!dirRaw || process.platform !== 'win32') return null;
+    const expanded = expandWindowsEnvVars(String(dirRaw).trim());
+    const normalized = normalizePathForWindows(expanded);
+    const lc = normalized.toLowerCase().replace(/\//g, '\\');
+
+    // Store registration often uses `%LocalAppData%\Packages\<PackageFamilyName>` — shim is `<PFN>.exe`.
+    if (lc.includes('\\appdata\\local\\packages\\')) {
+      const pkgBase = path.basename(normalized.replace(/[/\\]+$/, ''));
+      if (pkgBase && !pkgBase.includes('..')) {
+        const directShim = path.join(windowsAppsShimDir(), `${pkgBase}.exe`);
+        try {
+          if (fs.existsSync(directShim) && fs.statSync(directShim).isFile()) return directShim;
+        } catch {
+          // continue
+        }
+      }
+    }
+
+    if (!lc.includes('\\windowsapps\\')) return null;
+    const base = path.basename(normalized.replace(/[/\\]+$/, ''));
+    const waDir = windowsAppsShimDir();
+
+    const pickFromFamilyPrefix = (family) => {
+      const fam = String(family || '').trim();
+      if (!fam) return null;
+      let dirents;
+      try {
+        dirents = fs.readdirSync(waDir, { withFileTypes: true });
+      } catch {
+        return null;
+      }
+      const prefix = `${fam}_`.toLowerCase();
+      const matches = dirents
+        .filter((d) => (d.isFile() || d.isSymbolicLink()) && d.name.toLowerCase().endsWith('.exe'))
+        .filter((d) => d.name.toLowerCase().startsWith(prefix));
+      if (!matches.length) return null;
+      matches.sort((a, b) => a.name.length - b.name.length);
+      const pick = path.join(waDir, matches[0].name);
+      try {
+        if (fs.statSync(pick).isFile()) return pick;
+      } catch {
+        return null;
+      }
+      return null;
+    };
+
+    const parts = base.split('__');
+    if (parts.length === 2) {
+      const publisher = parts[1].trim();
+      const left = parts[0].trim();
+      if (publisher && left) {
+        const archMatch = left.match(/^(.*)_(x64|x86|arm64|arm|neutral)$/i);
+        const withoutArch = archMatch ? archMatch[1] : left;
+        const verMatch = withoutArch.match(/^(.*)_(\d+(?:\.\d+)*)$/);
+        const family = (verMatch ? verMatch[1] : withoutArch).trim();
+        if (family) {
+          const shimName = `${family}_${publisher}.exe`;
+          const shimPath = path.join(waDir, shimName);
+          try {
+            if (fs.existsSync(shimPath) && fs.statSync(shimPath).isFile()) return shimPath;
+          } catch {
+            // fall through to prefix scan
+          }
+          const fuzzy = pickFromFamilyPrefix(family);
+          if (fuzzy) return fuzzy;
+        }
+      }
+    }
+
+    // Odd package folder shapes (no `__` publisher split): best-effort prefix on first `_` segment.
+    if (parts.length !== 2) {
+      const head = base.split('_')[0];
+      return pickFromFamilyPrefix(head);
+    }
+    return null;
+  };
+
   const imageMimeTypeByExt = {
     '.png': 'image/png',
     '.jpg': 'image/jpeg',
@@ -310,6 +528,165 @@ const createIconPathAndAppHelpers = ({
     }
   };
 
+  const findAppxPackageRootFromExeSync = (startExe) => {
+    if (!startExe || process.platform !== 'win32') return null;
+    let dir = path.dirname(String(startExe).replace(/\//g, '\\'));
+    for (let depth = 0; depth < 20; depth += 1) {
+      try {
+        if (fs.existsSync(path.join(dir, 'AppxManifest.xml'))) return dir;
+      } catch {
+        return null;
+      }
+      const parent = path.dirname(dir);
+      if (parent === dir) break;
+      dir = parent;
+    }
+    return null;
+  };
+
+  const resolveLocalPackagesRootForStoreTargetExe = (exePath) => {
+    const norm = String(exePath || '').replace(/\//g, '\\');
+    const local = process.env.LOCALAPPDATA;
+    if (!local) return null;
+    const pkRoot = path.join(local, 'Packages');
+    let waFolder = null;
+    const nested = norm.match(/\\WindowsApps\\([^\\]+)\\[^\\/]+\.exe$/i);
+    if (nested) {
+      [, waFolder] = nested;
+    } else {
+      const flat = norm.match(/\\Microsoft\\WindowsApps\\([^\\/]+\.exe)$/i);
+      if (flat) waFolder = path.basename(flat[1], '.exe');
+    }
+    if (!waFolder) return null;
+    const direct = path.join(pkRoot, waFolder);
+    try {
+      if (fs.existsSync(path.join(direct, 'AppxManifest.xml'))) return direct;
+    } catch {
+      /* ignore */
+    }
+    const fam = waFolder.split('_')[0];
+    if (!fam) return null;
+    try {
+      const hit = fs.readdirSync(pkRoot).find((n) => n.toLowerCase().startsWith(`${fam.toLowerCase()}_`));
+      if (!hit) return null;
+      const d = path.join(pkRoot, hit);
+      return fs.existsSync(path.join(d, 'AppxManifest.xml')) ? d : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const readFirstVisualElementsLogoAbsPathSync = (pkgRoot, manifestPath) => {
+    let xml;
+    try {
+      xml = fs.readFileSync(manifestPath, 'utf8');
+    } catch {
+      return null;
+    }
+    const chunks = [];
+    try {
+      const iter = String(xml).matchAll(/<(?:[\w]+:)?VisualElements([^>]+)>/gi);
+      for (const m of iter) {
+        chunks.push(m[1]);
+      }
+    } catch {
+      const once = /<(?:[\w]+:)?VisualElements([^>]+)>/i.exec(String(xml));
+      if (once) chunks.push(once[1]);
+    }
+    if (!chunks.length) {
+      const once = /<(?:[\w]+:)?VisualElements([^>]+)>/i.exec(String(xml));
+      if (once) chunks.push(once[1]);
+    }
+    const attrs = chunks.join(' ');
+    if (!attrs) return null;
+    const pickAttr = (label) => {
+      const r = new RegExp(`${label}\\s*=\\s*"([^"]*)"`, 'i');
+      const hit = r.exec(attrs);
+      return hit ? hit[1].trim().replace(/\//g, '\\') : null;
+    };
+    const rel = pickAttr('Square44x44Logo')
+      || pickAttr('Square150x150Logo')
+      || pickAttr('AppListIcon')
+      || pickAttr('Square30x30Logo')
+      || pickAttr('Square310x310Logo')
+      || pickAttr('Logo');
+    if (!rel || /^ms-appx:/i.test(rel)) return null;
+    const candidate = path.normalize(path.join(pkgRoot, rel));
+    const rootLower = pkgRoot.replace(/\//g, '\\').toLowerCase();
+    const candLower = candidate.replace(/\//g, '\\').toLowerCase();
+    if (!candLower.startsWith(`${rootLower}\\`)) return null;
+    try {
+      if (fs.existsSync(candidate)) return candidate;
+    } catch {
+      return null;
+    }
+    const logoDir = path.dirname(candidate);
+    const stem = path.basename(candidate, path.extname(candidate));
+    let names;
+    try {
+      names = fs.readdirSync(logoDir);
+    } catch {
+      return null;
+    }
+    const alt = names.find(
+      (n) => n.toLowerCase().startsWith(stem.toLowerCase()) && /\.(png|jpg|jpeg|webp)$/i.test(n),
+    );
+    return alt ? path.join(logoDir, alt) : null;
+  };
+
+  const dataUrlFromMsixInstallRootSync = (pkgRoot) => {
+    if (!pkgRoot || process.platform !== 'win32') return null;
+    const root = String(pkgRoot).replace(/\//g, '\\');
+    const manifestPath = path.join(root, 'AppxManifest.xml');
+    try {
+      if (!fs.existsSync(manifestPath)) return null;
+    } catch {
+      return null;
+    }
+    const logoPath = readFirstVisualElementsLogoAbsPathSync(root, manifestPath);
+    if (!logoPath) return null;
+    return toImageDataUrlFromFile(logoPath);
+  };
+
+  const dataUrlFromMsixVisualLogoNearExeSync = (exePath, appxLookup) => {
+    if (!exePath || process.platform !== 'win32') return null;
+    const raw = String(exePath).replace(/\//g, '\\');
+    let resolved = raw;
+    try {
+      resolved = fs.realpathSync.native ? fs.realpathSync.native(raw) : fs.realpathSync(raw);
+    } catch {
+      resolved = raw;
+    }
+    const idxLoc = appxLookup?.getInstallLocationForExe?.(raw)
+      || appxLookup?.getInstallLocationForExe?.(resolved);
+    if (idxLoc) {
+      const fromIdx = dataUrlFromMsixInstallRootSync(idxLoc);
+      if (fromIdx) return fromIdx;
+    }
+    let pkgRoot = findAppxPackageRootFromExeSync(resolved);
+    if (!pkgRoot) {
+      pkgRoot = resolveLocalPackagesRootForStoreTargetExe(resolved);
+    }
+    if (!pkgRoot) {
+      pkgRoot = resolveLocalPackagesRootForStoreTargetExe(raw);
+    }
+    if (!pkgRoot) return null;
+    return dataUrlFromMsixInstallRootSync(pkgRoot);
+  };
+
+  const likelyMsixLayoutExePath = (p) => {
+    const lc = String(p || '').toLowerCase().replace(/\//g, '\\');
+    return (
+      lc.endsWith('.exe')
+      && (
+        lc.includes('\\windowsapps\\')
+        || lc.includes('\\systemapps\\')
+        || lc.includes('\\appdata\\local\\packages\\')
+        || lc.includes('\\microsoft\\windowsapps\\')
+      )
+    );
+  };
+
   const getWindowIconPath = () => {
     // Windows scales the whole bitmap into a fixed taskbar slot; a trimmed asset
     // makes the mark read larger than the full-canvas logo used in the renderer.
@@ -323,13 +700,38 @@ const createIconPathAndAppHelpers = ({
   };
 
   const getSafeIconDataUrl = async (iconSourcePath) => {
-    const safePath = extractIconSourcePath(iconSourcePath);
-    if (!safePath) return null;
+    const shellMonikerCandidate = String(iconSourcePath || '').trim();
+    const shellMoniker = (
+      process.platform === 'win32'
+      && isSafeWindowsAppsFolderMoniker(shellMonikerCandidate)
+    ) ? shellMonikerCandidate : null;
+    const extracted = shellMoniker || extractIconSourcePath(iconSourcePath);
+    if (!extracted) return null;
+    let resolvedPath = extracted;
+    if (process.platform === 'win32' && !shellMoniker) {
+      try {
+        const rp = fs.realpathSync.native
+          ? fs.realpathSync.native(extracted)
+          : fs.realpathSync(extracted);
+        if (rp) resolvedPath = rp;
+      } catch {
+        resolvedPath = extracted;
+      }
+    }
+    const probeOrder = resolvedPath !== extracted
+      ? [resolvedPath, extracted]
+      : [resolvedPath];
 
-    const cached = iconDataUrlCache.get(safePath);
-    if (cached !== undefined) return cached;
+    let appxLookup = null;
+    if (process.platform === 'win32') {
+      try {
+        appxLookup = await getAppxUserPackageLookup();
+      } catch {
+        appxLookup = null;
+      }
+    }
 
-    const tryShellIcon = async () => {
+    const tryShellIconForPath = async (safePath) => {
       if (
         process.platform !== 'win32'
         || !windowsShellIconScriptPath
@@ -337,53 +739,122 @@ const createIconPathAndAppHelpers = ({
       ) {
         return null;
       }
-      // SHGetFileInfo (via PowerShell): same family of resolution Explorer / Start uses for a path.
       return getShellItemIconDataUrl(windowsShellIconScriptPath, safePath);
     };
 
-    try {
-      const directImageDataUrl = toImageDataUrlFromFile(safePath);
-      if (directImageDataUrl) {
-        iconDataUrlCache.set(safePath, directImageDataUrl);
-        return directImageDataUrl;
-      }
+    // Packaged-app shims (App Execution Aliases, WindowsApps shims, registry-detected MSIX
+    // exes) return the *generic* Windows exe icon from SHGetFileInfo. That generic icon is
+    // non-null, which would poison the normal probe chain. For any MSIX-layout path we have
+    // an AUMID for, resolve the Shell icon from `shell:AppsFolder\<AUMID>` first — this is
+    // the same path Windows Search / Start Menu render.
+    const resolveMsixShellMonikerForPath = (safePath) => {
+      if (process.platform !== 'win32') return null;
+      if (shellMoniker) return null;
+      if (!appxLookup || appxLookup.empty) return null;
+      if (!likelyMsixLayoutExePath(safePath)) return null;
+      const aumid = appxLookup.getPreferredAppUserModelIdForExe?.(safePath) || null;
+      if (!aumid) return null;
+      if (!/^[A-Za-z0-9._-]+![A-Za-z0-9._-]+$/.test(aumid)) return null;
+      const moniker = `shell:AppsFolder\\${aumid}`;
+      return isSafeWindowsAppsFolderMoniker(moniker) ? moniker : null;
+    };
 
-      const shellUrl = await tryShellIcon();
-      if (shellUrl) {
-        iconDataUrlCache.set(safePath, shellUrl);
-        return shellUrl;
-      }
+    const tryOneProbePath = async (safePath) => {
+      const cached = iconDataUrlCache.get(safePath);
+      if (cached !== undefined) return cached;
 
-      let nativeIcon = await app.getFileIcon(safePath, { size: 'large' });
-      if (!nativeIcon || nativeIcon.isEmpty()) {
-        nativeIcon = await app.getFileIcon(safePath, { size: 'normal' });
-      }
-      if (!nativeIcon || nativeIcon.isEmpty()) {
-        const imageFallback = nativeImage.createFromPath(safePath);
-        if (imageFallback && !imageFallback.isEmpty()) {
-          const fallbackDataUrl = imageFallback.toDataURL();
-          iconDataUrlCache.set(safePath, fallbackDataUrl);
-          return fallbackDataUrl;
+      try {
+        const directImageDataUrl = toImageDataUrlFromFile(safePath);
+        if (directImageDataUrl) {
+          iconDataUrlCache.set(safePath, directImageDataUrl);
+          return directImageDataUrl;
         }
+
+        // Must run BEFORE SHGetFileInfo on the exe — Store shims return the generic exe icon,
+        // so preferring AUMID here is the only way packaged apps get their real icon.
+        const aumidMoniker = resolveMsixShellMonikerForPath(safePath);
+        if (aumidMoniker) {
+          const cachedForMoniker = iconDataUrlCache.get(aumidMoniker);
+          if (cachedForMoniker !== undefined && cachedForMoniker !== null) {
+            iconDataUrlCache.set(safePath, cachedForMoniker);
+            return cachedForMoniker;
+          }
+          const aumidUrl = await tryShellIconForPath(aumidMoniker);
+          if (aumidUrl) {
+            iconDataUrlCache.set(aumidMoniker, aumidUrl);
+            iconDataUrlCache.set(safePath, aumidUrl);
+            return aumidUrl;
+          }
+        }
+
+        if (!shellMoniker && likelyMsixLayoutExePath(safePath)) {
+          const msixLogo = dataUrlFromMsixVisualLogoNearExeSync(safePath, appxLookup);
+          if (msixLogo) {
+            iconDataUrlCache.set(safePath, msixLogo);
+            return msixLogo;
+          }
+        }
+
+        const shellUrl = await tryShellIconForPath(safePath);
+        if (shellUrl) {
+          iconDataUrlCache.set(safePath, shellUrl);
+          return shellUrl;
+        }
+
+        let nativeIcon = await app.getFileIcon(safePath, { size: 'large' });
+        if (!nativeIcon || nativeIcon.isEmpty()) {
+          nativeIcon = await app.getFileIcon(safePath, { size: 'normal' });
+        }
+        if (!nativeIcon || nativeIcon.isEmpty()) {
+          const imageFallback = nativeImage.createFromPath(safePath);
+          if (imageFallback && !imageFallback.isEmpty()) {
+            const fallbackDataUrl = imageFallback.toDataURL();
+            iconDataUrlCache.set(safePath, fallbackDataUrl);
+            return fallbackDataUrl;
+          }
+          iconDataUrlCache.set(safePath, null);
+          return null;
+        }
+        const dataUrl = nativeIcon.toDataURL();
+        iconDataUrlCache.set(safePath, dataUrl);
+        return dataUrl;
+      } catch {
         iconDataUrlCache.set(safePath, null);
         return null;
       }
-      const dataUrl = nativeIcon.toDataURL();
-      iconDataUrlCache.set(safePath, dataUrl);
-      return dataUrl;
-    } catch {
-      iconDataUrlCache.set(safePath, null);
-      return null;
+    };
+
+    let lastNonNull = null;
+    for (const probePath of probeOrder) {
+      const url = await tryOneProbePath(probePath);
+      if (url) {
+        lastNonNull = url;
+        break;
+      }
     }
+    if (lastNonNull) {
+      for (const p of probeOrder) {
+        iconDataUrlCache.set(p, lastNonNull);
+      }
+      iconDataUrlCache.set(extracted, lastNonNull);
+      return lastNonNull;
+    }
+    for (const p of probeOrder) {
+      if (iconDataUrlCache.get(p) === undefined) iconDataUrlCache.set(p, null);
+    }
+    iconDataUrlCache.set(extracted, null);
+    return null;
   };
 
   const isInstallerLikeExecutable = (filePath = '') => {
     if (!filePath) return false;
-    const baseName = path.basename(String(filePath), path.extname(String(filePath))).toLowerCase();
+    const exeCandidate = extractExecutablePath(filePath) || String(filePath).trim();
+    const baseName = path.basename(String(exeCandidate), path.extname(String(exeCandidate))).toLowerCase();
     if (!baseName) return false;
+    // `msiexec` contains the substring "install" but is the normal Windows Installer host for ARP rows.
     return (
       baseName.includes('setup')
-      || baseName.includes('install')
+      || (baseName.includes('install') && baseName !== 'msiexec')
       || baseName.includes('uninstall')
       || baseName.includes('repair')
       || baseName.includes('prereq')
@@ -518,7 +989,6 @@ const createIconPathAndAppHelpers = ({
     'jucheck.exe',
     'javaws.exe',
     'jp2launcher.exe',
-    'msiexec.exe',
   ]);
 
   /**
@@ -556,6 +1026,9 @@ const createIconPathAndAppHelpers = ({
     /\brepair\s+tool\b/i,
     /\bmaintenance\b/i,
     /\bquick\s*start\s*guide\b/i,
+    // Apple Bonjour / mDNS background service rows (not a user-facing desktop app).
+    /^bonjour$/i,
+    /^bonjour\s+service$/i,
   ];
 
   const isLikelyBackgroundBinary = (filePath = '') => {
@@ -599,6 +1072,23 @@ const createIconPathAndAppHelpers = ({
     const trimmed = String(name || '').trim();
     if (!trimmed) return false;
     return NON_USER_APP_NAME_REGEXES.some((re) => re.test(trimmed));
+  };
+
+  /**
+   * Low-value shims under `%LOCALAPPDATA%\\Microsoft\\WindowsApps` (package infra, not end-user apps).
+   * Only applied when `context.source === 'windows-apps-shim'`.
+   */
+  const isWindowsAppsCatalogNoiseBasename = (exeBase = '') => {
+    const low = String(exeBase || '').toLowerCase();
+    if (!low.endsWith('.exe')) return false;
+    const s = low.slice(0, -4);
+    if (s === 'winget' || s === 'wt') return true;
+    if (s.startsWith('windowspackagemanager')) return true;
+    if (s.startsWith('xboxpcappadmin') || s.startsWith('xboxpcappce')) return true;
+    if (s.startsWith('xboxpcapp') && /(admin|service|broker|helper|svr|runtime)$/i.test(s)) return true;
+    if (s === 'python' || s === 'python3' || s === 'pythonw') return true;
+    if (/^python\d/.test(s)) return true;
+    return false;
   };
 
   const matchesNonUserAppPathHaystack = (haystack = '') => {
@@ -682,6 +1172,13 @@ const createIconPathAndAppHelpers = ({
       return false;
     }
 
+    if (context.source === 'windows-apps-shim') {
+      const shimBase = basenameLower(context.targetExe || sourcePath);
+      if (isWindowsAppsCatalogNoiseBasename(shimBase)) {
+        return false;
+      }
+    }
+
     const targetExeRaw = normalizePathForWindows(context.targetExe || '');
     const targetExe = targetExeRaw.toLowerCase();
     if (targetExe && SHELL_HOST_EXECUTABLES.has(path.basename(targetExe))) {
@@ -711,6 +1208,8 @@ const createIconPathAndAppHelpers = ({
       (p) => p && pathIsWindowsSystem32Family(p) && p.endsWith('.exe'),
     );
     for (const p of system32ExePaths) {
+      // ARP rows often list `MsiExec.exe /X{...}` as UninstallString; that must not veto the app.
+      if (basenameLower(p) === 'msiexec.exe') continue;
       if (!isSystem32PathAllowedUserExe(p)) {
         return false;
       }
@@ -726,25 +1225,54 @@ const createIconPathAndAppHelpers = ({
 
     const registryMeta = context.registryMeta || null;
     if (registryMeta) {
-      if (registryMeta.systemComponent) return false;
-      if (registryMeta.parentKeyName) return false;
-      const releaseType = String(registryMeta.releaseType || '').toLowerCase();
+      const registryHaystack = (
+        `${lowerSourcePath}\n${targetExe}\n${String(registryMeta.uninstallString || '').toLowerCase()}\n${String(registryMeta.quietUninstallString || '').toLowerCase()}\n${String(registryMeta.iconSource || '').toLowerCase()}\n${String(registryMeta.installLocation || '').toLowerCase()}`
+      ).replace(/\//g, '\\');
       if (
-        releaseType.includes('update')
-        || releaseType.includes('hotfix')
-        || releaseType.includes('security')
+        /mdnsresponder\.exe/i.test(registryHaystack)
+        && /(?:[/\\]|^)bonjour(?:[/\\]|$)/i.test(registryHaystack)
       ) {
         return false;
       }
-      if (isInstallerLikeExecutable(registryMeta.uninstallString || '')) {
+      const packagedOrStoreInstall = (
+        /\\windowsapps\\/i.test(registryHaystack)
+        || /\\windows\\systemapps\\/i.test(registryHaystack)
+        || /\\appdata\\local\\packages\\/i.test(registryHaystack)
+      );
+      const nameLc = safeName.toLowerCase();
+      const mediaOrSpotifyByName = (
+        nameLc.includes('spotify')
+        || (nameLc.includes('movies') && nameLc.includes('tv'))
+        || (nameLc.includes('film') && nameLc.includes('tv'))
+        || nameLc.includes('zune')
+        || nameLc.includes('groove')
+      );
+      if (registryMeta.systemComponent && !packagedOrStoreInstall) return false;
+      if (registryMeta.parentKeyName && !packagedOrStoreInstall && !mediaOrSpotifyByName) return false;
+      const releaseType = String(registryMeta.releaseType || '').toLowerCase();
+      if (
+        !packagedOrStoreInstall
+        && (
+          releaseType.includes('update')
+          || releaseType.includes('hotfix')
+          || releaseType.includes('security')
+        )
+      ) {
         return false;
       }
     }
 
     if (context.source === 'start-menu-shortcut') {
       const sc = String(context.shortcutPath || '').toLowerCase().replace(/\//g, '\\');
-      const storeOrAppxHaystack = `${lowerSourcePath}\n${targetExe}\n${sc}`;
-      if (/\\windowsapps\\|\\windows\\systemapps\\/i.test(storeOrAppxHaystack)) {
+      const argsLc = String(context.rawShortcutArgs || '').toLowerCase();
+      const rawT = String(context.rawShortcutTarget || '').toLowerCase();
+      const storeOrAppxHaystack = `${lowerSourcePath}\n${targetExe}\n${sc}\n${argsLc}\n${rawT}`;
+      if (
+        /\\windowsapps\\|\\windows\\systemapps\\/i.test(storeOrAppxHaystack)
+        || /shell:appsfolder/i.test(storeOrAppxHaystack)
+        || (/\bexplorer\.exe\b/i.test(targetExe) && /microsoft\.\w+!/i.test(argsLc))
+        || /microsoft\.\w+!/i.test(storeOrAppxHaystack)
+      ) {
         return true;
       }
       if (context.shortcutPath) {
@@ -791,6 +1319,8 @@ const createIconPathAndAppHelpers = ({
     resolveShortcutPathForLaunch,
     getPlacementProcessKey,
     extractIconSourcePath,
+    probeInstallFolderForWindowsExe,
+    inferMsixUserWindowsAppsShimFromPackageDir,
     getWindowIconPath,
     getSafeIconDataUrl,
     parseInternetShortcut,

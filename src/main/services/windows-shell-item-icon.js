@@ -11,10 +11,21 @@ const systemPowerShellExe = () => {
   return path.join(root, 'System32', 'WindowsPowerShell', 'v1.0', 'powershell.exe');
 };
 
+const APPS_FOLDER_MONIKER_RE = /^shell:AppsFolder\\([A-Za-z0-9._-]+![A-Za-z0-9._-]+)$/i;
+
+const isSafeWindowsAppsFolderMoniker = (value) => {
+  if (!value || typeof value !== 'string') return false;
+  const n = value.trim();
+  if (!n || n.length > 512) return false;
+  if (n.includes('..') || n.includes('/') || n.includes('"') || n.includes('\0')) return false;
+  return APPS_FOLDER_MONIKER_RE.test(n);
+};
+
 /**
  * Paths we allow the Shell icon helper to touch (same surfaces as Start Menu / picker).
  */
 const isSafeWindowsShellIconProbePath = (absPath) => {
+  if (isSafeWindowsAppsFolderMoniker(absPath)) return true;
   if (!absPath || typeof absPath !== 'string') return false;
   const n = absPath.replace(/\//g, '\\').trim();
   if (n.includes('..') || n.startsWith('\\\\')) return false;
@@ -25,9 +36,14 @@ const isSafeWindowsShellIconProbePath = (absPath) => {
 };
 
 const isProbeableShellIconFile = (absolutePath) => {
+  if (isSafeWindowsAppsFolderMoniker(absolutePath)) return true;
   if (!isSafeWindowsShellIconProbePath(absolutePath)) return false;
   try {
-    return fs.statSync(absolutePath).isFile();
+    const st = fs.lstatSync(absolutePath);
+    if (st.isFile()) return true;
+    // Store / App Execution Alias shims are often symlinks; SHGetFileInfo still works on the link path.
+    if (st.isSymbolicLink() && absolutePath.toLowerCase().endsWith('.exe')) return true;
+    return false;
   } catch {
     return false;
   }
@@ -165,7 +181,7 @@ const scheduleShellIconLookup = (scriptPath, absolutePath) => new Promise((resol
  * Requests are debounced and batched into a single PowerShell process per batch (see script
  * -PathsFile mode) to avoid spawning hundreds of short-lived shells during installed-app scans.
  */
-const getShellItemIconDataUrl = (scriptPath, absolutePath, _timeoutMs = 12000) => {
+const getShellItemIconDataUrl = (scriptPath, absolutePath) => {
   if (process.platform !== 'win32') return Promise.resolve(null);
   if (!scriptPath || !fs.existsSync(scriptPath)) return Promise.resolve(null);
   if (!isProbeableShellIconFile(absolutePath)) return Promise.resolve(null);
@@ -179,5 +195,6 @@ const getShellItemIconDataUrl = (scriptPath, absolutePath, _timeoutMs = 12000) =
 module.exports = {
   getShellItemIconDataUrl,
   isSafeWindowsShellIconProbePath,
+  isSafeWindowsAppsFolderMoniker,
   systemPowerShellExe,
 };

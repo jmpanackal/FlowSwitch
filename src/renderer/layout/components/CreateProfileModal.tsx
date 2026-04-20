@@ -204,7 +204,7 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   const [isCapturingMemory, setIsCapturingMemory] = useState(false);
   const [memoryCaptureError, setMemoryCaptureError] = useState<string | null>(null);
   const [detectedMonitors, setDetectedMonitors] = useState<DetectedMonitor[]>([]);
-  const installedApps = useInstalledApps();
+  const installedApps = useInstalledApps({ refreshCatalogOnMount: true });
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
       return {
