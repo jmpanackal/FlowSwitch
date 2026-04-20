@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from "react";
+import { useState, useEffect, useLayoutEffect, useMemo, useRef, useCallback } from "react";
 import {
   Monitor,
   Grid3X3,
@@ -19,6 +19,23 @@ import { matchesMonitorAppSelection } from "../utils/appSelection";
 
 /** Floor so monitor cards stay legible; slight overlap is preferable to a pixel-sized cluster. */
 const MIN_MONITOR_PREVIEW_SCALE = 0.32;
+
+/**
+ * Prefer the live inner preview box over React state: after fullscreen / maximize on Electron,
+ * `previewBounds` can lag one or more frames while `getBoundingClientRect()` already matches paint.
+ * Using stale tiny bounds forces every monitor through `minX > maxX` clamp → (50%,50%) stack + wrong scale.
+ */
+function readLivePreviewMeasure(
+  el: HTMLElement | null,
+  fallback: { width: number; height: number },
+): { width: number; height: number } {
+  if (!el) return fallback;
+  const r = el.getBoundingClientRect();
+  const w = Math.round(r.width);
+  const h = Math.round(r.height);
+  if (w <= 10 || h <= 10) return fallback;
+  return { width: w, height: h };
+}
 
 interface App {
   name: string;
@@ -439,6 +456,7 @@ export function MonitorLayout({
   } | null>(null);
   const layoutRootRef = useRef<HTMLDivElement | null>(null);
   const previewScaleRef = useRef(1);
+  const recalculateLayoutPreviewScaleRef = useRef<() => void>(() => {});
   const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const lastSyncedMonitorLayoutSignatureRef = useRef<string>("");
   const prevMonitorsIdentityKeyRef = useRef<string | null>(null);
@@ -480,6 +498,9 @@ export function MonitorLayout({
         return prev;
       }
       return { width: w, height: h };
+    });
+    queueMicrotask(() => {
+      recalculateLayoutPreviewScaleRef.current();
     });
     return true;
   }, []);
@@ -540,7 +561,7 @@ export function MonitorLayout({
     previewScale: number,
     edgeMarginPct: number = 2.1,
   ) => {
-    const bounds = previewBoundsRef.current;
+    const bounds = readLivePreviewMeasure(monitorPreviewInnerRef.current, previewBoundsRef.current);
     if (bounds.width <= 10 || bounds.height <= 10) {
       return {
         x: Math.max(0, Math.min(100, position.x)),
@@ -579,7 +600,7 @@ export function MonitorLayout({
       return Math.min(1, Math.max(MIN_MONITOR_PREVIEW_SCALE, v));
     };
 
-    const pb = previewBoundsRef.current;
+    const pb = readLivePreviewMeasure(monitorPreviewInnerRef.current, previewBoundsRef.current);
     const positions = previewPositionsRef.current;
     if (pb.width <= 10 || pb.height <= 10) {
       setLayoutPreviewScale(1);
@@ -710,14 +731,20 @@ export function MonitorLayout({
     setLayoutPreviewScale(clampPreviewScaleValue(out));
   }, [monitors, large, isEditMode]);
 
+  recalculateLayoutPreviewScaleRef.current = recalculateLayoutPreviewScale;
+
   previewPositionsRef.current = monitorPreviewPositions;
   previewScaleRef.current = layoutPreviewScale;
   const displayPreviewScale =
     draggingMonitor?.frozenScale ?? layoutPreviewScale;
 
   /** UI chrome only (toolbar copy, meta text) — cards use fixed Tailwind + transform scale only. */
-  const compactPreviewMode = layoutPreviewScale < 0.84 || previewBounds.height < 600;
-  const densePreviewMode = layoutPreviewScale < 0.62 || previewBounds.height < 500;
+  const livePreviewChromeBounds = readLivePreviewMeasure(
+    monitorPreviewInnerRef.current,
+    previewBounds,
+  );
+  const compactPreviewMode = layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
+  const densePreviewMode = layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
   const useCompactMonitorEditChrome = !large || layoutPreviewScale < 0.9;
 
   useEffect(() => {
@@ -939,8 +966,7 @@ export function MonitorLayout({
     recalculateLayoutPreviewScale,
   ]);
 
-  useEffect(() => {
-    if (previewBounds.width <= 10 || previewBounds.height <= 10) return;
+  useLayoutEffect(() => {
     recalculateLayoutPreviewScale();
   }, [
     previewBounds.width,
