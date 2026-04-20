@@ -458,10 +458,29 @@ export function MonitorLayout({
   };
 
   const remeasurePreviewInnerBounds = useCallback(() => {
-    const el = monitorPreviewInnerRef.current;
-    if (!el) return false;
-    const w = Math.round(el.clientWidth);
-    const h = Math.round(el.clientHeight);
+    const inner = monitorPreviewInnerRef.current;
+    const outer = monitorPreviewRef.current;
+    if (!inner) return false;
+
+    const ir = inner.getBoundingClientRect();
+    let w = Math.round(ir.width);
+    let h = Math.round(ir.height);
+
+    if (outer) {
+      const or = outer.getBoundingClientRect();
+      const outerW = Math.round(or.width);
+      const outerH = Math.round(or.height);
+      const approxInnerW = Math.max(1, outerW - 36);
+      const approxInnerH = Math.max(1, outerH - 36);
+      const innerLooksStarved =
+        outerW > 320 &&
+        outerH > 220 &&
+        (w < approxInnerW * 0.42 || h < approxInnerH * 0.42);
+      if (innerLooksStarved) {
+        return false;
+      }
+    }
+
     if (w <= 10 || h <= 10) return false;
     setPreviewBounds((prev) => {
       if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
@@ -709,8 +728,9 @@ export function MonitorLayout({
   const useCompactMonitorEditChrome = !large || layoutPreviewScale < 0.9;
 
   useEffect(() => {
-    const container = monitorPreviewInnerRef.current;
-    if (!container) return;
+    const inner = monitorPreviewInnerRef.current;
+    const outer = monitorPreviewRef.current;
+    if (!inner) return;
 
     let raf = 0;
     const schedule = () => {
@@ -722,12 +742,17 @@ export function MonitorLayout({
     };
 
     scheduleRemeasurePreviewInnerWithRetries();
-    const observer = new ResizeObserver(schedule);
-    observer.observe(container);
+    const innerObserver = new ResizeObserver(schedule);
+    innerObserver.observe(inner);
+    const outerObserver = outer ? new ResizeObserver(schedule) : null;
+    if (outer && outerObserver) {
+      outerObserver.observe(outer);
+    }
 
     return () => {
       if (raf) cancelAnimationFrame(raf);
-      observer.disconnect();
+      innerObserver.disconnect();
+      outerObserver?.disconnect();
     };
   }, [scheduleRemeasurePreviewInnerWithRetries]);
 
@@ -1706,14 +1731,14 @@ export function MonitorLayout({
 
       {/* Monitor Layout Section - Flex-1 with overflow for scrolling if needed */}
       <div className="flex-1 min-h-0 overflow-hidden">
-        <div className={`h-full ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
+        <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative box-border h-full min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
           >
             <div
               ref={monitorPreviewInnerRef}
-              className="absolute inset-[clamp(5px,0.9vmin,12px)]"
+              className="absolute inset-[clamp(5px,0.9vmin,12px)] min-h-0 min-w-0"
             >
             {monitors.map((monitor) => {
               const isPortrait = monitor.orientation === 'portrait';
