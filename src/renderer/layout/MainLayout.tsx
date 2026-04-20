@@ -11,6 +11,10 @@ import { AppChromeModals } from "./components/AppChromeModals";
 import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
 import { ProfileCard } from "./components/ProfileCard";
 import { MonitorLayout } from "./components/MonitorLayout";
+import {
+  FLOW_SHELL_INSPECTOR_MARGIN_CLASS,
+  FLOW_SHELL_INSPECTOR_WIDTH_CLASS,
+} from "./constants/flowShellInspector";
 import { ProfileSettings } from "./components/ProfileSettings";
 import { CreateProfileModal } from "./components/CreateProfileModal";
 import { AppManager } from "./components/AppManager";
@@ -1324,7 +1328,7 @@ export default function App() {
         {/* Main Content Area with Header and Right Sidebar */}
         <div
           className={`flex min-h-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
-            rightSidebarOpen ? "mr-[clamp(18rem,24vw,24rem)]" : "mr-0"
+            rightSidebarOpen ? FLOW_SHELL_INSPECTOR_MARGIN_CLASS : "mr-0"
           }`}
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
@@ -1650,7 +1654,7 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-9 w-[clamp(18rem,24vw,24rem)] h-[calc(100vh-2.25rem)] flow-shell-inspector flex flex-col z-30 transform transition-transform duration-200 ease-out ${
+            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flex flex-col z-30 transform transition-transform duration-200 ease-out ${
               rightSidebarOpen
                 ? "translate-x-0"
                 : "translate-x-full"

@@ -318,35 +318,34 @@
     overflow: auto !important;
   }
   
-  /* ENHANCED Icon responsive sizing and centering - PROPERLY SCALES DOWN */
+  /* ENHANCED Icon responsive sizing — parent tile sets container-type/name app-container */
   .app-icon {
-    @apply w-10 h-10;
-    transition: all 0.2s ease-in-out;
-    /* Ensure icon is perfectly centered */
     display: block;
     margin: 0 auto;
     flex-shrink: 0;
-    /* Ensure proper sizing constraints */
-    min-width: 16px;
-    min-height: 16px;
-    max-width: 40px;
-    max-height: 40px;
+    /* cqw/cqh from tile + vmin/vw so icons shrink on small windows and narrow tiles */
+    width: clamp(12px, min(30cqw, 28cqh, 5.5vmin, 3.2vw), 52px);
+    height: clamp(12px, min(30cqw, 28cqh, 5.5vmin, 3.2vw), 52px);
+    min-width: 12px;
+    min-height: 12px;
+    max-width: 52px;
+    max-height: 52px;
+    transition: width 0.2s ease-in-out, height 0.2s ease-in-out;
   }
   
   .app-icon-fallback {
-    @apply w-10 h-10;
-    transition: all 0.2s ease-in-out;
-    /* Ensure fallback icon is perfectly centered */
     display: flex;
     align-items: center;
     justify-content: center;
     margin: 0 auto;
     flex-shrink: 0;
-    /* Ensure proper sizing constraints */
-    min-width: 16px;
-    min-height: 16px;
-    max-width: 40px;
-    max-height: 40px;
+    width: clamp(12px, min(30cqw, 28cqh, 5.5vmin, 3.2vw), 52px);
+    height: clamp(12px, min(30cqw, 28cqh, 5.5vmin, 3.2vw), 52px);
+    min-width: 12px;
+    min-height: 12px;
+    max-width: 52px;
+    max-height: 52px;
+    transition: width 0.2s ease-in-out, height 0.2s ease-in-out;
   }
   
   /* FIXED: App window content container - responsive padding with better centering */
