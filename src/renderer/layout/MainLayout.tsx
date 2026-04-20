@@ -81,6 +81,7 @@ import {
 } from "./hooks/useMainLayoutProfileMutations";
 import { ProfileIconFrame } from "./utils/profileHeaderPresentation";
 import { formatUnit } from "../utils/pluralize";
+import { prefetchInstalledAppsCatalog } from "../hooks/useInstalledApps";
 
 const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
 
@@ -197,6 +198,20 @@ export default function App() {
   useEffect(() => {
     setSidebarSearchQuery("");
   }, [currentView]);
+
+  /** Warm installed-apps catalog while the user is on Profiles/Content so the Apps tab opens quickly. */
+  useEffect(() => {
+    const run = () => {
+      prefetchInstalledAppsCatalog();
+    };
+    const ric = window.requestIdleCallback;
+    if (typeof ric === "function") {
+      const id = ric(run, { timeout: 5000 });
+      return () => window.cancelIdleCallback(id);
+    }
+    const t = window.setTimeout(run, 1500);
+    return () => window.clearTimeout(t);
+  }, []);
 
   const filteredProfiles = useMemo(() => {
     const q = sidebarSearchQuery.trim().toLowerCase();

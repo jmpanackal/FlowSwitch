@@ -15,7 +15,8 @@ export function AppSearchControl({
 }: AppSearchControlProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
-  const availableApps = useInstalledApps().map((app) => app.name);
+  const { apps: installedAppsForSearch } = useInstalledApps();
+  const availableApps = installedAppsForSearch.map((app) => app.name);
 
   // Filter apps based on search query
   const filteredApps = useMemo(() => {

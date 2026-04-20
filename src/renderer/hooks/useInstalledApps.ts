@@ -21,8 +21,9 @@ type UseInstalledAppsOptions = {
    */
   installedListVersion?: number;
   /**
-   * When true, the first time this hook runs it clears the renderer + main installed-app caches
-   * so the sidebar does not keep an empty or pre-fix catalog across hot reloads.
+   * @deprecated No longer clears caches on mount (that broke tab-switch performance and could
+   * wipe a prefetched catalog). Use `installedListVersion` or `invalidateInstalledAppsCache()`
+   * when you need a forced refresh.
    */
   refreshCatalogOnMount?: boolean;
 };
@@ -38,6 +39,14 @@ let cachedAt = 0;
 let inFlightRequest: Promise<InstalledApp[]> | null = null;
 /** Next main-process fetch should bypass the 10-minute installed-apps catalog cache. */
 let forceMainCatalogOnce = false;
+
+function readWarmInstalledAppsCache(ttlMs: number): InstalledApp[] | null {
+  const now = Date.now();
+  if (cachedInstalledApps && (now - cachedAt) < ttlMs) {
+    return cachedInstalledApps;
+  }
+  return null;
+}
 
 function normalizeApps(installedApps: {
   name: string;
@@ -99,35 +108,57 @@ export function invalidateInstalledAppsCache() {
   forceMainCatalogOnce = true;
 }
 
+/**
+ * Warm the installed-apps catalog in the background (renderer module cache + main IPC).
+ * Safe to call multiple times; concurrent calls share one in-flight request.
+ */
+export function prefetchInstalledAppsCatalog() {
+  if (typeof window === 'undefined') return;
+  if (!window.electron || typeof window.electron.getInstalledApps !== 'function') return;
+  void fetchInstalledAppsShared(false);
+}
+
+export type UseInstalledAppsResult = {
+  apps: InstalledApp[];
+  /** True until the first catalog payload is ready (or a forced refresh completes). */
+  isLoading: boolean;
+};
+
 export function useInstalledApps(
   options: UseInstalledAppsOptions = {},
-) {
+): UseInstalledAppsResult {
   const {
     allowFallbackWithoutElectron = false,
     fallbackApps = [],
     installedListVersion = 0,
-    refreshCatalogOnMount = false,
   } = options;
   const hasElectronBridge = !!window.electron && typeof window.electron.getInstalledApps === 'function';
-  const [apps, setApps] = useState<InstalledApp[]>(
-    hasElectronBridge ? [] : (allowFallbackWithoutElectron ? fallbackApps : []),
-  );
+  const [apps, setApps] = useState<InstalledApp[]>(() => {
+    if (typeof window === 'undefined') {
+      return allowFallbackWithoutElectron ? fallbackApps : [];
+    }
+    const has = !!window.electron && typeof window.electron.getInstalledApps === 'function';
+    if (!has) return allowFallbackWithoutElectron ? fallbackApps : [];
+    const warm = readWarmInstalledAppsCache(CACHE_TTL_MS);
+    return warm ?? [];
+  });
+  const [isLoading, setIsLoading] = useState(() => {
+    if (typeof window === 'undefined') return false;
+    const has = !!window.electron && typeof window.electron.getInstalledApps === 'function';
+    if (!has) return false;
+    return readWarmInstalledAppsCache(CACHE_TTL_MS) === null;
+  });
   const prevInstalledListVersion = useRef<number | undefined>(undefined);
-  const refreshOnMountDone = useRef(false);
 
   useEffect(() => {
     let cancelled = false;
 
     if (!hasElectronBridge) {
       setApps(allowFallbackWithoutElectron ? fallbackApps : []);
+      setIsLoading(false);
       return () => {
         cancelled = true;
       };
-    }
-
-    if (refreshCatalogOnMount && !refreshOnMountDone.current) {
-      refreshOnMountDone.current = true;
-      invalidateInstalledAppsCache();
     }
 
     const v = installedListVersion ?? 0;
@@ -135,19 +166,27 @@ export function useInstalledApps(
     prevInstalledListVersion.current = v;
     const forceRefresh = versionChanged && v > 0;
 
+    if (forceRefresh) {
+      setIsLoading(true);
+    }
+
     fetchInstalledAppsShared(forceRefresh)
       .then((normalized) => {
         if (cancelled) return;
         setApps(normalized);
+        setIsLoading(false);
       })
       .catch(() => {
-        if (!cancelled) setApps([]);
+        if (!cancelled) {
+          setApps([]);
+          setIsLoading(false);
+        }
       });
 
     return () => {
       cancelled = true;
     };
-  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge, installedListVersion, refreshCatalogOnMount]);
+  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge, installedListVersion]);
 
-  return useMemo(() => apps, [apps]);
+  return useMemo(() => ({ apps, isLoading }), [apps, isLoading]);
 }

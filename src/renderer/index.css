@@ -338,6 +338,76 @@
   .flow-nav-tab-idle {
     @apply text-flow-text-muted;
   }
+
+  /** Installed-apps sidebar: loading hero + row placeholders (Apps tab) */
+  @keyframes flow-installed-apps-breathe {
+    0%,
+    100% {
+      opacity: 0.5;
+      transform: scale(1);
+    }
+    50% {
+      opacity: 1;
+      transform: scale(1.07);
+    }
+  }
+
+  .flow-installed-apps-loader-icon {
+    animation: flow-installed-apps-breathe 2.1s ease-in-out infinite;
+  }
+
+  /** 2×2 “app tiles” wave — reads as a small app grid loading (sidebar Apps tab). */
+  @keyframes flow-installed-apps-tile-wave {
+    0%,
+    100% {
+      opacity: 0.22;
+      transform: scale(0.78);
+      box-shadow: 0 0 0 0 color-mix(in oklch, var(--flow-accent-blue) 0%, transparent);
+    }
+    40%,
+    60% {
+      opacity: 1;
+      transform: scale(1.12);
+      box-shadow:
+        0 0 0 1px color-mix(in oklch, var(--flow-accent-blue) 70%, transparent),
+        0 0 20px 0 color-mix(in oklch, var(--flow-accent-blue) 38%, transparent);
+    }
+  }
+
+  .flow-installed-apps-tile {
+    animation: flow-installed-apps-tile-wave 1.1s ease-in-out infinite;
+    background-color: color-mix(in oklch, var(--flow-accent-blue) 72%, transparent);
+  }
+
+  @keyframes flow-installed-apps-shimmer {
+    0% {
+      opacity: 0.38;
+    }
+    50% {
+      opacity: 0.72;
+    }
+    100% {
+      opacity: 0.38;
+    }
+  }
+
+  .flow-installed-apps-skeleton-row {
+    animation: flow-installed-apps-shimmer 1.35s ease-in-out infinite;
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .flow-installed-apps-loader-icon,
+    .flow-installed-apps-skeleton-row,
+    .flow-installed-apps-tile {
+      animation: none !important;
+      box-shadow: none !important;
+    }
+
+    .flow-installed-apps-tile {
+      opacity: 0.75;
+      transform: none;
+    }
+  }
 }
 
 @layer utilities {
