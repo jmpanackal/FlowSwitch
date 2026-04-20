@@ -20,26 +20,6 @@ import { matchesMonitorAppSelection } from "../utils/appSelection";
 /** Floor so monitor cards stay legible; slight overlap is preferable to a pixel-sized cluster. */
 const MIN_MONITOR_PREVIEW_SCALE = 0.32;
 
-/**
- * Reject clearly broken inner measurements (e.g. near-zero during fullscreen transitions).
- * Must NOT treat a legitimate “exit fullscreen → minimum window” size as bogus — that used to
- * keep stale fullscreen bounds and break scale/position math until profile remount.
- */
-function mergeMeasuredPreviewBounds(
-  prev: { width: number; height: number },
-  w: number,
-  h: number,
-): { width: number; height: number } {
-  if (w <= 10 || h <= 10) return prev;
-  if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) return prev;
-  const prevLikelyFullscreen = prev.width >= 900 && prev.height >= 600;
-  const clearlyBrokenSample = w < 56 && h < 56;
-  if (prevLikelyFullscreen && clearlyBrokenSample) {
-    return prev;
-  }
-  return { width: w, height: h };
-}
-
 interface App {
   name: string;
   icon?: LucideIcon;
@@ -477,6 +457,34 @@ export function MonitorLayout({
     });
   };
 
+  const remeasurePreviewInnerBounds = useCallback(() => {
+    const el = monitorPreviewInnerRef.current;
+    if (!el) return false;
+    const w = Math.round(el.clientWidth);
+    const h = Math.round(el.clientHeight);
+    if (w <= 10 || h <= 10) return false;
+    setPreviewBounds((prev) => {
+      if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
+        return prev;
+      }
+      return { width: w, height: h };
+    });
+    return true;
+  }, []);
+
+  const scheduleRemeasurePreviewInnerWithRetries = useCallback(() => {
+    if (remeasurePreviewInnerBounds()) return;
+    let left = 14;
+    const step = () => {
+      if (left-- <= 0) return;
+      requestAnimationFrame(() => {
+        if (remeasurePreviewInnerBounds()) return;
+        step();
+      });
+    };
+    step();
+  }, [remeasurePreviewInnerBounds]);
+
   const monitorsIdentityKey = useMemo(
     () =>
       [...monitors]
@@ -705,22 +713,15 @@ export function MonitorLayout({
     if (!container) return;
 
     let raf = 0;
-    const updateBounds = () => {
-      const w = Math.round(container.clientWidth);
-      const h = Math.round(container.clientHeight);
-      if (w <= 10 || h <= 10) return;
-      setPreviewBounds((prev) => mergeMeasuredPreviewBounds(prev, w, h));
-    };
-
     const schedule = () => {
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         raf = 0;
-        updateBounds();
+        scheduleRemeasurePreviewInnerWithRetries();
       });
     };
 
-    updateBounds();
+    scheduleRemeasurePreviewInnerWithRetries();
     const observer = new ResizeObserver(schedule);
     observer.observe(container);
 
@@ -728,28 +729,42 @@ export function MonitorLayout({
       if (raf) cancelAnimationFrame(raf);
       observer.disconnect();
     };
-  }, []);
+  }, [scheduleRemeasurePreviewInnerWithRetries]);
 
   /** Re-measure after inspector / edit chrome changes layout (margin transition on shell). */
   useEffect(() => {
-    const container = monitorPreviewInnerRef.current;
-    if (!container) return;
-    const updateBounds = () => {
-      const w = Math.round(container.clientWidth);
-      const h = Math.round(container.clientHeight);
-      if (w <= 10 || h <= 10) return;
-      setPreviewBounds((prev) => mergeMeasuredPreviewBounds(prev, w, h));
+    const bump = () => {
+      scheduleRemeasurePreviewInnerWithRetries();
+      window.setTimeout(() => remeasurePreviewInnerBounds(), 60);
+      window.setTimeout(() => remeasurePreviewInnerBounds(), 220);
     };
-    updateBounds();
-    const t0 = window.setTimeout(updateBounds, 0);
-    const t1 = window.setTimeout(updateBounds, 120);
-    const t2 = window.setTimeout(updateBounds, 280);
+    bump();
+    const t0 = window.setTimeout(bump, 0);
+    const t1 = window.setTimeout(bump, 120);
+    const t2 = window.setTimeout(bump, 280);
     return () => {
       window.clearTimeout(t0);
       window.clearTimeout(t1);
       window.clearTimeout(t2);
     };
-  }, [large, isEditMode]);
+  }, [large, isEditMode, remeasurePreviewInnerBounds, scheduleRemeasurePreviewInnerWithRetries]);
+
+  /** Electron often under-notifies inner layout after fullscreen; window resize fires reliably. */
+  useEffect(() => {
+    const onShellLayout = () => {
+      requestAnimationFrame(() => {
+        scheduleRemeasurePreviewInnerWithRetries();
+        window.setTimeout(() => remeasurePreviewInnerBounds(), 40);
+        window.setTimeout(() => remeasurePreviewInnerBounds(), 200);
+      });
+    };
+    window.addEventListener("resize", onShellLayout);
+    document.addEventListener("fullscreenchange", onShellLayout);
+    return () => {
+      window.removeEventListener("resize", onShellLayout);
+      document.removeEventListener("fullscreenchange", onShellLayout);
+    };
+  }, [remeasurePreviewInnerBounds, scheduleRemeasurePreviewInnerWithRetries]);
 
   useEffect(() => {
     const root = layoutRootRef.current;
