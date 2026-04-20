@@ -1798,12 +1798,12 @@ export function MonitorLayout({
               return (
                 <div
                   key={monitor.id}
-                  className="absolute flex flex-col"
+                  className="monitor-layout-preview-scaled absolute flex flex-col"
                   style={{
                     left: `${clampedPreview.x}%`,
                     top: `${clampedPreview.y}%`,
-                    transform: `translate(-50%, -50%) scale(${displayPreviewScale})`,
-                    transformOrigin: 'center center',
+                    transform: `translate3d(-50%, -50%, 0) scale(${displayPreviewScale})`,
+                    transformOrigin: "center center",
                     gap: `${stackGapPx}px`,
                   }}
                 >
@@ -2123,7 +2123,7 @@ export function MonitorLayout({
                               appIndex,
                               app,
                             )}
-                            monitorPreviewShellScale={displayPreviewScale}
+                            monitorPreviewSurface
                           />
                         ))}
                       </div>

@@ -86,11 +86,8 @@ interface AppFileWindowProps {
   onUpdateAssociatedFiles?: (files: any[]) => void;
   onAppSelect?: () => void;
   onFileSelect?: () => void;
-  /**
-   * Monitor layout preview scales the whole monitor with CSS `transform`.
-   * Apply the inverse scale to icon/name content so text and bitmap icons stay sharp.
-   */
-  monitorPreviewShellScale?: number;
+  /** Monitor preview uses CSS scale; lighter backdrop avoids extra softness under transform. */
+  monitorPreviewSurface?: boolean;
 }
 
 // App icon mapping - maps app names to their icons and colors
@@ -189,7 +186,7 @@ export function AppFileWindow({
   onUpdateAssociatedFiles,
   onAppSelect,
   onFileSelect,
-  monitorPreviewShellScale,
+  monitorPreviewSurface = false,
 }: AppFileWindowProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [localDragging, setLocalDragging] = useState(false);
@@ -1033,14 +1030,6 @@ export function AppFileWindow({
   const showFileEditBar = isEditable && isFile && !isCurrentlyDragging;
   const useStackedChrome = showAppTitleBar || showFileEditBar;
 
-  const previewContentCounterScale =
-    typeof monitorPreviewShellScale === "number" &&
-    Number.isFinite(monitorPreviewShellScale) &&
-    monitorPreviewShellScale > 0.001 &&
-    Math.abs(monitorPreviewShellScale - 1) > 0.001
-      ? 1 / monitorPreviewShellScale
-      : null;
-
   return (
     <>
       <div 
@@ -1074,9 +1063,9 @@ export function AppFileWindow({
                 ? 'ring-2 ring-inset ring-flow-accent-blue/55'
                 : styling.ring
           } ${!isCurrentlyDragging && !isSelected ? styling.innerGlow : ''}`}
-          style={{ 
+          style={{
             backgroundColor: styling.background,
-            backdropFilter: 'blur(8px)'
+            backdropFilter: monitorPreviewSurface ? "none" : "blur(8px)",
           }}
           onMouseDown={handleMouseDown}
           onClick={handleAppClick}
@@ -1085,7 +1074,11 @@ export function AppFileWindow({
           title={isFile ? getTooltipText() : item.name}
         >
           {showAppTitleBar ? (
-            <div className="pointer-events-auto flex min-h-[22px] max-h-[28px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 backdrop-blur-md">
+            <div
+              className={`pointer-events-auto flex min-h-[22px] max-h-[28px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 ${
+                monitorPreviewSurface ? "" : "backdrop-blur-md"
+              }`}
+            >
               <div
                 className="min-h-0 min-w-0 flex-1 cursor-move"
                 title={(item as AppItem).name}
@@ -1130,7 +1123,11 @@ export function AppFileWindow({
           ) : null}
 
           {showFileEditBar ? (
-            <div className="pointer-events-auto flex h-[20px] max-h-[20px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/25 backdrop-blur-sm">
+            <div
+              className={`pointer-events-auto flex h-[20px] max-h-[20px] shrink-0 items-stretch border-b border-white/[0.06] bg-black/25 ${
+                monitorPreviewSurface ? "" : "backdrop-blur-sm"
+              }`}
+            >
               <div
                 className="min-h-0 min-w-0 flex-1 cursor-move"
                 title={(item as FileItem).name}
@@ -1170,19 +1167,13 @@ export function AppFileWindow({
           >
             <div
               className="app-window-content"
-              style={{
-                ...(flushContentInset
+              style={
+                flushContentInset
                   ? { inset: 0 }
                   : useStackedChrome
                     ? { inset: "2px" }
-                    : {}),
-                ...(previewContentCounterScale
-                  ? {
-                      transform: `scale(${previewContentCounterScale})`,
-                      transformOrigin: "center center",
-                    }
-                  : {}),
-              }}
+                    : undefined
+              }
             >
               {renderContent()}
             </div>
