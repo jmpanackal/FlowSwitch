@@ -1,7 +1,10 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { X, Search, Plus, Monitor, Settings } from "lucide-react";
+import { X, Search, Plus, Monitor, Settings, LayoutGrid, MoreVertical } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
+import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
+import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
+import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 
 interface App {
   name: string;
@@ -38,13 +41,6 @@ interface AddAppModalProps {
   allowMonitorSelection?: boolean;
 }
 
-const appEntryKey = (app: {
-  name: string;
-  executablePath?: string | null;
-  shortcutPath?: string | null;
-  launchUrl?: string | null;
-}) => `${app.name}\0${app.executablePath ?? ''}\0${app.shortcutPath ?? ''}\0${app.launchUrl ?? ''}`;
-
 const getStableColor = (name: string) => {
   let hash = 0;
   for (let i = 0; i < name.length; i += 1) {
@@ -68,7 +64,29 @@ export function AddAppModal({
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedMonitor, setSelectedMonitor] = useState(monitorId || (monitors.length > 0 ? monitors[0].id : ''));
   const [selectedApp, setSelectedApp] = useState<any>(null);
-  const installedApps = useInstalledApps();
+  const [catalogOverflow, setCatalogOverflow] = useState<{
+    rowKey: string;
+    anchor: HTMLElement;
+  } | null>(null);
+  const [installedListVersion, setInstalledListVersion] = useState(0);
+  useEffect(() => {
+    if (!isOpen) return;
+    setInstalledListVersion((n) => n + 1);
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) setCatalogOverflow(null);
+  }, [isOpen]);
+  const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps({
+    installedListVersion,
+  });
+  const {
+    excludedSet,
+    listTab,
+    setListTab,
+    exclude: excludeFromCatalog,
+    include: includeInCatalog,
+  } = useInstalledCatalogExclusions();
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
       return {
@@ -83,17 +101,68 @@ export function AddAppModal({
     })
   ), [installedApps]);
 
-  const filteredApps = useMemo(() => (
-    availableApps.filter((app) =>
-      app.name.toLowerCase().includes(searchTerm.toLowerCase()) &&
-      !existingApps.some((existing) => appEntryKey({
-        name: existing.name,
-        executablePath: existing.executablePath ?? null,
-        shortcutPath: existing.shortcutPath ?? null,
-        launchUrl: existing.launchUrl ?? null,
-      }) === appEntryKey(app))
-    )
-  ), [availableApps, existingApps, searchTerm]);
+  const searchPostExisting = useMemo(
+    () =>
+      availableApps.filter((app) => {
+        if (!app.name.toLowerCase().includes(searchTerm.toLowerCase())) {
+          return false;
+        }
+        const rowKey = getInstalledAppCatalogKey(app);
+        return !existingApps.some(
+          (existing) =>
+            getInstalledAppCatalogKey({
+              name: existing.name,
+              executablePath: existing.executablePath ?? null,
+              shortcutPath: existing.shortcutPath ?? null,
+              launchUrl: existing.launchUrl ?? null,
+            }) === rowKey,
+        );
+      }),
+    [availableApps, existingApps, searchTerm],
+  );
+
+  const availableTabCount = useMemo(
+    () =>
+      searchPostExisting.filter(
+        (app) => !excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchPostExisting],
+  );
+
+  const hiddenTabCount = useMemo(
+    () =>
+      searchPostExisting.filter((app) =>
+        excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchPostExisting],
+  );
+
+  const filteredApps = useMemo(
+    () =>
+      searchPostExisting.filter((app) => {
+        const k = getInstalledAppCatalogKey(app);
+        if (listTab === "available") return !excludedSet.has(k);
+        return excludedSet.has(k);
+      }),
+    [excludedSet, listTab, searchPostExisting],
+  );
+
+  useEffect(() => {
+    if (listTab === "hidden" && hiddenTabCount === 0) {
+      setListTab("available");
+    }
+  }, [hiddenTabCount, listTab, setListTab]);
+
+  useEffect(() => {
+    if (!selectedApp) return;
+    const k = getInstalledAppCatalogKey(selectedApp);
+    if (listTab === "available" && excludedSet.has(k)) {
+      setSelectedApp(null);
+    }
+    if (listTab === "hidden" && !excludedSet.has(k)) {
+      setSelectedApp(null);
+    }
+  }, [excludedSet, listTab, selectedApp]);
 
   const handleAddApp = () => {
     if (!selectedApp) return;
@@ -183,50 +252,184 @@ export function AddAppModal({
         )}
 
         {/* Search */}
-        <div className="p-6 border-b border-flow-border">
-          <div className="relative">
-            <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-flow-text-muted" />
+        <div className="flex flex-col gap-3 border-b border-flow-border p-6 sm:flex-row sm:items-center sm:gap-3">
+          <div className="relative min-w-0 flex-1">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-flow-text-muted" />
             <input
               type="text"
               placeholder="Search applications..."
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-10 pr-4 py-3 bg-flow-surface border border-flow-border rounded-lg text-flow-text-primary placeholder-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+              className="w-full rounded-lg border border-flow-border bg-flow-surface py-3 pl-10 pr-4 text-flow-text-primary placeholder-flow-text-muted focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
             />
+          </div>
+          <div
+            className="flex shrink-0 flex-wrap items-center gap-1"
+            role="tablist"
+            aria-label="Application catalog list"
+          >
+            <button
+              type="button"
+              role="tab"
+              aria-selected={listTab === "available"}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors ${
+                listTab === "available"
+                  ? "border-flow-accent-blue/50 bg-flow-accent-blue/10 text-flow-accent-blue"
+                  : "border-flow-border bg-flow-surface text-flow-text-muted hover:bg-flow-surface-elevated hover:text-flow-text-secondary"
+              }`}
+              onClick={() => setListTab("available")}
+            >
+              <span>Available</span>
+              <span className="tabular-nums opacity-90">
+                {availableTabCount}
+              </span>
+            </button>
+            <button
+              type="button"
+              role="tab"
+              aria-selected={listTab === "hidden"}
+              disabled={hiddenTabCount === 0}
+              className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-2 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-35 ${
+                listTab === "hidden"
+                  ? "border-flow-accent-blue/50 bg-flow-accent-blue/10 text-flow-accent-blue"
+                  : "border-flow-border bg-flow-surface text-flow-text-muted hover:bg-flow-surface-elevated hover:text-flow-text-secondary"
+              }`}
+              onClick={() => setListTab("hidden")}
+            >
+              <span>Hidden</span>
+              <span className="tabular-nums opacity-90">
+                {hiddenTabCount}
+              </span>
+            </button>
           </div>
         </div>
 
         {/* App List */}
         <div className="scrollbar-elegant flex-1 overflow-y-auto p-6">
-          {filteredApps.length > 0 ? (
-            <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+          {installedAppsLoading && installedApps.length === 0 ? (
+            <div
+              className="flex flex-col items-center justify-center gap-5 py-10"
+              role="status"
+              aria-live="polite"
+              aria-busy="true"
+              aria-label="Loading applications"
+            >
+              <div className="relative flex h-12 w-12 items-center justify-center">
+                <span className="absolute inset-0 rounded-xl bg-flow-accent-blue/14 motion-reduce:opacity-60" />
+                <LayoutGrid
+                  className="relative h-6 w-6 text-flow-accent-blue motion-safe:flow-installed-apps-loader-icon"
+                  strokeWidth={1.75}
+                  aria-hidden
+                />
+              </div>
+              <p className="text-sm font-medium text-flow-text-secondary">Loading applications…</p>
+              <div className="grid w-full max-w-lg grid-cols-2 gap-3 sm:grid-cols-4">
+                {Array.from({ length: 8 }, (_, i) => (
+                  <div
+                    key={i}
+                    className="h-24 rounded-lg border border-flow-border/45 bg-flow-surface/60 motion-safe:flow-installed-apps-skeleton-row"
+                    style={{ animationDelay: `${i * 55}ms` }}
+                  />
+                ))}
+              </div>
+            </div>
+          ) : filteredApps.length > 0 ? (
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
               {filteredApps.map((app) => {
                 const IconComponent = app.icon;
                 const iconSrc = safeIconSrc(app.iconPath);
-                const rowKey = appEntryKey(app);
-                const isSelected = selectedApp && appEntryKey(selectedApp) === rowKey;
+                const rowKey = getInstalledAppCatalogKey(app);
+                const isSelected = selectedApp && getInstalledAppCatalogKey(selectedApp) === rowKey;
                 return (
-                  <button
+                  <div
                     key={rowKey}
-                    onClick={() => setSelectedApp(app)}
-                    className={`flex flex-col items-center gap-3 p-4 rounded-lg border transition-all hover:scale-105 ${
+                    className={`relative rounded-lg border transition-all hover:scale-[1.02] ${
                       isSelected
-                        ? 'border-flow-accent-blue bg-flow-accent-blue/10 text-flow-accent-blue'
-                        : 'border-flow-border bg-flow-surface hover:bg-flow-surface-elevated text-flow-text-secondary hover:text-flow-text-primary'
+                        ? "border-flow-accent-blue bg-flow-accent-blue/10 text-flow-accent-blue"
+                        : "border-flow-border bg-flow-surface text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary"
                     }`}
                   >
-                    <div 
-                      className="w-10 h-10 rounded-lg flex items-center justify-center"
-                      style={{ backgroundColor: `${app.color}20` }}
+                    <button
+                      type="button"
+                      className="flex w-full flex-col items-center gap-3 p-4 text-left"
+                      onClick={() => {
+                        setCatalogOverflow(null);
+                        setSelectedApp(app);
+                      }}
                     >
-                      {iconSrc ? (
-                        <img src={iconSrc} alt={app.name} className="w-5 h-5 object-contain rounded" />
-                      ) : (
-                        <IconComponent className="w-5 h-5" style={{ color: app.color }} />
-                      )}
+                      <div
+                        className="flex h-10 w-10 items-center justify-center rounded-lg"
+                        style={{ backgroundColor: `${app.color}20` }}
+                      >
+                        {iconSrc ? (
+                          <img src={iconSrc} alt={app.name} className="h-5 w-5 rounded object-contain" />
+                        ) : (
+                          <IconComponent className="h-5 w-5" style={{ color: app.color }} />
+                        )}
+                      </div>
+                      <span className="text-center text-sm font-medium">{app.name}</span>
+                    </button>
+                    <div className="absolute right-0.5 top-0.5 z-10">
+                      <button
+                        type="button"
+                        className="rounded-md p-0.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                        title={`More actions for ${app.name}`}
+                        aria-label={`More actions for ${app.name}`}
+                        aria-haspopup="menu"
+                        aria-expanded={catalogOverflow?.rowKey === rowKey}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCatalogOverflow((prev) =>
+                            prev?.rowKey === rowKey
+                              ? null
+                              : {
+                                  rowKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                },
+                          );
+                        }}
+                      >
+                        <MoreVertical className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                      </button>
+                      {catalogOverflow?.rowKey === rowKey ? (
+                        <SidebarOverlayMenu
+                          open
+                          anchorEl={catalogOverflow.anchor}
+                          onClose={() => setCatalogOverflow(null)}
+                        >
+                          <div className="bg-flow-bg-tertiary/25 px-1 py-0.5">
+                            {listTab === "hidden" ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-secondary hover:text-flow-accent-green"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  includeInCatalog(rowKey);
+                                  setCatalogOverflow(null);
+                                }}
+                              >
+                                Restore to catalog
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  excludeFromCatalog(rowKey);
+                                  setCatalogOverflow(null);
+                                }}
+                              >
+                                Hide from catalog
+                              </button>
+                            )}
+                          </div>
+                        </SidebarOverlayMenu>
+                      ) : null}
                     </div>
-                    <span className="text-sm font-medium">{app.name}</span>
-                  </button>
+                  </div>
                 );
               })}
             </div>

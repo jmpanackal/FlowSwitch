@@ -5,16 +5,18 @@ import {
   Settings,
   Power,
   Save,
-  Move,
-  LayoutGrid,
-  Plus,
+  Info,
+  MoreVertical,
 } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
+import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
+import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
 import {
   placeInstalledSidebarAppOnMinimized,
   placeInstalledSidebarAppOnMonitor,
 } from "../utils/sidebarExplicitPlacement";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
+import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 
 type AppType = {
   name: string;
@@ -24,7 +26,6 @@ type AppType = {
   launchUrl?: string | null;
   color?: string;
   category?: string;
-  firstLetter?: string;
 };
 
 interface AppManagerProps {
@@ -52,6 +53,9 @@ const getStableColor = (name: string) => {
   const hue = Math.abs(hash) % 360;
   return `hsl(${hue}, 65%, 55%)`;
 };
+
+const APPS_SIDEBAR_HELP =
+  "Open ⋯ on a row to add to a monitor or minimized row, or change catalog visibility.";
 
 const inferCategory = (name: string) => {
   const normalized = name.toLowerCase();
@@ -86,12 +90,20 @@ export function AppManager({
     ? sidebarSearchQuery
     : searchTerm;
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [addMenuOpen, setAddMenuOpen] = useState<{
-    appName: string;
+  const [overflowMenuOpen, setOverflowMenuOpen] = useState<{
+    catalogKey: string;
     anchor: HTMLElement;
   } | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
-  const installedApps = useInstalledApps();
+  const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps();
+  const {
+    excludedSet,
+    listTab,
+    setListTab,
+    exclude: excludeFromCatalog,
+    include: includeInCatalog,
+  } = useInstalledCatalogExclusions();
+  const installedAppsListLoading = installedAppsLoading && installedApps.length === 0;
   const allApps = useMemo<AppType[]>(() => (
     installedApps.map((app) => ({
       name: app.name,
@@ -101,7 +113,6 @@ export function AppManager({
       launchUrl: app.launchUrl ?? null,
       color: getStableColor(app.name),
       category: inferCategory(app.name),
-      firstLetter: app.name.charAt(0).toUpperCase(),
     }))
   ), [installedApps]);
 
@@ -112,32 +123,66 @@ export function AppManager({
     return { lastAccessed: 0, size: 0 };
   }
 
-  let filteredApps = allApps.filter((app) => {
-    const matchesSearch = app.name
-      .toLowerCase()
-      .includes(effectiveSearchTerm.toLowerCase());
-    const matchesCategory =
-      compact
-      || !selectedCategory
-      || app.category === selectedCategory;
-    return matchesSearch && matchesCategory;
-  });
+  const searchMatchedApps = useMemo(
+    () =>
+      allApps.filter((app) => {
+        const matchesSearch = app.name
+          .toLowerCase()
+          .includes(effectiveSearchTerm.toLowerCase());
+        const matchesCategory =
+          compact
+          || !selectedCategory
+          || app.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+      }),
+    [allApps, compact, effectiveSearchTerm, selectedCategory],
+  );
 
-  // Sorting logic
-  filteredApps = filteredApps.slice().sort((a, b) => {
-    if (sortOption === 'name') {
-      return a.name.localeCompare(b.name, undefined, { sensitivity: 'base' });
-    } else if (sortOption === 'lastAccessed') {
-      const aStats = getAppFileStats(a);
-      const bStats = getAppFileStats(b);
-      return bStats.lastAccessed - aStats.lastAccessed;
-    } else if (sortOption === 'size') {
-      const aStats = getAppFileStats(a);
-      const bStats = getAppFileStats(b);
-      return bStats.size - aStats.size;
+  const availableTabCount = useMemo(
+    () =>
+      searchMatchedApps.filter(
+        (app) => !excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchMatchedApps],
+  );
+
+  const hiddenTabCount = useMemo(
+    () =>
+      searchMatchedApps.filter((app) =>
+        excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchMatchedApps],
+  );
+
+  const filteredApps = useMemo(() => {
+    const tabFiltered = searchMatchedApps.filter((app) => {
+      const k = getInstalledAppCatalogKey(app);
+      if (listTab === "available") return !excludedSet.has(k);
+      return excludedSet.has(k);
+    });
+    return tabFiltered.slice().sort((a, b) => {
+      if (sortOption === "name") {
+        return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
+      }
+      if (sortOption === "lastAccessed") {
+        const aStats = getAppFileStats(a);
+        const bStats = getAppFileStats(b);
+        return bStats.lastAccessed - aStats.lastAccessed;
+      }
+      if (sortOption === "size") {
+        const aStats = getAppFileStats(a);
+        const bStats = getAppFileStats(b);
+        return bStats.size - aStats.size;
+      }
+      return 0;
+    });
+  }, [excludedSet, listTab, searchMatchedApps, sortOption]);
+
+  useEffect(() => {
+    if (listTab === "hidden" && hiddenTabCount === 0) {
+      setListTab("available");
     }
-    return 0;
-  });
+  }, [hiddenTabCount, listTab, setListTab]);
 
   const monitorsSortedForMenu = useMemo(() => {
     const list = [...(currentProfile?.monitors ?? [])] as {
@@ -153,7 +198,7 @@ export function AppManager({
   }, [currentProfile?.monitors]);
 
   useEffect(() => {
-    setAddMenuOpen(null);
+    setOverflowMenuOpen(null);
   }, [currentProfile?.id]);
 
   /** Icons for any profile layout slot using this app name (not tied to expansion UI). */
@@ -194,7 +239,6 @@ export function AppManager({
       executablePath: app.executablePath ?? null,
       color: app.color,
       category: app.category,
-      firstLetter: app.firstLetter
     };
     const previewIconSrc = safeIconSrc(app.iconPath);
 
@@ -243,7 +287,7 @@ export function AppManager({
         onAddApp(mid, newApp);
       },
     });
-    setAddMenuOpen(null);
+    setOverflowMenuOpen(null);
   };
 
   const handleAddInstalledToMinimized = (app: AppType) => {
@@ -260,22 +304,68 @@ export function AppManager({
         onAddAppToMinimized(newApp);
       },
     });
-    setAddMenuOpen(null);
+    setOverflowMenuOpen(null);
   };
 
   if (compact) {
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-between border-b border-flow-border/50 px-3 py-3">
-          <div className="flex items-center gap-2">
-            <LayoutGrid
-              className="h-3.5 w-3.5 shrink-0 text-flow-text-muted"
-              strokeWidth={1.75}
-              aria-hidden
-            />
-            <h2 className="flow-sidebar-section-title">Apps</h2>
+        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-flow-border/50 px-3 py-2.5">
+          <button
+            type="button"
+            className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
+            title={APPS_SIDEBAR_HELP}
+            aria-label={APPS_SIDEBAR_HELP}
+          >
+            <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+          </button>
+          <div className="min-w-0 flex-1">
+            {installedAppsListLoading ? (
+              <div className="text-right">
+                <span className="flow-sidebar-meta">Loading…</span>
+              </div>
+            ) : (
+              <div
+                className="flex min-w-0 flex-wrap items-center justify-end gap-1"
+                role="tablist"
+                aria-label="Installed apps list"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "available"}
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
+                    listTab === "available"
+                      ? "bg-flow-surface text-flow-text-primary ring-1 ring-flow-border/60"
+                      : "text-flow-text-muted hover:bg-flow-surface/60 hover:text-flow-text-secondary"
+                  }`}
+                  onClick={() => setListTab("available")}
+                >
+                  <span>Available</span>
+                  <span className="tabular-nums opacity-90">
+                    {availableTabCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "hidden"}
+                  disabled={hiddenTabCount === 0}
+                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-35 ${
+                    listTab === "hidden"
+                      ? "bg-flow-surface text-flow-text-primary ring-1 ring-flow-border/60"
+                      : "text-flow-text-muted hover:bg-flow-surface/60 hover:text-flow-text-secondary"
+                  }`}
+                  onClick={() => setListTab("hidden")}
+                >
+                  <span>Hidden</span>
+                  <span className="tabular-nums opacity-90">
+                    {hiddenTabCount}
+                  </span>
+                </button>
+              </div>
+            )}
           </div>
-          <span className="flow-sidebar-meta">{filteredApps.length} available</span>
         </div>
 
         <div className="flex min-h-0 min-w-0 flex-1 flex-col pl-3 pr-0 pb-3 pt-3">
@@ -292,24 +382,20 @@ export function AppManager({
             </div>
           ) : null}
 
-          <div className="mb-3 shrink-0 rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
-            <div className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
-              <Move className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={1.75} />
-              <span>
-                Use <span className="font-medium text-flow-text-primary">+</span> to add to a
-                monitor or minimized row. Drag the app icon to place precisely on the canvas.
-              </span>
-            </div>
-          </div>
-
         <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
+          {installedAppsListLoading ? (
+            <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 py-6 pr-2.5">
+              <InstalledAppsSidebarSkeleton />
+            </div>
+          ) : (
           <div className="flex min-h-0 flex-col gap-2 pr-2.5">
-          {filteredApps.map((app, index) => {
+          {filteredApps.map((app) => {
+            const catalogKey = getInstalledAppCatalogKey(app);
             const layoutFlags = getAppLayoutAggregateFlags(app.name);
             const iconSrc = safeIconSrc(app.iconPath);
             return (
-              <div 
-                key={index} 
+              <div
+                key={catalogKey}
                 className="flow-card-quiet rounded-lg"
               >
                 <div className="flex items-center gap-3 p-3">
@@ -321,36 +407,30 @@ export function AppManager({
                     title="Drag to add to monitor or minimized apps"
                   >
                     {iconSrc ? (
-                      <img
-                        src={iconSrc}
-                        alt={app.name}
-                        className="w-6 h-6 object-contain rounded"
-                        draggable={false}
-                        onError={e => {
-                          // Hide broken image and show explicit fallback element.
-                          const target = e.target as HTMLImageElement;
-                          target.style.display = 'none';
-                          const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as HTMLElement | null;
-                          if (fallback) fallback.style.display = 'flex';
-                        }}
-                      />
-                    ) : null}
-                    {/* Fallback: Lucide icon or first letter */}
-                    {'firstLetter' in app && app.firstLetter ? (
-                      <span className="absolute bottom-0 right-0 bg-gray-800 text-white text-[10px] font-bold rounded px-1 pb-0.5 leading-none border border-white/10 pointer-events-none">
-                        {app.firstLetter}
-                      </span>
-                    ) : null}
-                    {/* Fallback for broken image: show Lucide icon or first letter if image fails */}
-                    {iconSrc ? (
-                      <div
-                        data-icon-fallback="true"
-                        style={{ display: 'none' }}
-                        className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
-                      >
-                        {app.firstLetter ? app.firstLetter : <Settings className="w-3 h-3 text-white" />}
-                      </div>
-                    ) : null}
+                      <>
+                        <img
+                          src={iconSrc}
+                          alt={app.name}
+                          className="w-6 h-6 object-contain rounded"
+                          draggable={false}
+                          onError={e => {
+                            const target = e.target as HTMLImageElement;
+                            target.style.display = 'none';
+                            const fallback = target.parentElement?.querySelector('[data-icon-fallback="true"]') as HTMLElement | null;
+                            if (fallback) fallback.style.display = 'flex';
+                          }}
+                        />
+                        <div
+                          data-icon-fallback="true"
+                          style={{ display: 'none' }}
+                          className="w-6 h-6 flex items-center justify-center app-icon-fallback bg-white/20 rounded"
+                        >
+                          <Settings className="w-3 h-3 text-white" aria-hidden />
+                        </div>
+                      </>
+                    ) : (
+                      <Settings className="w-4 h-4 text-white opacity-90" aria-hidden />
+                    )}
                   </div>
                   <div
                     className={`flex-1 min-w-0${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
@@ -395,89 +475,125 @@ export function AppManager({
                     </div>
                   </div>
                   <div
-                    className="flex shrink-0 items-center gap-0.5 self-center"
+                    className="flex shrink-0 items-center gap-0 self-center"
                     onMouseDown={stopRowPointerForDrag}
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="relative">
                       <button
                         type="button"
-                        disabled={!currentProfile || !onAddApp}
-                        title={
-                          !currentProfile
-                            ? "Select a profile first"
-                            : "Add to a monitor or minimized row"
-                        }
-                        aria-label={`Add ${app.name} to layout`}
-                        aria-expanded={addMenuOpen?.appName === app.name}
+                        className="rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                        title={`More actions for ${app.name}`}
+                        aria-label={`More actions for ${app.name}`}
                         aria-haspopup="menu"
+                        aria-expanded={
+                          overflowMenuOpen?.catalogKey === catalogKey
+                        }
                         onClick={(e) => {
                           stopRowPointerForDrag(e);
-                          setAddMenuOpen((prev) =>
-                            prev?.appName === app.name
+                          setOverflowMenuOpen((prev) =>
+                            prev?.catalogKey === catalogKey
                               ? null
                               : {
-                                  appName: app.name,
+                                  catalogKey,
                                   anchor: e.currentTarget as HTMLElement,
                                 },
                           );
                         }}
-                        className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
                       >
-                        <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+                        <MoreVertical
+                          className="h-3.5 w-3.5"
+                          strokeWidth={2}
+                          aria-hidden
+                        />
                       </button>
-                      {addMenuOpen?.appName === app.name ? (
+                      {overflowMenuOpen?.catalogKey === catalogKey ? (
                         <SidebarOverlayMenu
                           open
-                          anchorEl={addMenuOpen.anchor}
-                          onClose={() => setAddMenuOpen(null)}
+                          anchorEl={overflowMenuOpen.anchor}
+                          onClose={() => setOverflowMenuOpen(null)}
                         >
-                          {monitorsSortedForMenu.length ? (
-                            monitorsSortedForMenu.map((m) => (
+                          <div className="px-1 py-0.5">
+                            {monitorsSortedForMenu.length ? (
+                              monitorsSortedForMenu.map((m) => (
+                                <button
+                                  key={m.id}
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={!currentProfile || !onAddApp}
+                                  className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                  onClick={(e) => {
+                                    stopRowPointerForDrag(e);
+                                    handleAddInstalledToMonitor(app, m.id);
+                                  }}
+                                >
+                                  <span className="truncate">
+                                    {(m.name || m.id) +
+                                      (m.primary ? " (primary)" : "")}
+                                  </span>
+                                </button>
+                              ))
+                            ) : (
+                              <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                                No monitors in this profile.
+                              </div>
+                            )}
+                            <div
+                              className="my-0.5 h-px bg-flow-border/50"
+                              role="separator"
+                              aria-hidden
+                            />
+                            <button
+                              type="button"
+                              role="menuitem"
+                              disabled={!currentProfile || !onAddAppToMinimized}
+                              title={
+                                !currentProfile
+                                  ? "Select a profile first"
+                                  : undefined
+                              }
+                              className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                              onClick={(e) => {
+                                stopRowPointerForDrag(e);
+                                handleAddInstalledToMinimized(app);
+                              }}
+                            >
+                              Minimized row
+                            </button>
+                          </div>
+                          <div
+                            className="my-1 h-px bg-flow-border/60"
+                            role="separator"
+                            aria-hidden
+                          />
+                          <div className="bg-flow-bg-tertiary/25 px-1 py-0.5">
+                            {listTab === "hidden" ? (
                               <button
-                                key={m.id}
                                 type="button"
                                 role="menuitem"
-                                className="flow-menu-item min-w-0 text-left text-xs"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-secondary hover:text-flow-accent-green"
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
-                                  handleAddInstalledToMonitor(app, m.id);
+                                  includeInCatalog(catalogKey);
+                                  setOverflowMenuOpen(null);
                                 }}
                               >
-                                <span className="truncate">
-                                  {(m.name || m.id) +
-                                    (m.primary ? " (primary)" : "")}
-                                </span>
+                                Restore to catalog
                               </button>
-                            ))
-                          ) : (
-                            <div className="px-3 py-2 text-[11px] text-flow-text-muted">
-                              No monitors in this profile.
-                            </div>
-                          )}
-                          <div
-                            className="my-0.5 h-px bg-flow-border/50"
-                            role="none"
-                          />
-                          <button
-                            type="button"
-                            role="menuitem"
-                            disabled={!currentProfile || !onAddAppToMinimized}
-                            title={
-                              !currentProfile
-                                ? "Select a profile first"
-                                : undefined
-                            }
-                            className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                            onClick={(e) => {
-                              stopRowPointerForDrag(e);
-                              handleAddInstalledToMinimized(app);
-                            }}
-                          >
-                            Minimized row
-                          </button>
-                          <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
-                            Drag the app icon to drop on a specific tile.
+                            ) : (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                onClick={(e) => {
+                                  stopRowPointerForDrag(e);
+                                  excludeFromCatalog(catalogKey);
+                                  setOverflowMenuOpen(null);
+                                }}
+                              >
+                                Hide from catalog
+                              </button>
+                            )}
                           </div>
                         </SidebarOverlayMenu>
                       ) : null}
@@ -488,6 +604,7 @@ export function AppManager({
             );
           })}
           </div>
+          )}
         </div>
         </div>
       </div>

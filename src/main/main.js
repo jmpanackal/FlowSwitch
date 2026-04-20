@@ -57,6 +57,7 @@ const { createWindowPlacementRuntime } = require('./services/window-placement-ru
 const {
   createHandleTrustedIpc,
   registerTrustedRendererIpc,
+  scheduleInstalledAppsCatalogWarmup,
 } = require('./ipc/trusted-renderer-ipc');
 
 const shouldBootstrapElectronMain = (
@@ -99,30 +100,65 @@ const DEFAULT_AUTOMATION_SETTLE_MS = 1800;
 const DEFAULT_AUTOMATION_START_DELAY_MS = 900;
 const launchStatusStore = createLaunchStatusStore();
 
+/** Prefer repo-relative paths; add fallbacks when cwd / packaged resources differ. */
+const resolveWindowsShellIconScriptPath = () => {
+  if (process.platform !== 'win32') return null;
+  const name = 'windows-shell-item-icon.ps1';
+  const candidates = [
+    path.join(__dirname, '../../scripts', name),
+    path.join(__dirname, '../scripts', name),
+    path.join(process.cwd(), 'scripts', name),
+  ];
+  if (typeof process.resourcesPath === 'string') {
+    candidates.push(
+      path.join(process.resourcesPath, 'scripts', name),
+      path.join(process.resourcesPath, 'app.asar.unpacked', 'scripts', name),
+    );
+  }
+  try {
+    if (app?.getAppPath) {
+      candidates.push(path.join(app.getAppPath(), 'scripts', name));
+    }
+  } catch {
+    // ignore
+  }
+  for (const p of candidates) {
+    try {
+      if (p && fs.existsSync(p)) return p;
+    } catch {
+      // ignore
+    }
+  }
+  return null;
+};
+
 const {
   safeLimitedString,
   isSafeExternalHttpUrl,
   normalizeSafeUrl,
   unpackProfilesReadResult,
   extractExecutablePath,
+  resolveBareSystemExecutableFromShimTarget,
+  resolveUpdateStyleProcessStartChildExe,
   isDisallowedLaunchExecutablePath,
   resolveShortcutPathForLaunch,
   getPlacementProcessKey,
   extractIconSourcePath,
+  probeInstallFolderForWindowsExe,
+  inferMsixUserWindowsAppsShimFromPackageDir,
   getWindowIconPath,
   getSafeIconDataUrl,
   parseInternetShortcut,
   isAppProtocolUrl,
   getCanonicalAppKey,
   isLikelyBackgroundBinary,
-  parseSteamGameId,
-  resolveSteamGameIconPath,
   isLikelyUserApp,
 } = createIconPathAndAppHelpers({
   iconDataUrlCache,
   maxUrlLength: MAX_URL_LENGTH,
   maxShortcutPathLength: MAX_SHORTCUT_PATH_LENGTH,
   publicDir: path.join(__dirname, '../../public'),
+  windowsShellIconScriptPath: resolveWindowsShellIconScriptPath(),
 });
 
 const { createProfileLaunchGatherers } = require('./services/profile-launch-gather');
@@ -863,14 +899,16 @@ if (shouldBootstrapElectronMain) {
     isLikelyUserApp,
     getCanonicalAppKey,
     extractExecutablePath,
+    resolveBareSystemExecutableFromShimTarget,
+    resolveUpdateStyleProcessStartChildExe,
     isLikelyBackgroundBinary,
     getRegistryInstalledApps,
     scanForExeFiles,
     extractIconSourcePath,
+    probeInstallFolderForWindowsExe,
+    inferMsixUserWindowsAppsShimFromPackageDir,
     parseInternetShortcut,
     isAppProtocolUrl,
-    parseSteamGameId,
-    resolveSteamGameIconPath,
     isSafeAppLaunchUrl,
     MAX_URL_LENGTH,
     getSafeIconDataUrl,
@@ -878,6 +916,10 @@ if (shouldBootstrapElectronMain) {
     hiddenProcessNamePatterns,
     hiddenWindowTitlePatterns,
   });
+
+  if (process.platform === 'win32') {
+    scheduleInstalledAppsCatalogWarmup();
+  }
 
   // Dedicated handler so reveal-in-folder always registers with main ipcMain (avoids ordering issues).
   ipcMain.handle('show-item-in-folder', async (event, rawPath) => {

@@ -1,8 +1,11 @@
 import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { formatUnit } from "../../utils/pluralize";
-import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings } from "lucide-react";
+import { X, Search, Plus, Scan, Folder, Monitor, Globe, Settings, LayoutGrid, MoreVertical } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
+import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
+import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
+import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 
 interface CreateProfileModalProps {
   isOpen: boolean;
@@ -204,7 +207,18 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   const [isCapturingMemory, setIsCapturingMemory] = useState(false);
   const [memoryCaptureError, setMemoryCaptureError] = useState<string | null>(null);
   const [detectedMonitors, setDetectedMonitors] = useState<DetectedMonitor[]>([]);
-  const installedApps = useInstalledApps();
+  const [catalogOverflow, setCatalogOverflow] = useState<{
+    catalogKey: string;
+    anchor: HTMLElement;
+  } | null>(null);
+  const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps();
+  const {
+    excludedSet,
+    listTab,
+    setListTab,
+    exclude: excludeFromCatalog,
+    include: includeInCatalog,
+  } = useInstalledCatalogExclusions();
   const availableApps = useMemo(() => (
     installedApps.map((app) => {
       return {
@@ -221,14 +235,68 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
   ), [installedApps]);
 
   const categories = Array.from(new Set(availableApps.map(app => app.category)));
-  
-  const filteredApps = useMemo(() => (
-    availableApps.filter((app) => {
-      const matchesSearch = app.name.toLowerCase().includes(searchTerm.toLowerCase());
-      const matchesCategory = !selectedCategory || app.category === selectedCategory;
-      return matchesSearch && matchesCategory;
-    })
-  ), [availableApps, searchTerm, selectedCategory]);
+
+  const searchMatchedApps = useMemo(
+    () =>
+      availableApps.filter((app) => {
+        const matchesSearch = app.name
+          .toLowerCase()
+          .includes(searchTerm.toLowerCase());
+        const matchesCategory =
+          !selectedCategory || app.category === selectedCategory;
+        return matchesSearch && matchesCategory;
+      }),
+    [availableApps, searchTerm, selectedCategory],
+  );
+
+  const availableTabCount = useMemo(
+    () =>
+      searchMatchedApps.filter(
+        (app) => !excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchMatchedApps],
+  );
+
+  const hiddenTabCount = useMemo(
+    () =>
+      searchMatchedApps.filter((app) =>
+        excludedSet.has(getInstalledAppCatalogKey(app)),
+      ).length,
+    [excludedSet, searchMatchedApps],
+  );
+
+  const filteredApps = useMemo(
+    () =>
+      searchMatchedApps.filter((app) => {
+        const k = getInstalledAppCatalogKey(app);
+        if (listTab === "available") return !excludedSet.has(k);
+        return excludedSet.has(k);
+      }),
+    [excludedSet, listTab, searchMatchedApps],
+  );
+
+  useEffect(() => {
+    if (listTab === "hidden" && hiddenTabCount === 0) {
+      setListTab("available");
+    }
+  }, [hiddenTabCount, listTab, setListTab]);
+
+  useEffect(() => {
+    setSelectedApps((prev) => {
+      const next = prev.filter((s) => {
+        const k = getInstalledAppCatalogKey(s);
+        if (listTab === "available") return !excludedSet.has(k);
+        return excludedSet.has(k);
+      });
+      if (
+        next.length === prev.length
+        && next.every((item, i) => item === prev[i])
+      ) {
+        return prev;
+      }
+      return next;
+    });
+  }, [excludedSet, listTab]);
 
   const totalCapturedApps = useMemo(() => {
     if (!memoryCapture) return 0;
@@ -266,6 +334,10 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
     return () => {
       cancelled = true;
     };
+  }, [isOpen]);
+
+  useEffect(() => {
+    if (!isOpen) setCatalogOverflow(null);
   }, [isOpen]);
 
   const captureMemoryLayout = async () => {
@@ -530,58 +602,183 @@ export function CreateProfileModal({ isOpen, onClose, onCreateProfile }: CreateP
         {creationMode === 'manual' && (
           <div className="space-y-6">
             {/* Search and Filter */}
-            <div className="flex gap-4">
-              <div className="flex-1 relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 w-4 h-4 text-white/50" />
-                <input
-                  type="text"
-                  placeholder="Search applications..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                  className="w-full pl-10 pr-4 py-2 bg-white/10 border border-white/20 rounded-lg text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400/50"
-                />
+            <div className="flex flex-col gap-3">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-stretch sm:gap-4">
+                <div className="relative min-w-0 flex-1">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 transform text-white/50" />
+                  <input
+                    type="text"
+                    placeholder="Search applications..."
+                    value={searchTerm}
+                    onChange={(e) => setSearchTerm(e.target.value)}
+                    className="w-full rounded-lg border border-white/20 bg-white/10 py-2 pl-10 pr-4 text-white placeholder-white/50 focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+                  />
+                </div>
+                <select
+                  value={selectedCategory || ''}
+                  onChange={(e) => setSelectedCategory(e.target.value || null)}
+                  className="rounded-lg border border-white/20 bg-white/10 px-3 py-2 text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50 sm:min-w-[10rem]"
+                >
+                  <option value="">All Categories</option>
+                  {categories.map(category => (
+                    <option key={category} value={category}>{category}</option>
+                  ))}
+                </select>
               </div>
-              <select
-                value={selectedCategory || ''}
-                onChange={(e) => setSelectedCategory(e.target.value || null)}
-                className="px-3 py-2 bg-white/10 border border-white/20 rounded-lg text-white focus:outline-none focus:ring-2 focus:ring-purple-400/50"
+              <div
+                className="flex flex-wrap items-center gap-1"
+                role="tablist"
+                aria-label="Application catalog list"
               >
-                <option value="">All Categories</option>
-                {categories.map(category => (
-                  <option key={category} value={category}>{category}</option>
-                ))}
-              </select>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "available"}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
+                    listTab === "available"
+                      ? "border-purple-400/60 bg-purple-500/25 text-white"
+                      : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                  onClick={() => setListTab("available")}
+                >
+                  <span>Available</span>
+                  <span className="tabular-nums opacity-90">
+                    {availableTabCount}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={listTab === "hidden"}
+                  disabled={hiddenTabCount === 0}
+                  className={`inline-flex items-center gap-1 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-35 ${
+                    listTab === "hidden"
+                      ? "border-purple-400/60 bg-purple-500/25 text-white"
+                      : "border-white/20 bg-white/5 text-white/70 hover:bg-white/10 hover:text-white"
+                  }`}
+                  onClick={() => setListTab("hidden")}
+                >
+                  <span>Hidden</span>
+                  <span className="tabular-nums opacity-90">
+                    {hiddenTabCount}
+                  </span>
+                </button>
+              </div>
             </div>
 
             {/* App Selection Grid */}
             <div>
               <h4 className="text-white mb-3">Select Applications ({selectedApps.length} selected)</h4>
               <div className="grid grid-cols-6 gap-3 max-h-64 overflow-y-auto scrollbar-elegant">
-                {filteredApps.map((app, index) => {
+                {installedAppsLoading && installedApps.length === 0 ? (
+                  <div
+                    className="col-span-6 flex flex-col items-center justify-center gap-3 py-12 text-sm text-white/55"
+                    role="status"
+                    aria-live="polite"
+                    aria-busy="true"
+                    aria-label="Loading applications"
+                  >
+                    <LayoutGrid
+                      className="h-8 w-8 text-white/70 motion-safe:flow-installed-apps-loader-icon"
+                      strokeWidth={1.75}
+                      aria-hidden
+                    />
+                    <span>Loading applications…</span>
+                  </div>
+                ) : filteredApps.map((app) => {
+                  const catalogKey = getInstalledAppCatalogKey(app);
                   const iconSrc = safeIconSrc(app.iconPath);
                   return (
-                  <button
-                    key={index}
-                    onClick={() => toggleApp(app)}
-                    className={`p-3 rounded-lg border transition-all ${
+                  <div
+                    key={catalogKey}
+                    className={`relative rounded-lg border transition-all ${
                       selectedApps.find(a => a.name === app.name)
                         ? 'border-purple-400/60 bg-purple-500/20'
                         : 'border-white/20 bg-white/5 hover:bg-white/10'
                     }`}
                   >
-                    <div 
-                      className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
-                      style={{ backgroundColor: `${app.color}20` }}
+                    <button
+                      type="button"
+                      className="w-full p-3 text-left"
+                      onClick={() => {
+                        setCatalogOverflow(null);
+                        toggleApp(app);
+                      }}
                     >
-                      {iconSrc ? (
-                        <img src={iconSrc} alt={app.name} className="w-5 h-5 object-contain rounded" />
-                      ) : (
-                        <app.icon className="w-5 h-5 text-white" />
-                      )}
+                      <div 
+                        className="w-8 h-8 rounded-lg flex items-center justify-center mx-auto mb-2"
+                        style={{ backgroundColor: `${app.color}20` }}
+                      >
+                        {iconSrc ? (
+                          <img src={iconSrc} alt={app.name} className="w-5 h-5 object-contain rounded" />
+                        ) : (
+                          <app.icon className="w-5 h-5 text-white" />
+                        )}
+                      </div>
+                      <div className="text-white text-xs text-center truncate">{app.name}</div>
+                      <div className="text-white/50 text-xs text-center">{app.category}</div>
+                    </button>
+                    <div className="absolute right-0.5 top-0.5 z-10">
+                      <button
+                        type="button"
+                        className="rounded p-0.5 text-white/50 transition-colors hover:bg-white/10 hover:text-white"
+                        title={`More actions for ${app.name}`}
+                        aria-label={`More actions for ${app.name}`}
+                        aria-haspopup="menu"
+                        aria-expanded={catalogOverflow?.catalogKey === catalogKey}
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setCatalogOverflow((prev) =>
+                            prev?.catalogKey === catalogKey
+                              ? null
+                              : {
+                                  catalogKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                },
+                          );
+                        }}
+                      >
+                        <MoreVertical className="h-3 w-3" strokeWidth={2} aria-hidden />
+                      </button>
+                      {catalogOverflow?.catalogKey === catalogKey ? (
+                        <SidebarOverlayMenu
+                          open
+                          anchorEl={catalogOverflow.anchor}
+                          onClose={() => setCatalogOverflow(null)}
+                        >
+                          <div className="bg-flow-bg-tertiary/25 px-1 py-0.5">
+                            {listTab === "hidden" ? (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-secondary hover:text-flow-accent-green"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  includeInCatalog(catalogKey);
+                                  setCatalogOverflow(null);
+                                }}
+                              >
+                                Restore to catalog
+                              </button>
+                            ) : (
+                              <button
+                                type="button"
+                                role="menuitem"
+                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  excludeFromCatalog(catalogKey);
+                                  setCatalogOverflow(null);
+                                }}
+                              >
+                                Hide from catalog
+                              </button>
+                            )}
+                          </div>
+                        </SidebarOverlayMenu>
+                      ) : null}
                     </div>
-                    <div className="text-white text-xs text-center truncate">{app.name}</div>
-                    <div className="text-white/50 text-xs text-center">{app.category}</div>
-                  </button>
+                  </div>
                   );
                 })}
               </div>

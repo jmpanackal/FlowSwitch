@@ -9,7 +9,10 @@ I will normalize, label, and review items later.
 Add new ideas here as raw bullets.
 After review, move them to `Reviewed Raw Archive` and keep this section small.
 
-_(empty — last intake reviewed 2026-04-19, see Archive Batch B)_
+*(empty — last intake reviewed 2026-04-19, see Archive Batch B)*
+
+- hide apps button for apps in sidebar that user decides they will never launch with flowswitch (also add filter to show/hide hidden apps)
+- change profile cards to display a list of app icons under instead of x monitors, x apps, x tabs, makes it easier to tell whats in the profile
 
 ## Reviewed Raw Archive (Reference Only)
 
@@ -284,3 +287,4 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 - For each spec, define explicit acceptance criteria and non-goals to avoid scope creep.
 - Track dependencies between launch pipeline changes and renderer status UX so sequencing stays realistic.
 - For Batch B **evaluate** items, capture a short decision memo (feasibility, risks, user value) before promoting to P1/P2.
+

@@ -80,7 +80,7 @@ declare global {
           updatedAt: number;
         } | null;
       }>;
-      getInstalledApps: () => Promise<{
+      getInstalledApps: (opts?: { force?: boolean }) => Promise<{
         name: string;
         iconPath: string | null;
         executablePath?: string | null;

@@ -3,9 +3,15 @@
 const path = require('path');
 const fs = require('fs');
 const ws = require('windows-shortcuts');
+const {
+  getAppxUserPackageLookup,
+  invalidateAppxUserPackageLookupCache,
+} = require('../services/windows-appx-user-package-index');
 const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 
+/** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
+let scheduleInstalledAppsCatalogWarmup = () => {};
 
 const createHandleTrustedIpc = (ipcMain, isTrustedIpcSender) => (
   (channel, handler) => {
@@ -34,14 +40,16 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     isLikelyUserApp,
     getCanonicalAppKey,
     extractExecutablePath,
+    resolveBareSystemExecutableFromShimTarget,
+    resolveUpdateStyleProcessStartChildExe,
     isLikelyBackgroundBinary,
     getRegistryInstalledApps,
     scanForExeFiles,
     extractIconSourcePath,
+    probeInstallFolderForWindowsExe,
+    inferMsixUserWindowsAppsShimFromPackageDir,
     parseInternetShortcut,
     isAppProtocolUrl,
-    parseSteamGameId,
-    resolveSteamGameIconPath,
     isSafeAppLaunchUrl,
     MAX_URL_LENGTH,
     getSafeIconDataUrl,
@@ -49,6 +57,10 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     hiddenProcessNamePatterns,
     hiddenWindowTitlePatterns,
   } = deps;
+
+  let installedAppsCatalogCache = null;
+  let installedAppsCatalogInflight = null;
+  const INSTALLED_APPS_CATALOG_TTL_MS = 10 * 60 * 1000;
 
   handleTrustedIpc('get-system-monitors', async () => {
   try {
@@ -297,21 +309,214 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
   };
 });
 
-  handleTrustedIpc('get-installed-apps', async () => {
-  // IPC handler: get-installed-apps (Start Menu, Registry, Program Files)
-  try {
+  const collectInstalledAppsCatalog = async () => {
+    let appxUserLookup = null;
+    if (process.platform === 'win32') {
+      try {
+        appxUserLookup = await getAppxUserPackageLookup();
+      } catch {
+        appxUserLookup = null;
+      }
+    }
+
     const appMap = new Map();
     const seenStartMenuKeys = new Set();
     const sourcePriority = {
       'start-menu-shortcut': 3,
       'start-menu-url': 3,
       registry: 2,
+      'windows-apps-shim': 1,
       'exe-scan': 1,
     };
+    const exePathToCatalogKey = new Map();
+    const appxManifestDisplayNameByManifestPath = new Map();
+
+    const parsePlainDisplayNameFromAppxManifestXml = (xml) => {
+      const strip = (s) => String(s || '').trim();
+      const isResourceRef = (s) => /^ms-resource:/i.test(strip(s));
+      const propBlock = /<(?:[\w]+:)?Properties>([\s\S]*?)<\/(?:[\w]+:)?Properties>/i.exec(String(xml || ''));
+      if (propBlock) {
+        const inner = propBlock[1];
+        const dm = /<(?:[\w]+:)?DisplayName>([^<]*)<\/(?:[\w]+:)?DisplayName>/gi;
+        let m;
+        while ((m = dm.exec(inner)) !== null) {
+          const n = strip(m[1]);
+          if (n && !isResourceRef(n)) return n;
+        }
+      }
+      const ve = /<(?:[\w]+:)?VisualElements[^>]*\sDisplayName=\s*"([^"]*)"/i.exec(String(xml || ''));
+      if (ve) {
+        const n = strip(ve[1]);
+        if (n && !isResourceRef(n)) return n;
+      }
+      return null;
+    };
+
+    const resolveLocalPackagesRootForStoreTargetExe = (exePath) => {
+      const norm = String(exePath || '').replace(/\//g, '\\');
+      const local = process.env.LOCALAPPDATA;
+      if (!local) return null;
+      const pkRoot = path.join(local, 'Packages');
+      let waFolder = null;
+      const nested = norm.match(/\\WindowsApps\\([^\\]+)\\[^\\/]+\.exe$/i);
+      if (nested) {
+        [, waFolder] = nested;
+      } else {
+        const flat = norm.match(/\\Microsoft\\WindowsApps\\([^\\/]+\.exe)$/i);
+        if (flat) waFolder = path.basename(flat[1], '.exe');
+      }
+      if (!waFolder) return null;
+      const direct = path.join(pkRoot, waFolder);
+      try {
+        if (fs.existsSync(path.join(direct, 'AppxManifest.xml'))) return direct;
+      } catch {
+        /* ignore */
+      }
+      const fam = waFolder.split('_')[0];
+      if (!fam) return null;
+      try {
+        const hit = fs.readdirSync(pkRoot).find((n) => n.toLowerCase().startsWith(`${fam.toLowerCase()}_`));
+        if (!hit) return null;
+        const d = path.join(pkRoot, hit);
+        return fs.existsSync(path.join(d, 'AppxManifest.xml')) ? d : null;
+      } catch {
+        return null;
+      }
+    };
+
+    const readStorePackageDisplayNameFromExePathSync = (exePath) => {
+      const raw = String(exePath || '').replace(/\//g, '\\');
+      if (!raw || process.platform !== 'win32') return null;
+
+      const walkUpForManifestDisplayName = (startExe) => {
+        let dir = path.dirname(startExe);
+        for (let depth = 0; depth < 20; depth += 1) {
+          const manifestPath = path.join(dir, 'AppxManifest.xml');
+          if (fs.existsSync(manifestPath)) {
+            const cached = appxManifestDisplayNameByManifestPath.get(manifestPath);
+            if (cached !== undefined) return cached;
+            let parsed = null;
+            try {
+              const xml = fs.readFileSync(manifestPath, 'utf8');
+              parsed = parsePlainDisplayNameFromAppxManifestXml(xml);
+            } catch {
+              parsed = null;
+            }
+            if (parsed != null) {
+              appxManifestDisplayNameByManifestPath.set(manifestPath, parsed);
+              return parsed;
+            }
+          }
+          const parent = path.dirname(dir);
+          if (parent === dir) break;
+          dir = parent;
+        }
+        return null;
+      };
+
+      let resolved = raw;
+      try {
+        resolved = fs.realpathSync.native
+          ? fs.realpathSync.native(raw)
+          : fs.realpathSync(raw);
+      } catch {
+        resolved = raw;
+      }
+      const fromWinRt = appxUserLookup?.getDisplayNameForExe?.(raw)
+        || appxUserLookup?.getDisplayNameForExe?.(resolved);
+      if (fromWinRt) return fromWinRt;
+      const fromResolved = walkUpForManifestDisplayName(resolved);
+      if (fromResolved) return fromResolved;
+      if (resolved !== raw) {
+        const fromRaw = walkUpForManifestDisplayName(raw);
+        if (fromRaw) return fromRaw;
+      }
+      const pkgRoot = resolveLocalPackagesRootForStoreTargetExe(raw)
+        || resolveLocalPackagesRootForStoreTargetExe(resolved);
+      if (pkgRoot) {
+        const manifestPath = path.join(pkgRoot, 'AppxManifest.xml');
+        const cached = appxManifestDisplayNameByManifestPath.get(manifestPath);
+        if (cached !== undefined) return cached;
+        let parsed = null;
+        try {
+          const xml = fs.readFileSync(manifestPath, 'utf8');
+          parsed = parsePlainDisplayNameFromAppxManifestXml(xml);
+        } catch {
+          parsed = null;
+        }
+        if (parsed != null) {
+          appxManifestDisplayNameByManifestPath.set(manifestPath, parsed);
+          return parsed;
+        }
+      }
+      return null;
+    };
+
+    const extractAppsFolderAppUserModelId = (...rawValues) => {
+      for (const raw of rawValues) {
+        const s = String(raw || '');
+        if (!s) continue;
+        const m = s.match(/shell:AppsFolder\\([A-Za-z0-9._-]+![A-Za-z0-9._-]+)/i);
+        if (!m) continue;
+        const aumid = String(m[1] || '').trim();
+        if (aumid) return aumid;
+      }
+      return null;
+    };
+
+    const toAppsFolderShellMoniker = (appUserModelId) => {
+      const id = String(appUserModelId || '').trim();
+      if (!id) return null;
+      if (!/^[A-Za-z0-9._-]+![A-Za-z0-9._-]+$/i.test(id)) return null;
+      return `shell:AppsFolder\\${id}`;
+    };
+
+    const resolveStartMenuShortcutCatalogDisplayName = (fileStem, targetExe) => {
+      const fromPkg = readStorePackageDisplayNameFromExePathSync(targetExe);
+      if (fromPkg) return fromPkg;
+      return String(fileStem || '').trim();
+    };
+
+    const displayNameQuality = (s) => {
+      const t = String(s || '').trim();
+      if (!t) return 0;
+      let q = Math.min(t.length, 100);
+      if (/[A-Z]/.test(t) && t !== t.toUpperCase()) q += 30;
+      else if (/[A-Z]/.test(t)) q += 8;
+      if (t === t.toLowerCase()) q -= 18;
+      if (/\\|\//.test(t)) q -= 50;
+      if (/\.[a-z]{2,}_[0-9]/i.test(t) && t.includes('_')) q -= 25;
+      return q;
+    };
+
+    const betterCatalogDisplayName = (a, b) => {
+      const qa = displayNameQuality(a);
+      const qb = displayNameQuality(b);
+      if (qa !== qb) return qa > qb ? a : b;
+      return String(a).length >= String(b).length ? a : b;
+    };
+
+    const normalizeExePathDedupeKey = (rawPath) => {
+      if (!rawPath || typeof rawPath !== 'string') return null;
+      let t = rawPath.replace(/\//g, '\\').trim();
+      if (/^"(.+)"$/.test(t)) t = t.slice(1, -1);
+      if (!t.toLowerCase().endsWith('.exe')) return null;
+      try {
+        return path.normalize(t).toLowerCase();
+      } catch {
+        return null;
+      }
+    };
+
     const upsertDiscoveredApp = (appName, iconPath, sourcePath = '', context = {}) => {
       if (!isLikelyUserApp(appName, sourcePath, context)) return;
       const normalizedName = String(appName || '').trim();
-      const key = getCanonicalAppKey(normalizedName) || normalizedName.toLowerCase();
+      const targetExeRaw = context.targetExe || extractExecutablePath(sourcePath);
+      const exeDedupeKey = normalizeExePathDedupeKey(targetExeRaw);
+      let key = getCanonicalAppKey(normalizedName) || normalizedName.toLowerCase();
+      if (exeDedupeKey && exePathToCatalogKey.has(exeDedupeKey)) {
+        key = exePathToCatalogKey.get(exeDedupeKey);
+      }
       if (!key) return;
 
       const nextPriority = sourcePriority[context.source] || 0;
@@ -331,11 +536,17 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           launchUrl: context.launchUrl || null,
           priority: nextPriority,
         });
+        if (exeDedupeKey) {
+          exePathToCatalogKey.set(exeDedupeKey, key);
+        }
         return;
       }
 
       const currentPriority = existing.priority || 0;
-      const preferredName = currentPriority >= nextPriority ? existing.name : normalizedName;
+      let preferredName = currentPriority >= nextPriority ? existing.name : normalizedName;
+      if (getCanonicalAppKey(existing.name) === getCanonicalAppKey(normalizedName)) {
+        preferredName = betterCatalogDisplayName(existing.name, normalizedName);
+      }
       const preferredPriority = Math.max(currentPriority, nextPriority);
       const preferredIcon = (iconPath && (!existing.iconPath || nextPriority >= currentPriority))
         ? iconPath
@@ -352,6 +563,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         launchUrl: preferredLaunchUrl,
         priority: preferredPriority,
       });
+      if (exeDedupeKey) {
+        exePathToCatalogKey.set(exeDedupeKey, key);
+      }
     };
 
     const isRegistryCandidateAllowedWithoutStartMenu = (appMeta, iconSourcePath) => {
@@ -361,20 +575,73 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       // Include registry-only apps only when they look like user-launchable GUI apps.
       const source = String(iconSourcePath || '').toLowerCase();
       if (!source) return false;
-      if (isLikelyBackgroundBinary(source)) return false;
+      if (
+        isLikelyBackgroundBinary(source)
+        && !/\\spotify\\/i.test(source)
+        && !/\\discord\\/i.test(source)
+        && !/\\slack\\/i.test(source)
+        && !/\\teams\\/i.test(source)
+      ) {
+        return false;
+      }
       if (
         source.includes('\\nvidia corporation\\')
-        || source.includes('\\windows\\')
+        || source.includes('\\windows\\system32\\')
+        || source.includes('\\windows\\syswow64\\')
+        || source.includes('\\windows\\immersivecontrolpanel\\')
         || source.includes('\\programdata\\package cache\\')
       ) {
         return false;
       }
 
-      return (
-        source.includes('\\program files\\')
-        || source.includes('\\program files (x86)\\')
-        || source.includes('\\appdata\\local\\programs\\')
-      );
+      // Broad, vendor-neutral prefixes (typical Win32 / Store / per-user installs).
+      const registryGlobalInstallPrefixes = [
+        '\\program files\\',
+        '\\program files (x86)\\',
+        '\\appdata\\local\\programs\\',
+        '\\windowsapps\\',
+        '\\windows\\systemapps\\',
+        '\\appdata\\local\\packages\\',
+        '\\appdata\\local\\microsoft\\windowsapps\\',
+      ];
+      if (registryGlobalInstallPrefixes.some((m) => source.includes(m))) {
+        return true;
+      }
+
+      // Per-user installs under %LocalAppData%\<App>\…\<something>.exe|ico — not a fixed vendor list.
+      const localAppDataNoise = [
+        '\\appdata\\local\\temp\\',
+        '\\appdata\\local\\microsoft\\windows\\',
+        '\\appdata\\local\\assembly\\',
+        '\\appdata\\local\\d3dshadercache\\',
+        '\\appdata\\local\\pip\\',
+        '\\appdata\\local\\npm-cache\\',
+        '\\appdata\\local\\elevateddiagnostics\\',
+        '\\appdata\\local\\package cache\\',
+        '\\appdata\\local\\crashdumps\\',
+        '\\appdata\\local\\comms\\',
+        '\\appdata\\local\\connecteddevicesplatform\\',
+        '\\appdata\\local\\placeholdermailbox\\',
+        '\\appdata\\local\\mutablecache\\',
+      ];
+      if (
+        source.includes('\\appdata\\local\\')
+        && !localAppDataNoise.some((n) => source.includes(n))
+        && /\.(exe|ico|dll)([,\s]|$)/i.test(source)
+      ) {
+        return true;
+      }
+
+      // Some installers put the real binary under %AppData%\Roaming\<Vendor>\…\.exe
+      if (
+        source.includes('\\appdata\\roaming\\')
+        && /\.(exe|ico)([,\s]|$)/i.test(source)
+        && !/\\appdata\\roaming\\microsoft\\windows\\/i.test(source)
+      ) {
+        return true;
+      }
+
+      return false;
     };
 
     const runWithConcurrencyLimit = async (tasks, limit) => {
@@ -405,9 +672,12 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     };
 
     // 1. Start Menu + Taskbar pinned shortcuts (.lnk / .url)
+    // Full matrix (paths, hives, registry values, scope): see
+    // docs/superpowers/specs/windows-installed-app-discovery-matrix.md
     const startMenuDirs = [
       path.join(process.env.ProgramData || 'C:/ProgramData', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
       path.join(process.env.APPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
+      path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'Windows', 'Start Menu', 'Programs'),
       path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'TaskBar'),
       path.join(process.env.APPDATA || '', 'Microsoft', 'Internet Explorer', 'Quick Launch', 'User Pinned', 'ImplicitAppShortcuts'),
     ];
@@ -422,50 +692,118 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
               walk(fullPath);
             } else if (entry.isFile() && entry.name.toLowerCase().endsWith('.lnk')) {
               try {
-                const name = entry.name.replace(/\.lnk$/i, '');
+                const fileStem = entry.name.replace(/\.lnk$/i, '');
                 shortcutTasks.push(() => new Promise((resolve) => {
-                  const timeout = setTimeout(() => resolve(), 400);
+                  let settled = false;
+                  const safety = setTimeout(() => {
+                    if (settled) return;
+                    settled = true;
+                    console.warn(`[StartMenu] Shortcut query timed out: ${fullPath}`);
+                    resolve();
+                  }, 12000);
                   ws.query(fullPath, async (err, info) => {
                     try {
-                      clearTimeout(timeout);
-                      const normalizedTargetExe = !err && info
-                        ? extractExecutablePath(info.target || info.targetPath || info.path)
+                      if (settled) return;
+                      settled = true;
+                      clearTimeout(safety);
+                      const rawTarget = !err && info
+                        ? (info.expanded?.target || info.target || info.targetPath || info.path)
+                        : '';
+                      const rawArgs = !err && info
+                        ? (info.expanded?.args || info.args || '')
+                        : '';
+                      let normalizedTargetExe = rawTarget
+                        ? extractExecutablePath(rawTarget)
                         : null;
-                      const normalizedIconSource = !err && info && info.icon
-                        ? extractIconSourcePath(info.icon)
-                        : normalizedTargetExe;
+                      if (!normalizedTargetExe && rawTarget) {
+                        normalizedTargetExe = resolveBareSystemExecutableFromShimTarget(rawTarget);
+                      }
+                      const processStartChildExe = resolveUpdateStyleProcessStartChildExe(
+                        normalizedTargetExe,
+                        rawArgs,
+                      );
+                      const resolvedExecutableForShortcut = (
+                        processStartChildExe || normalizedTargetExe
+                      );
+                      const rawIcon = !err && info
+                        ? (info.expanded?.icon || info.icon || '')
+                        : '';
+                      const normalizedIconFromShortcut = rawIcon
+                        ? extractIconSourcePath(rawIcon)
+                        : null;
+                      const iconSourceForRecord = (
+                        normalizedIconFromShortcut
+                        || resolvedExecutableForShortcut
+                        || toAppsFolderShellMoniker(
+                          extractAppsFolderAppUserModelId(rawTarget, rawArgs),
+                        )
+                        || fullPath
+                      );
+                      const appUserModelId = extractAppsFolderAppUserModelId(rawTarget, rawArgs);
+                      const appUserModelMoniker = toAppsFolderShellMoniker(appUserModelId);
 
-                      const mapKey = getCanonicalAppKey(name) || name.toLowerCase();
-                      // If we already discovered this app with an icon, skip expensive rework.
-                      const existing = appMap.get(mapKey);
-                      if (existing?.iconPath) return resolve();
-
+                      // Prefer icon sources that resolve to the *application* icon. SHGetFileInfo on
+                      // a .lnk includes the shell shortcut overlay; target .exe / IconFile do not.
                       let iconPath = null;
-                      if (normalizedIconSource) {
-                        iconPath = await getSafeIconDataUrl(normalizedIconSource);
+                      if (normalizedIconFromShortcut) {
+                        iconPath = await getSafeIconDataUrl(normalizedIconFromShortcut);
                         if (!iconPath) {
                           iconFailureSummary.shortcut += 1;
                         }
                       }
 
-                      // Safe fallback: get icon from the shortcut itself (helps game launchers/Steam links).
-                      if (!iconPath) {
-                        const shortcutIcon = await getSafeIconDataUrl(fullPath);
-                        if (shortcutIcon) {
-                          iconPath = shortcutIcon;
+                      const exeIconCandidates = [
+                        processStartChildExe,
+                        normalizedTargetExe,
+                      ].filter(Boolean);
+                      const uniqueExeIconCandidates = [...new Set(exeIconCandidates)];
+                      for (const candidate of uniqueExeIconCandidates) {
+                        if (iconPath) break;
+                        iconPath = await getSafeIconDataUrl(candidate);
+                        if (!iconPath) {
+                          iconFailureSummary.shortcut += 1;
                         }
                       }
 
+                      if (!iconPath && appUserModelMoniker) {
+                        iconPath = await getSafeIconDataUrl(appUserModelMoniker);
+                        if (!iconPath) {
+                          iconFailureSummary.shortcut += 1;
+                        }
+                      }
+
+                      if (!iconPath) {
+                        const fromLnk = await getSafeIconDataUrl(fullPath);
+                        if (fromLnk) {
+                          iconPath = fromLnk;
+                        } else {
+                          iconFailureSummary.shortcut += 1;
+                        }
+                      }
+
+                      const displayName = resolveStartMenuShortcutCatalogDisplayName(
+                        fileStem,
+                        resolvedExecutableForShortcut,
+                      );
+
                       upsertDiscoveredApp(
-                        name,
+                        displayName,
                         iconPath,
-                        normalizedIconSource || normalizedTargetExe || fullPath,
+                        iconSourceForRecord,
                         {
                           source: 'start-menu-shortcut',
                           shortcutPath: fullPath,
-                          targetExe: normalizedTargetExe,
-                          iconSource: normalizedIconSource,
+                          targetExe: resolvedExecutableForShortcut,
+                          rawShortcutArgs: rawArgs,
+                          rawShortcutTarget: String(rawTarget || ''),
+                          iconSource: (
+                            normalizedIconFromShortcut
+                            || resolvedExecutableForShortcut
+                            || appUserModelMoniker
+                            || null
+                          ),
                           hasShortcutIcon: !!iconPath,
+                          appUserModelId: appUserModelId || null,
                           launchUrl: null,
                         },
                       );
@@ -482,21 +820,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
               const shortcut = parseInternetShortcut(fullPath);
               const iconSource = extractIconSourcePath(shortcut.iconFile);
               const isProtocolApp = isAppProtocolUrl(shortcut.url);
-              const steamAppId = parseSteamGameId(shortcut.url);
               shortcutTasks.push(async () => {
                 let iconPath = null;
                 if (iconSource) {
                   iconPath = await getSafeIconDataUrl(iconSource);
                 }
-                if (!iconPath && steamAppId) {
-                  const steamIconPath = resolveSteamGameIconPath(steamAppId);
-                  if (steamIconPath) {
-                    iconPath = await getSafeIconDataUrl(steamIconPath);
-                  }
-                }
                 if (!iconPath) {
-                  const shortcutIcon = await getSafeIconDataUrl(fullPath);
-                  if (shortcutIcon) iconPath = shortcutIcon;
+                  iconPath = await getSafeIconDataUrl(fullPath);
                 }
                 const rawUrl = String(shortcut.url || '').trim();
                 const safeLaunchUrl = isSafeAppLaunchUrl(rawUrl)
@@ -512,7 +842,6 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
                     iconSource,
                     hasShortcutIcon: !!iconPath,
                     isAppProtocol: isProtocolApp,
-                    steamAppId,
                     launchUrl: safeLaunchUrl || null,
                   },
                 );
@@ -523,29 +852,191 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         walk(dir);
       }
     }
-    // 2. Registry Apps
+    // 2. Registry metadata first; icon extraction runs after Start Menu so `seenStartMenuKeys`
+    // reflects shortcuts already merged (registry gating stays correct).
     const registryApps = await getRegistryInstalledApps();
+    const startMenuScanConcurrency = 14;
+    await runWithConcurrencyLimit(shortcutTasks, startMenuScanConcurrency);
+
+    const registryIconConcurrency = 14;
+    const registryTasks = [];
+    const shouldPreferMsixShimOverFolderProbe = (locRaw) => {
+      const s = String(locRaw || '').toLowerCase().replace(/\//g, '\\');
+      return s.includes('\\program files\\windowsapps\\')
+        || s.includes('%programfiles%\\windowsapps\\')
+        || s.includes('%programfiles(x86)%\\windowsapps\\')
+        || s.includes('\\appdata\\local\\packages\\')
+        || s.includes('%localappdata%\\packages\\');
+    };
     for (const app of registryApps) {
-      if (!app.name || !app.iconSource) {
+      if (!app.name) {
         continue;
       }
-      const normalizedIconSource = extractIconSourcePath(app.iconSource);
-      if (!isLikelyUserApp(app.name, normalizedIconSource || app.iconSource, { source: 'registry', registryMeta: app })) {
+      const haystackParts = [
+        app.iconSource,
+        app.installLocation,
+        app.uninstallString,
+        app.quietUninstallString,
+      ].filter(Boolean);
+      const msixShimExe = inferMsixUserWindowsAppsShimFromPackageDir(app.installLocation);
+      const probedExe = app.installLocation
+        ? probeInstallFolderForWindowsExe(app.installLocation)
+        : null;
+      // `C:\Program Files\WindowsApps\...` is ACL-gated: folder probe fails and UninstallString is
+      // often `msiexec.exe /...` (blocked as NON_USER exe). Resolve the user-visible shim instead.
+      const installProbeExe = (shouldPreferMsixShimOverFolderProbe(app.installLocation) && msixShimExe)
+        ? msixShimExe
+        : (probedExe || msixShimExe);
+      if (installProbeExe) {
+        haystackParts.push(installProbeExe);
+      }
+      const registryHaystack = haystackParts.join('\n');
+      if (!registryHaystack.trim()) {
         continue;
       }
-      if (!isRegistryCandidateAllowedWithoutStartMenu(app, normalizedIconSource || app.iconSource)) {
-        continue;
-      }
-      if (!normalizedIconSource) {
-        upsertDiscoveredApp(app.name, null, app.iconSource, { source: 'registry', registryMeta: app });
-        continue;
-      }
-      const iconPath = await getSafeIconDataUrl(normalizedIconSource);
-      if (!iconPath) {
-        iconFailureSummary.registry += 1;
-      }
-      upsertDiscoveredApp(app.name, iconPath, normalizedIconSource, { source: 'registry', registryMeta: app });
+
+      registryTasks.push(async () => {
+        const iconSourceForRegistry = (
+          extractIconSourcePath(app.iconSource || '')
+          || extractIconSourcePath(app.installLocation || '')
+          || String(app.iconSource || app.installLocation || '').trim()
+        );
+        const registryEarlyTargetExe = (
+          installProbeExe
+          || extractExecutablePath(app.uninstallString || '')
+          || extractExecutablePath(app.quietUninstallString || '')
+          || null
+        );
+        if (!isLikelyUserApp(app.name, iconSourceForRegistry, {
+          source: 'registry',
+          registryMeta: app,
+          targetExe: registryEarlyTargetExe,
+        })) {
+          return;
+        }
+        if (!isRegistryCandidateAllowedWithoutStartMenu(app, registryHaystack)) {
+          return;
+        }
+        let normalizedIconSource = (
+          extractIconSourcePath(app.iconSource || '')
+          || extractIconSourcePath(app.installLocation || '')
+          || extractExecutablePath(app.uninstallString || '')
+          || extractExecutablePath(app.quietUninstallString || '')
+          || installProbeExe
+        );
+        const registryTargetExe = (
+          installProbeExe
+          || extractExecutablePath(app.uninstallString || '')
+          || extractExecutablePath(app.quietUninstallString || '')
+          || extractExecutablePath(normalizedIconSource || '')
+          || extractExecutablePath(app.iconSource || '')
+          || (normalizedIconSource && normalizedIconSource.toLowerCase().endsWith('.exe')
+            ? normalizedIconSource
+            : null)
+        );
+        const upsertSourcePath = normalizedIconSource || iconSourceForRegistry || registryHaystack;
+        if (!normalizedIconSource) {
+          let iconPath = null;
+          const registryAumid = appxUserLookup?.getPreferredAppUserModelIdForExe?.(
+            registryTargetExe || installProbeExe || normalizedIconSource || '',
+          );
+          const registryAumidMoniker = toAppsFolderShellMoniker(registryAumid);
+          if (registryAumidMoniker) {
+            iconPath = await getSafeIconDataUrl(registryAumidMoniker);
+            if (!iconPath) {
+              iconFailureSummary.registry += 1;
+            }
+          }
+          upsertDiscoveredApp(app.name, iconPath, upsertSourcePath, {
+            source: 'registry',
+            registryMeta: app,
+            targetExe: registryTargetExe || null,
+            appUserModelId: registryAumid || null,
+          });
+          return;
+        }
+        let iconPath = await getSafeIconDataUrl(normalizedIconSource);
+        if (!iconPath) {
+          iconFailureSummary.registry += 1;
+          const registryAumid = appxUserLookup?.getPreferredAppUserModelIdForExe?.(
+            registryTargetExe || normalizedIconSource,
+          );
+          const registryAumidMoniker = toAppsFolderShellMoniker(registryAumid);
+          if (registryAumidMoniker) {
+            iconPath = await getSafeIconDataUrl(registryAumidMoniker);
+          }
+        }
+        upsertDiscoveredApp(app.name, iconPath, upsertSourcePath, {
+          source: 'registry',
+          registryMeta: app,
+          targetExe: registryTargetExe || null,
+        });
+      });
     }
+    await runWithConcurrencyLimit(registryTasks, registryIconConcurrency);
+
+    // 2b. MSIX / Store launcher stubs (per-user). Must scan **all** `*.exe` here: a lexicographic cap
+    // silently dropped Spotify (`SpotifyAB…` sorts after hundreds of `Microsoft.*` shims).
+    // App Execution Aliases are often **symlinks / reparse points** — `dirent.isFile()` is false; use
+    // `isSymbolicLink()` or `lstat` so `SpotifyAB.SpotifyMusic_*.exe` is not skipped.
+    const isWindowsAppsShimExeDirent = (dir, dirent) => {
+      if (!dirent.name.toLowerCase().endsWith('.exe')) return false;
+      if (dirent.isFile() || dirent.isSymbolicLink()) return true;
+      try {
+        const st = fs.lstatSync(path.join(dir, dirent.name));
+        return st.isFile() || st.isSymbolicLink();
+      } catch {
+        return false;
+      }
+    };
+
+    const friendlyNameForWindowsAppsShimStem = (stem, exeFullPath) => {
+      // Prefer Start Menu / Search display name (same index Windows Shell uses) so
+      // App Execution Aliases render as e.g. "Snipping Tool" instead of "SnippingTool".
+      const fromLookup = appxUserLookup?.getDisplayNameForExe?.(exeFullPath);
+      if (fromLookup) return String(fromLookup).trim();
+      const fromManifest = readStorePackageDisplayNameFromExePathSync(exeFullPath);
+      if (fromManifest) return fromManifest;
+      return String(stem || '').trim();
+    };
+
+    const windowsAppsShimTasks = [];
+    if (process.platform === 'win32') {
+      const windowsAppsDir = path.join(process.env.LOCALAPPDATA || '', 'Microsoft', 'WindowsApps');
+      if (fs.existsSync(windowsAppsDir)) {
+        try {
+          const shimEntries = fs.readdirSync(windowsAppsDir, { withFileTypes: true })
+            .filter((d) => isWindowsAppsShimExeDirent(windowsAppsDir, d));
+          for (const entry of shimEntries) {
+            const fullPath = path.join(windowsAppsDir, entry.name);
+            windowsAppsShimTasks.push(async () => {
+              const stem = entry.name.replace(/\.exe$/i, '');
+              const displayName = friendlyNameForWindowsAppsShimStem(stem, fullPath);
+              const ctx = { source: 'windows-apps-shim', targetExe: fullPath };
+              if (!isLikelyUserApp(displayName, fullPath, ctx)) return;
+              let iconPath = null;
+              try {
+                iconPath = await getSafeIconDataUrl(fullPath);
+                if (!iconPath) {
+                  const shimAumid = appxUserLookup?.getPreferredAppUserModelIdForExe?.(fullPath);
+                  const shimAumidMoniker = toAppsFolderShellMoniker(shimAumid);
+                  if (shimAumidMoniker) {
+                    iconPath = await getSafeIconDataUrl(shimAumidMoniker);
+                  }
+                }
+              } catch {
+                iconPath = null;
+              }
+              upsertDiscoveredApp(displayName, iconPath, fullPath, ctx);
+            });
+          }
+        } catch (e) {
+          console.warn('[InstalledApps] WindowsApps shim scan failed:', e);
+        }
+      }
+    }
+    await runWithConcurrencyLimit(windowsAppsShimTasks, 14);
+
     // 3. Optional Program Files .exe scan (very expensive; disabled by default).
     // Enable only for deep discovery troubleshooting:
     //   FLOWSWITCH_ENABLE_EXE_SCAN=1 npm run dev
@@ -577,7 +1068,6 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         }
       }
     }
-    await runWithConcurrencyLimit(shortcutTasks, 6);
     if (iconFailureSummary.shortcut > 0 || iconFailureSummary.registry > 0) {
       console.warn(
         `[InstalledApps] Icon extraction failures (shortcut=${iconFailureSummary.shortcut}, registry=${iconFailureSummary.registry}).`,
@@ -592,11 +1082,54 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         launchUrl: entry.launchUrl || null,
       }))
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
-  } catch (err) {
-    console.error('Error in get-installed-apps handler:', err);
-    return [];
-  }
-});
+  };
+
+  const ensureInstalledAppsCatalog = async (force) => {
+    if (!force && installedAppsCatalogCache
+      && Date.now() - installedAppsCatalogCache.at < INSTALLED_APPS_CATALOG_TTL_MS) {
+      return installedAppsCatalogCache.apps;
+    }
+    if (force) {
+      installedAppsCatalogCache = null;
+      invalidateAppxUserPackageLookupCache();
+    }
+    if (installedAppsCatalogInflight && force) {
+      try {
+        await installedAppsCatalogInflight;
+      } catch {
+        // ignore stale in-flight errors when forcing refresh
+      }
+    }
+    if (!force && installedAppsCatalogInflight) return installedAppsCatalogInflight;
+
+    installedAppsCatalogInflight = (async () => {
+      try {
+        const apps = await collectInstalledAppsCatalog();
+        installedAppsCatalogCache = { at: Date.now(), apps };
+        return apps;
+      } finally {
+        installedAppsCatalogInflight = null;
+      }
+    })();
+    return installedAppsCatalogInflight;
+  };
+
+  handleTrustedIpc('get-installed-apps', async (_event, payload) => {
+    try {
+      const force = Boolean(payload?.force);
+      return await ensureInstalledAppsCatalog(force);
+    } catch (err) {
+      console.error('Error in get-installed-apps handler:', err);
+      return [];
+    }
+  });
+
+  scheduleInstalledAppsCatalogWarmup = () => {
+    setImmediate(() => {
+      if (process.platform !== 'win32') return;
+      void ensureInstalledAppsCatalog(false).catch(() => {});
+    });
+  };
 
   handleTrustedIpc('capture-running-app-layout', async () => {
   try {
@@ -944,4 +1477,5 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
 module.exports = {
   createHandleTrustedIpc,
   registerTrustedRendererIpc,
+  scheduleInstalledAppsCatalogWarmup: () => scheduleInstalledAppsCatalogWarmup(),
 };

@@ -11,7 +11,7 @@ contextBridge.exposeInMainWorld('electron', {
   getLaunchProfileStatus: (profileId) => ipcRenderer.invoke('launch-profile-status', profileId),
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)
-  getInstalledApps: () => ipcRenderer.invoke('get-installed-apps'),
+  getInstalledApps: (opts) => ipcRenderer.invoke('get-installed-apps', opts ?? {}),
 
   // Capture running app layout from main process
   captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout'),

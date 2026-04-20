@@ -469,6 +469,8 @@ export function MonitorLayout({
   const previewPositionsRef = useRef<Record<string, { x: number; y: number }>>({});
   const lastSyncedMonitorLayoutSignatureRef = useRef<string>("");
   const prevMonitorsIdentityKeyRef = useRef<string | null>(null);
+  /** Tracks preview size so we can detect first transition off the {1,1} placeholder / tiny rect. */
+  const prevMeaningfulPreviewBoundsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
   const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
   const [monitorEditActionsOpenId, setMonitorEditActionsOpenId] = useState<string | null>(null);
 
@@ -611,6 +613,129 @@ export function MonitorLayout({
 
   const [layoutPreviewScale, setLayoutPreviewScale] = useState(1);
 
+  const computeMultiMonitorPreviewScale = useCallback(
+    (positions: Record<string, { x: number; y: number }>) => {
+      const clampPreviewScaleValue = (raw: number) => {
+        const v = Number.isFinite(raw) && raw > 0 ? raw : MIN_MONITOR_PREVIEW_SCALE;
+        return Math.min(1, Math.max(MIN_MONITOR_PREVIEW_SCALE, v));
+      };
+
+      const pb = readLivePreviewMeasure(monitorPreviewInnerRef.current, previewBoundsRef.current);
+      if (pb.width <= 10 || pb.height <= 10) {
+        return 1;
+      }
+      if (monitors.length <= 1) {
+        return 1;
+      }
+
+      let scale = 1;
+      for (let iter = 0; iter < 8; iter += 1) {
+        let minLeft = Number.POSITIVE_INFINITY;
+        let minTop = Number.POSITIVE_INFINITY;
+        let maxRight = Number.NEGATIVE_INFINITY;
+        let maxBottom = Number.NEGATIVE_INFINITY;
+
+        for (const monitor of monitors) {
+          const preview = positions[monitor.id] || { x: 50, y: 50 };
+          const clamped = clampPreviewPosition(monitor, preview, scale);
+          const footprint = getMonitorFootprint(monitor);
+          const w = footprint.widthPx * scale;
+          const h = footprint.heightPx * scale;
+
+          const centerX = (clamped.x / 100) * pb.width;
+          const centerY = (clamped.y / 100) * pb.height;
+
+          minLeft = Math.min(minLeft, centerX - w / 2);
+          minTop = Math.min(minTop, centerY - h / 2);
+          maxRight = Math.max(maxRight, centerX + w / 2);
+          maxBottom = Math.max(maxBottom, centerY + h / 2);
+        }
+
+        if (!Number.isFinite(minLeft) || !Number.isFinite(minTop) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
+          return 1;
+        }
+
+        const requiredWidth = Math.max(1, maxRight - minLeft);
+        const requiredHeight = Math.max(1, maxBottom - minTop);
+        const marginFrac = 2.1 / 100;
+        const availableWidth = Math.max(1, pb.width * (1 - 2 * marginFrac));
+        const availableHeight = Math.max(1, pb.height * (1 - 2 * marginFrac));
+
+        const fitScale = Math.min(1, availableWidth / requiredWidth, availableHeight / requiredHeight);
+        const nextScale = Math.max(MIN_MONITOR_PREVIEW_SCALE, fitScale);
+        if (Math.abs(nextScale - scale) < 0.001) {
+          scale = nextScale;
+          break;
+        }
+        scale = nextScale;
+      }
+
+      const gutterPx = Math.max(
+        9,
+        Math.min(18, Math.round(0.012 * pb.width + 0.01 * pb.height)),
+      );
+      const overlapsAtScale = (s: number) => {
+        const rects = monitors.map((monitor) => {
+          const preview = positions[monitor.id] || { x: 50, y: 50 };
+          const clamped = clampPreviewPosition(monitor, preview, s);
+          const footprint = getMonitorFootprint(monitor);
+          const w = footprint.widthPx * s;
+          const h = footprint.heightPx * s;
+          const cx = (clamped.x / 100) * pb.width;
+          const cy = (clamped.y / 100) * pb.height;
+          return {
+            l: cx - w / 2,
+            r: cx + w / 2,
+            t: cy - h / 2,
+            b: cy + h / 2,
+          };
+        });
+        for (let i = 0; i < rects.length; i += 1) {
+          for (let j = i + 1; j < rects.length; j += 1) {
+            const a = rects[i];
+            const b = rects[j];
+            const separated =
+              a.r + gutterPx <= b.l ||
+              b.r + gutterPx <= a.l ||
+              a.b + gutterPx <= b.t ||
+              b.b + gutterPx <= a.t;
+            if (!separated) return true;
+          }
+        }
+        return false;
+      };
+
+      const fitBBoxCap = scale;
+      let out = fitBBoxCap;
+      let guard = 0;
+      while (overlapsAtScale(out) && out > MIN_MONITOR_PREVIEW_SCALE + 0.002 && guard < 60) {
+        out = Math.max(MIN_MONITOR_PREVIEW_SCALE, out * 0.93);
+        guard += 1;
+      }
+      if (overlapsAtScale(out)) {
+        let loB = MIN_MONITOR_PREVIEW_SCALE;
+        let hiB = out;
+        for (let b = 0; b < 28; b += 1) {
+          const mid = (loB + hiB) / 2;
+          if (overlapsAtScale(mid)) hiB = mid;
+          else loB = mid;
+        }
+        out = loB;
+      } else if (out < fitBBoxCap - 0.004) {
+        let loE = out;
+        let hiE = fitBBoxCap;
+        for (let b = 0; b < 22; b += 1) {
+          const mid = (loE + hiE) / 2;
+          if (!overlapsAtScale(mid)) loE = mid;
+          else hiE = mid;
+        }
+        out = loE;
+      }
+      return clampPreviewScaleValue(out);
+    },
+    [monitors, large, isEditMode],
+  );
+
   const recalculateLayoutPreviewScale = useCallback(() => {
     const clampPreviewScaleValue = (raw: number) => {
       const v = Number.isFinite(raw) && raw > 0 ? raw : MIN_MONITOR_PREVIEW_SCALE;
@@ -641,112 +766,8 @@ export function MonitorLayout({
       return;
     }
 
-    let scale = 1;
-    for (let iter = 0; iter < 8; iter += 1) {
-      let minLeft = Number.POSITIVE_INFINITY;
-      let minTop = Number.POSITIVE_INFINITY;
-      let maxRight = Number.NEGATIVE_INFINITY;
-      let maxBottom = Number.NEGATIVE_INFINITY;
-
-      for (const monitor of monitors) {
-        const preview = positions[monitor.id] || { x: 50, y: 50 };
-        const clamped = clampPreviewPosition(monitor, preview, scale);
-        const footprint = getMonitorFootprint(monitor);
-        const w = footprint.widthPx * scale;
-        const h = footprint.heightPx * scale;
-
-        const centerX = (clamped.x / 100) * pb.width;
-        const centerY = (clamped.y / 100) * pb.height;
-
-        minLeft = Math.min(minLeft, centerX - w / 2);
-        minTop = Math.min(minTop, centerY - h / 2);
-        maxRight = Math.max(maxRight, centerX + w / 2);
-        maxBottom = Math.max(maxBottom, centerY + h / 2);
-      }
-
-      if (!Number.isFinite(minLeft) || !Number.isFinite(minTop) || !Number.isFinite(maxRight) || !Number.isFinite(maxBottom)) {
-        setLayoutPreviewScale(1);
-        return;
-      }
-
-      const requiredWidth = Math.max(1, maxRight - minLeft);
-      const requiredHeight = Math.max(1, maxBottom - minTop);
-      const marginFrac = 2.1 / 100;
-      const availableWidth = Math.max(1, pb.width * (1 - 2 * marginFrac));
-      const availableHeight = Math.max(1, pb.height * (1 - 2 * marginFrac));
-
-      const fitScale = Math.min(1, availableWidth / requiredWidth, availableHeight / requiredHeight);
-      const nextScale = Math.max(MIN_MONITOR_PREVIEW_SCALE, fitScale);
-      if (Math.abs(nextScale - scale) < 0.001) {
-        scale = nextScale;
-        break;
-      }
-      scale = nextScale;
-    }
-
-    const gutterPx = Math.max(
-      9,
-      Math.min(18, Math.round(0.012 * pb.width + 0.01 * pb.height)),
-    );
-    const overlapsAtScale = (s: number) => {
-      const rects = monitors.map((monitor) => {
-        const preview = positions[monitor.id] || { x: 50, y: 50 };
-        const clamped = clampPreviewPosition(monitor, preview, s);
-        const footprint = getMonitorFootprint(monitor);
-        const w = footprint.widthPx * s;
-        const h = footprint.heightPx * s;
-        const cx = (clamped.x / 100) * pb.width;
-        const cy = (clamped.y / 100) * pb.height;
-        return {
-          l: cx - w / 2,
-          r: cx + w / 2,
-          t: cy - h / 2,
-          b: cy + h / 2,
-        };
-      });
-      for (let i = 0; i < rects.length; i += 1) {
-        for (let j = i + 1; j < rects.length; j += 1) {
-          const a = rects[i];
-          const b = rects[j];
-          const separated =
-            a.r + gutterPx <= b.l ||
-            b.r + gutterPx <= a.l ||
-            a.b + gutterPx <= b.t ||
-            b.b + gutterPx <= a.t;
-          if (!separated) return true;
-        }
-      }
-      return false;
-    };
-
-    const fitBBoxCap = scale;
-    let out = fitBBoxCap;
-    let guard = 0;
-    while (overlapsAtScale(out) && out > MIN_MONITOR_PREVIEW_SCALE + 0.002 && guard < 60) {
-      out = Math.max(MIN_MONITOR_PREVIEW_SCALE, out * 0.93);
-      guard += 1;
-    }
-    if (overlapsAtScale(out)) {
-      let loB = MIN_MONITOR_PREVIEW_SCALE;
-      let hiB = out;
-      for (let b = 0; b < 28; b += 1) {
-        const mid = (loB + hiB) / 2;
-        if (overlapsAtScale(mid)) hiB = mid;
-        else loB = mid;
-      }
-      out = loB;
-    } else if (out < fitBBoxCap - 0.004) {
-      let loE = out;
-      let hiE = fitBBoxCap;
-      for (let b = 0; b < 22; b += 1) {
-        const mid = (loE + hiE) / 2;
-        if (!overlapsAtScale(mid)) loE = mid;
-        else hiE = mid;
-      }
-      out = loE;
-    }
-    setLayoutPreviewScale(clampPreviewScaleValue(out));
-  }, [monitors, large, isEditMode]);
+    setLayoutPreviewScale(computeMultiMonitorPreviewScale(positions));
+  }, [monitors, large, isEditMode, computeMultiMonitorPreviewScale]);
 
   recalculateLayoutPreviewScaleRef.current = recalculateLayoutPreviewScale;
 
@@ -858,11 +879,12 @@ export function MonitorLayout({
     };
   }, []);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (draggingMonitor) return;
     if (monitors.length === 0) {
       lastSyncedMonitorLayoutSignatureRef.current = "";
       prevMonitorsIdentityKeyRef.current = "";
+      prevMeaningfulPreviewBoundsRef.current = { width: 0, height: 0 };
       setPreviewPositions({});
       return;
     }
@@ -884,19 +906,48 @@ export function MonitorLayout({
       return;
     }
 
+    const livePreviewBox = readLivePreviewMeasure(
+      monitorPreviewInnerRef.current,
+      previewBoundsRef.current,
+    );
+    const previewNowSized = livePreviewBox.width > 10 && livePreviewBox.height > 10;
+    const previewWasTiny =
+      prevMeaningfulPreviewBoundsRef.current.width <= 10
+      || prevMeaningfulPreviewBoundsRef.current.height <= 10;
+    if (previewNowSized && previewWasTiny) {
+      // First pass used 1×1 (or stale) bounds → clampPreviewPosition collapsed monitors to (50,50).
+      // Invalidate so we take the full normalization path once real layout metrics exist.
+      lastSyncedMonitorLayoutSignatureRef.current = "";
+    }
+    prevMeaningfulPreviewBoundsRef.current = {
+      width: Math.max(previewBounds.width, livePreviewBox.width),
+      height: Math.max(previewBounds.height, livePreviewBox.height),
+    };
+
     const signatureFromProps = monitorLayoutSignature;
     const signatureChanged =
       lastSyncedMonitorLayoutSignatureRef.current !== signatureFromProps;
 
     if (!signatureChanged) {
-      setPreviewPositions((prev) => {
-        const next: Record<string, { x: number; y: number }> = {};
-        for (const monitor of monitors) {
-          const p = prev[monitor.id] || { x: 50, y: 50 };
-          next[monitor.id] = clampPreviewPosition(monitor, p, layoutPreviewScale);
-        }
-        return next;
-      });
+      const prevSnap = previewPositionsRef.current;
+      const next: Record<string, { x: number; y: number }> = {};
+      for (const monitor of monitors) {
+        const p = prevSnap[monitor.id] || { x: 50, y: 50 };
+        next[monitor.id] = clampPreviewPosition(monitor, p, layoutPreviewScale);
+      }
+      previewPositionsRef.current = next;
+      let scale = computeMultiMonitorPreviewScale(next);
+      for (const monitor of monitors) {
+        next[monitor.id] = clampPreviewPosition(monitor, next[monitor.id], scale);
+      }
+      previewPositionsRef.current = next;
+      scale = computeMultiMonitorPreviewScale(next);
+      for (const monitor of monitors) {
+        next[monitor.id] = clampPreviewPosition(monitor, next[monitor.id], scale);
+      }
+      previewPositionsRef.current = next;
+      setPreviewPositions(next);
+      setLayoutPreviewScale(scale);
       return;
     }
 
@@ -956,21 +1007,24 @@ export function MonitorLayout({
       }
     }
 
+    previewPositionsRef.current = normalized;
+    let scale = computeMultiMonitorPreviewScale(normalized);
     const clampedPositions: Record<string, { x: number; y: number }> = {};
     for (const monitor of monitors) {
       const nextPosition = normalized[monitor.id] || { x: 50, y: 50 };
-      clampedPositions[monitor.id] = clampPreviewPosition(monitor, nextPosition, layoutPreviewScale);
+      clampedPositions[monitor.id] = clampPreviewPosition(monitor, nextPosition, scale);
+    }
+    previewPositionsRef.current = clampedPositions;
+    scale = computeMultiMonitorPreviewScale(clampedPositions);
+    for (const monitor of monitors) {
+      const pos = clampedPositions[monitor.id] || { x: 50, y: 50 };
+      clampedPositions[monitor.id] = clampPreviewPosition(monitor, pos, scale);
     }
     setPreviewPositions(clampedPositions);
     previewPositionsRef.current = clampedPositions;
+    setLayoutPreviewScale(scale);
     lastSyncedMonitorLayoutSignatureRef.current = signatureFromProps;
-    const identityChanged = prevMonitorsIdentityKeyRef.current !== monitorsIdentityKey;
     prevMonitorsIdentityKeyRef.current = monitorsIdentityKey;
-    if (identityChanged) {
-      queueMicrotask(() => {
-        recalculateLayoutPreviewScale();
-      });
-    }
   }, [
     monitorLayoutSignature,
     previewBounds.width,
@@ -982,6 +1036,7 @@ export function MonitorLayout({
     isEditMode,
     monitorsIdentityKey,
     recalculateLayoutPreviewScale,
+    computeMultiMonitorPreviewScale,
   ]);
 
   useLayoutEffect(() => {

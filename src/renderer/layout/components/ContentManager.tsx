@@ -82,6 +82,9 @@ interface ContentManagerProps {
   onSidebarSearchQueryChange?: (query: string) => void;
 }
 
+const CONTENT_SIDEBAR_COMPACT_HELP =
+  'Click a row to set path and Opens with. Use + to add to a monitor or minimized row. Drag the content icon to place precisely on the canvas.';
+
 // Available apps for users to choose from (exported for library inspector)
 export const AVAILABLE_APPS = [
   // Browsers
@@ -1552,7 +1555,7 @@ export function ContentManager({
 
   const { folders: displayFolders, content: displayContent } = getDisplayItems();
   const breadcrumbs = getCurrentBreadcrumbs();
-  
+
   // Get current folder info for context
   const currentFolder = currentFolderId ? folders.find(f => f.id === currentFolderId) : null;
 
@@ -1573,25 +1576,26 @@ export function ContentManager({
         }`}
       >
         <div className="flex min-w-0 items-center gap-2">
-          <Link
-            className={`shrink-0 text-flow-text-muted ${
-              compact ? "h-3.5 w-3.5" : "h-4 w-4"
-            }`}
-            strokeWidth={1.75}
-            aria-hidden
-          />
-          <h2
-            className={
-              compact
-                ? "flow-sidebar-section-title"
-                : "text-sm font-medium uppercase tracking-wide text-flow-text-secondary"
-            }
-          >
-            Content
-          </h2>
-
-          {!compact ? (
+          {compact ? (
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
+              title={CONTENT_SIDEBAR_COMPACT_HELP}
+              aria-label={CONTENT_SIDEBAR_COMPACT_HELP}
+            >
+              <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+            </button>
+          ) : (
             <>
+              <Link
+                className="h-4 w-4 shrink-0 text-flow-text-muted"
+                strokeWidth={1.75}
+                aria-hidden
+              />
+              <h2 className="text-sm font-medium uppercase tracking-wide text-flow-text-secondary">
+                Content
+              </h2>
+
               <div className="relative">
                 <button
                   type="button"
@@ -1628,7 +1632,7 @@ export function ContentManager({
                 </span>
               )}
             </>
-          ) : null}
+          )}
         </div>
         <div className="flex shrink-0 items-center gap-2">
           {compact ? (
@@ -1697,23 +1701,6 @@ export function ContentManager({
                   : "w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary placeholder-flow-text-muted transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
               }
             />
-          </div>
-        ) : null}
-
-        {compact && onPlaceContentOnMonitor ? (
-          <div className="rounded-lg border border-flow-border/50 bg-flow-surface/60 p-3">
-            <div className="flex items-start gap-2 text-[11px] text-flow-text-secondary">
-              <ExternalLink
-                className="mt-0.5 h-3.5 w-3.5 shrink-0 text-flow-accent-blue"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-              <span>
-                Click a row for full path and to change <span className="font-medium text-flow-text-primary">Opens with</span>
-                . Use <span className="font-medium text-flow-text-primary">+</span> for a monitor
-                or minimized row. Drag to place precisely.
-              </span>
-            </div>
           </div>
         ) : null}
 
