@@ -4,7 +4,8 @@ import {
   Settings,
   Copy,
   Trash2,
-  Plus,
+  LayoutGrid,
+  Scan,
   Upload,
   Download,
 } from "lucide-react";
@@ -18,7 +19,8 @@ type ProfileHeaderOverflowMenuProps = {
   onSettings: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
-  onNewProfile: () => void;
+  onNewEmptyProfile: () => void;
+  onNewFromCapturedLayout: () => void;
 };
 
 const menuPanelClass =
@@ -32,7 +34,8 @@ export function ProfileHeaderOverflowMenu({
   onSettings,
   onDuplicate,
   onDelete,
-  onNewProfile,
+  onNewEmptyProfile,
+  onNewFromCapturedLayout,
 }: ProfileHeaderOverflowMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -93,10 +96,19 @@ export function ProfileHeaderOverflowMenu({
             type="button"
             role="menuitem"
             className="flow-menu-item"
-            onClick={() => run(onNewProfile)}
+            onClick={() => run(onNewEmptyProfile)}
           >
-            <Plus className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-            New profile
+            <LayoutGrid className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+            Empty layout
+          </button>
+          <button
+            type="button"
+            role="menuitem"
+            className="flow-menu-item"
+            onClick={() => run(onNewFromCapturedLayout)}
+          >
+            <Scan className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
+            Capture current layout
           </button>
           <button
             type="button"

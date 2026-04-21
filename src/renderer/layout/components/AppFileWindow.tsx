@@ -88,6 +88,11 @@ interface AppFileWindowProps {
   onFileSelect?: () => void;
   /** Monitor preview uses CSS scale; lighter backdrop avoids extra softness under transform. */
   monitorPreviewSurface?: boolean;
+  /**
+   * When true, the outer shell is `relative h-full` so the tile can sit inside a parent
+   * that already provides absolute percent bounds (e.g. overlapping-app stack).
+   */
+  embedInStack?: boolean;
 }
 
 // App icon mapping - maps app names to their icons and colors
@@ -187,6 +192,7 @@ export function AppFileWindow({
   onAppSelect,
   onFileSelect,
   monitorPreviewSurface = false,
+  embedInStack = false,
 }: AppFileWindowProps) {
   const [isResizing, setIsResizing] = useState(false);
   const [localDragging, setLocalDragging] = useState(false);
@@ -1030,20 +1036,33 @@ export function AppFileWindow({
   const showFileEditBar = isEditable && isFile && !isCurrentlyDragging;
   const useStackedChrome = showAppTitleBar || showFileEditBar;
 
+  const outerPositionStyle = embedInStack
+    ? ({
+      containerType: "size",
+      containerName: "app-container",
+    } as React.CSSProperties)
+    : ({
+      left: `${item.position.x - item.size.width / 2}%`,
+      top: `${item.position.y - item.size.height / 2}%`,
+      width: `${item.size.width}%`,
+      height: `${item.size.height}%`,
+      containerType: "size",
+      containerName: "app-container",
+    } as React.CSSProperties);
+
+  const outerClassName = embedInStack
+    ? `relative h-full min-h-0 w-full transition-all duration-200 ${
+      isCurrentlyDragging ? "opacity-90 z-50" : "z-10"
+    }`
+    : `absolute transition-all duration-200 ${
+      isCurrentlyDragging ? "opacity-90 z-50" : "z-10"
+    }`;
+
   return (
     <>
       <div 
-        className={`absolute transition-all duration-200 ${
-          isCurrentlyDragging ? 'opacity-90 z-50' : 'z-10'
-        }`}
-        style={{
-          left: `${item.position.x - item.size.width/2}%`,
-          top: `${item.position.y - item.size.height/2}%`,
-          width: `${item.size.width}%`,
-          height: `${item.size.height}%`,
-          containerType: 'size',
-          containerName: 'app-container',
-        } as React.CSSProperties}
+        className={outerClassName}
+        style={outerPositionStyle}
         draggable={isEditable}
         onDragStart={handleDragStartEvent}
         onDragEnd={handleDragEndEvent}

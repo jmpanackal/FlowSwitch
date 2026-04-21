@@ -10,6 +10,11 @@ export type InstalledApp = {
 
 type UseInstalledAppsOptions = {
   /**
+   * When false, do not trigger a catalog fetch (keeps warm in-memory cache if present).
+   * Use for modals that only need the list in a subset of UI states.
+   */
+  enabled?: boolean;
+  /**
    * Show fallback apps only when Electron bridge is unavailable
    * (e.g. running renderer standalone in browser).
    */
@@ -128,6 +133,7 @@ export function useInstalledApps(
   options: UseInstalledAppsOptions = {},
 ): UseInstalledAppsResult {
   const {
+    enabled = true,
     allowFallbackWithoutElectron = false,
     fallbackApps = [],
     installedListVersion = 0,
@@ -161,6 +167,13 @@ export function useInstalledApps(
       };
     }
 
+    if (!enabled) {
+      setIsLoading(false);
+      return () => {
+        cancelled = true;
+      };
+    }
+
     const v = installedListVersion ?? 0;
     const versionChanged = prevInstalledListVersion.current !== v;
     prevInstalledListVersion.current = v;
@@ -186,7 +199,7 @@ export function useInstalledApps(
     return () => {
       cancelled = true;
     };
-  }, [allowFallbackWithoutElectron, fallbackApps, hasElectronBridge, installedListVersion]);
+  }, [allowFallbackWithoutElectron, enabled, fallbackApps, hasElectronBridge, installedListVersion]);
 
   return useMemo(() => ({ apps, isLoading }), [apps, isLoading]);
 }

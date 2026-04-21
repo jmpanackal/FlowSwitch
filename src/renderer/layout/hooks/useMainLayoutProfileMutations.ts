@@ -6,6 +6,13 @@ import {
   type SetStateAction,
 } from "react";
 import type { FlowProfile } from "../../../types/flow-profile";
+import { normalizeFlowProfile } from "../../../types/flow-profile";
+import {
+  layoutMapsFromDragRows,
+  resolveLayoutPositionAfterDrag,
+  syncAllProfilesMonitorLayoutPositions,
+  type MonitorPositionDragRow,
+} from "../utils/sharedMonitorLayout";
 import type { ProfileLayoutDragActions } from "./useLayoutCustomDrag";
 
 /** Selection state for the right-hand inspector (mirrors prior MainLayout inline type). */
@@ -771,21 +778,22 @@ export function useMainLayoutProfileMutations({
   };
 
   const updateMonitorPositions = (
-    profileId: string,
-    positions: Array<{ id: string; layoutPosition: { x: number; y: number } }>,
+    _profileId: string,
+    positions: MonitorPositionDragRow[],
   ) => {
-    const positionMap = new Map(
-      positions.map((position) => [position.id, position.layoutPosition]),
-    );
+    const dragMaps = layoutMapsFromDragRows(positions);
 
     setProfiles((prev) =>
       prev.map((profile) => {
-        if (profile.id !== profileId) return profile;
-
+        const mons = profile.monitors || [];
         return {
           ...profile,
-          monitors: profile.monitors.map((monitor) => {
-            const nextPosition = positionMap.get(monitor.id);
+          monitors: mons.map((monitor) => {
+            const nextPosition = resolveLayoutPositionAfterDrag(
+              monitor,
+              mons,
+              dragMaps,
+            );
             if (!nextPosition) return monitor;
             return {
               ...monitor,
@@ -1088,7 +1096,12 @@ export function useMainLayoutProfileMutations({
         importedProfile.id = `imported-${Date.now()}`;
         importedProfile.onStartup = false;
         importedProfile.autoLaunchOnBoot = false;
-        setProfiles((prev) => [...prev, importedProfile]);
+        setProfiles((prev) =>
+          syncAllProfilesMonitorLayoutPositions([
+            ...prev,
+            normalizeFlowProfile(importedProfile),
+          ]),
+        );
       } catch (error) {
         console.error("Failed to import profile:", error);
       }
