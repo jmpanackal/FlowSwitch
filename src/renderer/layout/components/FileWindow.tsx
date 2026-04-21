@@ -13,6 +13,7 @@ import {
   ChevronRight,
   MoreHorizontal
 } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface FileWindowProps {
   file: any;
@@ -97,8 +98,11 @@ export function FileWindow({
     return ext ? `${truncated}.${ext}` : truncated;
   };
 
+  const fileSummaryTip = `${file.name}\n${file.path}\nOpens with: ${file.associatedApp}`;
+
   return (
     <>
+      <FlowTooltip label={fileSummaryTip}>
       <div
         ref={windowRef}
         className={`absolute select-none group ${className} ${
@@ -106,7 +110,6 @@ export function FileWindow({
         }`}
         style={style}
         onMouseDown={handleMouseDown}
-        title={`${file.name}\n${file.path}\nOpens with: ${file.associatedApp}`}
       >
         {/* File Window */}
         <div 
@@ -120,29 +123,35 @@ export function FileWindow({
           {isEditMode && (
             <div className="absolute top-1 right-1 flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity z-10">
               {onMinimize && (
-                <button
-                  onClick={handleMinimizeClick}
-                  className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface-elevated transition-colors"
-                  title="Minimize file"
-                >
-                  <Minimize2 className="w-3 h-3" />
-                </button>
+                <FlowTooltip label="Minimize file">
+                  <button
+                    type="button"
+                    onClick={handleMinimizeClick}
+                    className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface-elevated transition-colors"
+                  >
+                    <Minimize2 className="w-3 h-3" />
+                  </button>
+                </FlowTooltip>
               )}
-              <button
-                onClick={handleSettingsClick}
-                className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface-elevated transition-colors"
-                title="File settings"
-              >
-                <Settings className="w-3 h-3" />
-              </button>
-              {onRemove && (
+              <FlowTooltip label="File settings">
                 <button
-                  onClick={handleRemoveClick}
-                  className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-accent-red hover:bg-flow-accent-red/20 transition-colors"
-                  title="Remove file"
+                  type="button"
+                  onClick={handleSettingsClick}
+                  className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface-elevated transition-colors"
                 >
-                  <X className="w-3 h-3" />
+                  <Settings className="w-3 h-3" />
                 </button>
+              </FlowTooltip>
+              {onRemove && (
+                <FlowTooltip label="Remove file">
+                  <button
+                    type="button"
+                    onClick={handleRemoveClick}
+                    className="w-5 h-5 bg-flow-surface border border-flow-border rounded flex items-center justify-center text-flow-text-muted hover:text-flow-accent-red hover:bg-flow-accent-red/20 transition-colors"
+                  >
+                    <X className="w-3 h-3" />
+                  </button>
+                </FlowTooltip>
               )}
             </div>
           )}
@@ -184,17 +193,19 @@ export function FileWindow({
 
             {/* Folder Expansion Button */}
             {file.isFolder && file.files && file.files.length > 0 && (
-              <button
-                onClick={handleExpandClick}
-                className="mt-1 p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
-                title={`${isExpanded ? 'Collapse' : 'Expand'} folder`}
-              >
-                {isExpanded ? (
-                  <ChevronDown className="w-3 h-3" />
-                ) : (
-                  <ChevronRight className="w-3 h-3" />
-                )}
-              </button>
+              <FlowTooltip label={`${isExpanded ? 'Collapse' : 'Expand'} folder`}>
+                <button
+                  type="button"
+                  onClick={handleExpandClick}
+                  className="mt-1 p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
+                >
+                  {isExpanded ? (
+                    <ChevronDown className="w-3 h-3" />
+                  ) : (
+                    <ChevronRight className="w-3 h-3" />
+                  )}
+                </button>
+              </FlowTooltip>
             )}
           </div>
 
@@ -233,6 +244,7 @@ export function FileWindow({
           )}
         </div>
       </div>
+      </FlowTooltip>
 
       {/* File Settings Modal */}
       {showSettings && (

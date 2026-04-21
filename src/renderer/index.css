@@ -1350,3 +1350,19 @@
     color-mix(in oklch, var(--flow-accent-blue) 22%, var(--flow-border-accent)) 100%
   );
 }
+
+/* Radix + custom hover panels: shared enter motion (inner only; outer keeps Radix transforms). */
+@keyframes flow-tooltip-inner-pop-kf {
+  from {
+    opacity: 0;
+    transform: translateY(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.flow-tooltip-inner-pop {
+  animation: flow-tooltip-inner-pop-kf 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Globe, X, Copy, Bookmark, Plus, MoreVertical, ExternalLink, Monitor, Minimize2, Maximize2 } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface BrowserTab {
   name: string;
@@ -307,7 +308,11 @@ export function BrowserTabs({
                       {instance.monitorName}
                     </span>
                     {instance.isPrimary && (
-                      <div className="w-1.5 h-1.5 bg-flow-accent-blue rounded-full" title="Primary Monitor" />
+                      <FlowTooltip label="Primary Monitor">
+                        <span className="inline-flex h-2 w-2 items-center justify-center">
+                          <span className="h-1.5 w-1.5 rounded-full bg-flow-accent-blue" aria-hidden />
+                        </span>
+                      </FlowTooltip>
                     )}
                   </div>
                 </div>
@@ -317,13 +322,15 @@ export function BrowserTabs({
                     {instance.tabs.length} tab{instance.tabs.length !== 1 ? 's' : ''}
                   </span>
                   {isEditMode && (
-                    <button
-                      onClick={() => addNewTab(instance.monitorId || 'monitor-1', instance.browser)}
-                      className="p-1 hover:bg-flow-surface-elevated rounded transition-colors"
-                      title="Add Tab"
-                    >
-                      <Plus className="w-3 h-3 text-flow-text-muted" />
-                    </button>
+                    <FlowTooltip label="Add Tab">
+                      <button
+                        type="button"
+                        onClick={() => addNewTab(instance.monitorId || 'monitor-1', instance.browser)}
+                        className="p-1 hover:bg-flow-surface-elevated rounded transition-colors"
+                      >
+                        <Plus className="w-3 h-3 text-flow-text-muted" />
+                      </button>
+                    </FlowTooltip>
                   )}
                 </div>
               </div>
@@ -359,16 +366,18 @@ export function BrowserTabs({
                           <ExternalLink className="w-3 h-3 text-flow-text-muted flex-shrink-0" />
                         )}
                         {isEditMode && globalIndex >= 0 && (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              deleteTab(globalIndex);
-                            }}
-                            className="p-1 hover:bg-flow-accent-red/20 rounded transition-colors"
-                            title="Close Tab"
-                          >
-                            <X className="w-3 h-3 text-flow-accent-red" />
-                          </button>
+                          <FlowTooltip label="Close Tab">
+                            <button
+                              type="button"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                deleteTab(globalIndex);
+                              }}
+                              className="p-1 hover:bg-flow-accent-red/20 rounded transition-colors"
+                            >
+                              <X className="w-3 h-3 text-flow-accent-red" />
+                            </button>
+                          </FlowTooltip>
                         )}
                       </div>
                     );

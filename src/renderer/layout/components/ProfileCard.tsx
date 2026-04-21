@@ -3,6 +3,7 @@ import { Monitor, Globe, MoreVertical, Copy, Edit, Trash2, Download, Zap, ZapOff
 import { LucideIcon } from "lucide-react";
 import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
 import { formatUnit } from "../../utils/pluralize";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface Profile {
   id: string;
@@ -129,34 +130,36 @@ export function ProfileCard({ profile, onClick, onSettings, onDuplicate, onDelet
         {!disabled && (
           <div className="absolute top-3 right-3 flex items-center gap-0.5">
             {onSettings ? (
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  onSettings();
-                }}
-                className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
-                aria-label={`Edit ${profile.name}`}
-                title="Edit profile"
-              >
-                <Edit className="h-3.5 w-3.5" />
-              </button>
+              <FlowTooltip label="Edit profile">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    onSettings();
+                  }}
+                  className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                  aria-label={`Edit ${profile.name}`}
+                >
+                  <Edit className="h-3.5 w-3.5" />
+                </button>
+              </FlowTooltip>
             ) : null}
             <div className="relative">
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setShowActions(!showActions);
-                }}
-                className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
-                aria-expanded={showActions}
-                aria-haspopup="menu"
-                aria-label={`More actions for ${profile.name}`}
-                title="More"
-              >
-                <MoreVertical className="h-3 w-3" />
-              </button>
+              <FlowTooltip label="More">
+                <button
+                  type="button"
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    setShowActions(!showActions);
+                  }}
+                  className="rounded p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                  aria-expanded={showActions}
+                  aria-haspopup="menu"
+                  aria-label={`More actions for ${profile.name}`}
+                >
+                  <MoreVertical className="h-3 w-3" />
+                </button>
+              </FlowTooltip>
 
               {showActions && (
                 <div className="absolute top-6 right-0 w-48 bg-flow-surface-elevated border border-flow-border/60 rounded-xl shadow-flow-shadow-lg z-10 py-1">

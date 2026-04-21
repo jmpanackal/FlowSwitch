@@ -11,6 +11,7 @@ import {
 import { AppFileWindow } from "./AppFileWindow";
 import { MinimizedApps } from "./MinimizedApps";
 import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
+import { FlowTooltip } from "./ui/tooltip";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
@@ -1748,18 +1749,19 @@ export function MonitorLayout({
               >
                 Monitor layout
               </h3>
-              <p
-                className="truncate text-[11px] text-flow-text-muted"
-                title={
+              <FlowTooltip
+                label={
                   densePreviewMode
                     ? "Drag apps on monitors · use Edit layout to change positions"
                     : undefined
                 }
               >
-                {densePreviewMode
-                  ? "Drag apps · Edit layout for positions"
-                  : "Drag apps on monitors · use Edit layout to change positions"}
-              </p>
+                <p className="truncate text-[11px] text-flow-text-muted">
+                  {densePreviewMode
+                    ? "Drag apps · Edit layout for positions"
+                    : "Drag apps on monitors · use Edit layout to change positions"}
+                </p>
+              </FlowTooltip>
             </div>
             {isEditMode ? (
               <div className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
@@ -1783,31 +1785,34 @@ export function MonitorLayout({
             )}
           </div>
           {onToggleLayoutEdit ? (
-            <button
-              type="button"
-              onClick={onToggleLayoutEdit}
-              title={
+            <FlowTooltip
+              label={
                 isEditMode
                   ? "Save layout and exit edit mode"
                   : "Edit monitor layout (drag apps between monitors)"
               }
-              aria-label={
-                isEditMode
-                  ? "Save layout and exit edit mode"
-                  : "Edit monitor layout"
-              }
-              className={`inline-flex shrink-0 items-center justify-center rounded-lg p-2.5 transition-colors md:p-3 ${
-                isEditMode
-                  ? "bg-flow-accent-blue text-flow-text-primary shadow-sm hover:bg-flow-accent-blue-hover"
-                  : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
-              }`}
             >
-              {isEditMode ? (
-                <Save className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-              ) : (
-                <PenLine className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-              )}
-            </button>
+              <button
+                type="button"
+                onClick={onToggleLayoutEdit}
+                aria-label={
+                  isEditMode
+                    ? "Save layout and exit edit mode"
+                    : "Edit monitor layout"
+                }
+                className={`inline-flex shrink-0 items-center justify-center rounded-lg p-2.5 transition-colors md:p-3 ${
+                  isEditMode
+                    ? "bg-flow-accent-blue text-flow-text-primary shadow-sm hover:bg-flow-accent-blue-hover"
+                    : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
+                }`}
+              >
+                {isEditMode ? (
+                  <Save className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
+                ) : (
+                  <PenLine className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
+                )}
+              </button>
+            </FlowTooltip>
           ) : null}
         </div>
       </div>
@@ -1868,9 +1873,9 @@ export function MonitorLayout({
                       useCompactMonitorEditChrome ? (
                         <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
                           <div className="flex min-w-0 items-center justify-center gap-1.5">
+                            <FlowTooltip label={monitor.name}>
                             <div
                               className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
-                              title={monitor.name}
                             >
                               <span className="flex shrink-0 flex-col gap-[3px] py-px" aria-hidden>
                                 <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
@@ -1879,13 +1884,14 @@ export function MonitorLayout({
                               </span>
                               <span className="truncate">{monitor.name}</span>
                             </div>
+                            </FlowTooltip>
                             {(onUpdateMonitorLayout || (totalItems > 0 && onAutoSnapApps)) ? (
                               <div className="relative shrink-0">
+                                <FlowTooltip label="Layout preset and tools">
                                 <button
                                   type="button"
                                   aria-label={`Monitor actions for ${monitor.name}`}
                                   aria-expanded={monitorEditActionsOpenId === monitor.id}
-                                  title="Layout preset and tools"
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/15"
                                   onMouseDown={(e) => e.stopPropagation()}
                                   onClick={() =>
@@ -1896,6 +1902,7 @@ export function MonitorLayout({
                                 >
                                   <MoreHorizontal className="h-4 w-4" strokeWidth={1.75} />
                                 </button>
+                                </FlowTooltip>
                                 {monitorEditActionsOpenId === monitor.id ? (
                                   <>
                                     <div
@@ -1925,18 +1932,19 @@ export function MonitorLayout({
                                         />
                                       ) : null}
                                       {totalItems > 0 && onAutoSnapApps ? (
-                                        <button
-                                          type="button"
-                                          onClick={() => {
-                                            handleAutoSnap(monitor.id);
-                                            setMonitorEditActionsOpenId(null);
-                                          }}
-                                          className="inline-flex items-center justify-center gap-1.5 rounded-md border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
-                                          title="Auto-snap all windows to closest zones"
-                                        >
-                                          <Zap className="h-3 w-3 shrink-0" />
-                                          Auto-Snap
-                                        </button>
+                                        <FlowTooltip label="Auto-snap all windows to closest zones">
+                                          <button
+                                            type="button"
+                                            onClick={() => {
+                                              handleAutoSnap(monitor.id);
+                                              setMonitorEditActionsOpenId(null);
+                                            }}
+                                            className="inline-flex w-full items-center justify-center gap-1.5 rounded-md border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1.5 text-xs font-medium text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
+                                          >
+                                            <Zap className="h-3 w-3 shrink-0" />
+                                            Auto-Snap
+                                          </button>
+                                        </FlowTooltip>
                                       ) : null}
                                     </div>
                                   </>
@@ -1979,16 +1987,17 @@ export function MonitorLayout({
                             </div>
                           ) : null}
                           {totalItems > 0 && onAutoSnapApps ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={() => handleAutoSnap(monitor.id)}
-                              className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1 text-xs text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
-                              title="Auto-snap all windows to closest zones"
-                            >
-                              <Zap className="h-3 w-3" />
-                              Auto-Snap
-                            </button>
+                            <FlowTooltip label="Auto-snap all windows to closest zones">
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={() => handleAutoSnap(monitor.id)}
+                                className="inline-flex shrink-0 items-center gap-1 whitespace-nowrap rounded border border-flow-accent-purple/50 bg-flow-accent-purple px-2 py-1 text-xs text-white shadow-sm transition-colors hover:bg-flow-accent-purple/80"
+                              >
+                                <Zap className="h-3 w-3" />
+                                Auto-Snap
+                              </button>
+                            </FlowTooltip>
                           ) : null}
                         </div>
                       )

@@ -11,6 +11,7 @@ import { AppChromeModals } from "./components/AppChromeModals";
 import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
 import { NewProfileMenu } from "./components/NewProfileMenu";
 import { ProfileCard } from "./components/ProfileCard";
+import { FlowTooltip } from "./components/ui/tooltip";
 import { MonitorLayout } from "./components/MonitorLayout";
 import {
   FLOW_SHELL_INSPECTOR_MARGIN_CLASS,
@@ -1493,24 +1494,27 @@ export default function App() {
                             className="min-w-0 max-w-full rounded-md border border-flow-border/60 bg-flow-bg-primary/80 px-2 py-0.5 text-xl font-extrabold tracking-tight text-flow-text-primary shadow-sm outline-none ring-flow-accent-blue/40 focus:ring-2 md:text-2xl"
                           />
                         ) : (
-                          <button
-                            type="button"
-                            disabled={isEditMode}
-                            onClick={() => {
-                              if (isEditMode) return;
-                              skipNextHeaderRenameBlurCommitRef.current = false;
-                              setHeaderNameDraft(currentProfile.name);
-                              setHeaderNameEditOpen(true);
-                            }}
-                            className={`min-w-0 truncate text-left text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl ${
-                              isEditMode
-                                ? "cursor-default"
-                                : "cursor-text rounded-md hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
-                            }`}
-                            title={isEditMode ? undefined : "Click to rename"}
+                          <FlowTooltip
+                            label={isEditMode ? undefined : "Click to rename"}
                           >
-                            {currentProfile.name}
-                          </button>
+                            <button
+                              type="button"
+                              disabled={isEditMode}
+                              onClick={() => {
+                                if (isEditMode) return;
+                                skipNextHeaderRenameBlurCommitRef.current = false;
+                                setHeaderNameDraft(currentProfile.name);
+                                setHeaderNameEditOpen(true);
+                              }}
+                              className={`min-w-0 truncate text-left text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl ${
+                                isEditMode
+                                  ? "cursor-default"
+                                  : "cursor-text rounded-md hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
+                              }`}
+                            >
+                              {currentProfile.name}
+                            </button>
+                          </FlowTooltip>
                         )}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
@@ -1621,24 +1625,30 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    disabled
-                    title="Select a profile to edit its monitor layout"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
-                  >
-                    <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                    Edit layout
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    title="Select a profile for preferences and import/export"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Preferences
-                  </button>
+                  <FlowTooltip label="Select a profile to edit its monitor layout">
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                      >
+                        <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                        Edit layout
+                      </button>
+                    </span>
+                  </FlowTooltip>
+                  <FlowTooltip label="Select a profile for preferences and import/export">
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Preferences
+                      </button>
+                    </span>
+                  </FlowTooltip>
                   <button
                     disabled
                     className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-accent-blue text-flow-text-primary opacity-50 cursor-not-allowed"
@@ -1910,22 +1920,26 @@ export default function App() {
 
         {/* Right Sidebar Toggle Button (when closed) */}
         {!rightSidebarOpen && (selectedApp || librarySelection) ? (
-          <button
-            type="button"
-            onClick={() => setRightSidebarOpen(true)}
-            className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
-            style={{
-              top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
-              transform: "translateY(-50%)",
-            }}
-            title={
+          <FlowTooltip
+            label={
               librarySelection
                 ? "Open library item details"
                 : "Open app details"
             }
+            side="left"
           >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={() => setRightSidebarOpen(true)}
+              className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
+              style={{
+                top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
+                transform: "translateY(-50%)",
+              }}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </FlowTooltip>
         ) : null}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}

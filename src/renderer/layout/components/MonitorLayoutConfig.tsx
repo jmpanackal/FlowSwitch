@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Settings, Grid3X3, Check, X, Monitor, ChevronDown } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface MonitorLayoutConfigProps {
   monitor: {
@@ -270,19 +271,21 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
   
   return (
     <div className="relative">
-      <button
-        onClick={() => setIsOpen(!isOpen)}
-        className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded transition-all duration-200 ${
-          isDropdown 
-            ? 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
-            : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
-        }`}
-        title="Configure Layout"
-      >
-        <Grid3X3 className="w-3 h-3" />
-        <span>{currentLayout?.name || 'Dynamic'}</span>
-        {isDropdown && <ChevronDown className="w-3 h-3" />}
-      </button>
+      <FlowTooltip label="Configure Layout">
+        <button
+          type="button"
+          onClick={() => setIsOpen(!isOpen)}
+          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded transition-all duration-200 ${
+            isDropdown 
+              ? 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
+              : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
+          }`}
+        >
+          <Grid3X3 className="w-3 h-3" />
+          <span>{currentLayout?.name || 'Dynamic'}</span>
+          {isDropdown && <ChevronDown className="w-3 h-3" />}
+        </button>
+      </FlowTooltip>
       
       {isOpen && (
         <>

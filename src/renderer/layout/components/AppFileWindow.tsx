@@ -9,6 +9,7 @@ import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface BaseItem {
   name: string;
@@ -438,26 +439,22 @@ export function AppFileWindow({
         
         {/* ENHANCED: Concise tooltip that appears close to the indicator */}
         {fileIconHovered && (
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-50 pointer-events-none">
-            <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-700 min-w-max max-w-48">
-              <div className="font-medium mb-1">
+          <div className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 transform pointer-events-none">
+            <div className="flow-tooltip-inner-pop min-w-max max-w-48 rounded-md border border-flow-border bg-flow-surface-elevated px-3 py-2 text-xs text-flow-text-primary shadow-flow-shadow-lg">
+              <div className="mb-1 font-medium text-flow-text-primary">
                 {totalContent} {contentLabel}
                 {relatedTabs.length > 0 && files.length > 0 && (
-                  <div className="text-gray-400 text-xs">
+                  <div className="text-xs text-flow-text-muted">
                     {relatedTabs.length} tabs • {files.length} files
                   </div>
                 )}
               </div>
               <div className="space-y-0.5">
                 {tooltipContent.map((item, index) => (
-                  <div key={index} className="text-gray-300 truncate">
+                  <div key={index} className="truncate text-flow-text-secondary">
                     {item}
                   </div>
                 ))}
-              </div>
-              {/* Arrow pointing up to the indicator */}
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2">
-                <div className="w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-gray-900"></div>
               </div>
             </div>
           </div>
@@ -479,12 +476,15 @@ export function AppFileWindow({
     const fileCount = app.associatedFiles!.length;
     
     return (
-      <div 
-        className={`file-indicator ${hasFolder ? 'folder-style' : 'file-style'} pointer-events-auto z-20`}
-        title={`${fileCount} ${hasFolder ? 'folders/files' : 'files'} associated`}
+      <FlowTooltip
+        label={`${fileCount} ${hasFolder ? 'folders/files' : 'files'} associated`}
       >
-        {fileCount > 99 ? '99+' : fileCount}
-      </div>
+        <div 
+          className={`file-indicator ${hasFolder ? 'folder-style' : 'file-style'} pointer-events-auto z-20`}
+        >
+          {fileCount > 99 ? '99+' : fileCount}
+        </div>
+      </FlowTooltip>
     );
   };
 
@@ -509,13 +509,14 @@ export function AppFileWindow({
             
             {/* Admin indicator if applicable */}
             {file.associatedApp === 'Terminal' && (
-              <span
-                className="mt-1 inline-flex"
-                title="May require admin"
-                aria-label="May require admin"
-              >
-                <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
-              </span>
+              <FlowTooltip label="May require admin">
+                <span
+                  className="mt-1 inline-flex"
+                  aria-label="May require admin"
+                >
+                  <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
+                </span>
+              </FlowTooltip>
             )}
           </div>
         </>
@@ -541,13 +542,14 @@ export function AppFileWindow({
             
             {/* Admin indicator */}
             {app.runAsAdmin && (
-              <span
-                className="mt-1 inline-flex"
-                title="Run as admin"
-                aria-label="Run as admin"
-              >
-                <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
-              </span>
+              <FlowTooltip label="Run as admin">
+                <span
+                  className="mt-1 inline-flex"
+                  aria-label="Run as admin"
+                >
+                  <Shield className="h-3 w-3 text-yellow-400" aria-hidden />
+                </span>
+              </FlowTooltip>
             )}
           </div>
         </>
@@ -1071,6 +1073,7 @@ export function AppFileWindow({
         data-item-index={itemIndex}
         data-item-type={item.type}
       >
+        <FlowTooltip label={isFile ? undefined : item.name}>
         <div 
           ref={mainWindowRef}
           className={`relative flex h-full min-h-0 w-full flex-col overflow-hidden ${monitorTileRadiusClass} ring-1 ring-inset transition-all duration-200 select-none ${
@@ -1090,7 +1093,6 @@ export function AppFileWindow({
           onClick={handleAppClick}
           onMouseEnter={(e) => handleMainWindowHover(e, true)}
           onMouseLeave={(e) => handleMainWindowHover(e, false)}
-          title={isFile ? getTooltipText() : item.name}
         >
           {showAppTitleBar ? (
             <div
@@ -1098,45 +1100,51 @@ export function AppFileWindow({
                 monitorPreviewSurface ? "" : "backdrop-blur-md"
               }`}
             >
-              <div
-                className="min-h-0 min-w-0 flex-1 cursor-move"
-                title={(item as AppItem).name}
-                aria-hidden
-              />
+              <FlowTooltip label={(item as AppItem).name}>
+                <div
+                  className="min-h-0 min-w-0 flex-1 cursor-move"
+                  aria-hidden
+                />
+              </FlowTooltip>
               <div className="flex shrink-0 items-stretch divide-x divide-white/[0.06]">
                 {onMoveToMinimized ? (
+                  <FlowTooltip label="Minimize to row">
+                    <button
+                      type="button"
+                      onClick={handleMinimizeClick}
+                      className="flex h-full w-7 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90"
+                      aria-label="Minimize to minimized row"
+                    >
+                      <Minus className="h-3 w-3" strokeWidth={2.25} />
+                    </button>
+                  </FlowTooltip>
+                ) : null}
+                <FlowTooltip
+                  label={tileMaximized ? 'Restore size' : 'Maximize on monitor'}
+                >
                   <button
                     type="button"
-                    onClick={handleMinimizeClick}
+                    onClick={handleMaximizeToggle}
                     className="flex h-full w-7 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90"
-                    title="Minimize to row"
-                    aria-label="Minimize to minimized row"
+                    aria-label={tileMaximized ? 'Restore window size' : 'Maximize on monitor'}
                   >
-                    <Minus className="h-3 w-3" strokeWidth={2.25} />
+                    {tileMaximized ? (
+                      <Minimize2 className="h-3 w-3" strokeWidth={2} />
+                    ) : (
+                      <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                    )}
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleMaximizeToggle}
-                  className="flex h-full w-7 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90"
-                  title={tileMaximized ? 'Restore size' : 'Maximize on monitor'}
-                  aria-label={tileMaximized ? 'Restore window size' : 'Maximize on monitor'}
-                >
-                  {tileMaximized ? (
-                    <Minimize2 className="h-3 w-3" strokeWidth={2} />
-                  ) : (
-                    <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
-                  )}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleDeleteClick}
-                  className={`flex h-full w-7 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
-                  title="Remove from monitor"
-                  aria-label="Remove from monitor"
-                >
-                  <X className="h-3 w-3" strokeWidth={2.25} />
-                </button>
+                </FlowTooltip>
+                <FlowTooltip label="Remove from monitor">
+                  <button
+                    type="button"
+                    onClick={handleDeleteClick}
+                    className={`flex h-full w-7 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
+                    aria-label="Remove from monitor"
+                  >
+                    <X className="h-3 w-3" strokeWidth={2.25} />
+                  </button>
+                </FlowTooltip>
               </div>
             </div>
           ) : null}
@@ -1147,32 +1155,35 @@ export function AppFileWindow({
                 monitorPreviewSurface ? "" : "backdrop-blur-sm"
               }`}
             >
-              <div
-                className="min-h-0 min-w-0 flex-1 cursor-move"
-                title={(item as FileItem).name}
-                aria-hidden
-              />
+              <FlowTooltip label={(item as FileItem).name}>
+                <div
+                  className="min-h-0 min-w-0 flex-1 cursor-move"
+                  aria-hidden
+                />
+              </FlowTooltip>
               <div className="flex shrink-0 items-center divide-x divide-white/[0.06]">
                 {onMoveToMinimized ? (
+                  <FlowTooltip label="Minimize to row">
+                    <button
+                      type="button"
+                      onClick={handleMinimizeClick}
+                      className="flex h-full w-6 items-center justify-center text-white/45 hover:bg-white/[0.06] hover:text-white/90"
+                      aria-label="Minimize to minimized row"
+                    >
+                      <Minus className="h-2.5 w-2.5" strokeWidth={2.25} />
+                    </button>
+                  </FlowTooltip>
+                ) : null}
+                <FlowTooltip label="Remove from monitor">
                   <button
                     type="button"
-                    onClick={handleMinimizeClick}
-                    className="flex h-full w-6 items-center justify-center text-white/45 hover:bg-white/[0.06] hover:text-white/90"
-                    title="Minimize to row"
-                    aria-label="Minimize to minimized row"
+                    onClick={handleDeleteClick}
+                    className={`flex h-full w-6 items-center justify-center text-red-500 hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
+                    aria-label="Remove from monitor"
                   >
-                    <Minus className="h-2.5 w-2.5" strokeWidth={2.25} />
+                    <X className="h-2.5 w-2.5" strokeWidth={2.25} />
                   </button>
-                ) : null}
-                <button
-                  type="button"
-                  onClick={handleDeleteClick}
-                  className={`flex h-full w-6 items-center justify-center text-red-500 hover:bg-red-600 hover:text-white ${closeButtonTopRightRadiusClass}`}
-                  title="Remove from monitor"
-                  aria-label="Remove from monitor"
-                >
-                  <X className="h-2.5 w-2.5" strokeWidth={2.25} />
-                </button>
+                </FlowTooltip>
               </div>
             </div>
           ) : null}
@@ -1198,15 +1209,16 @@ export function AppFileWindow({
             </div>
 
             {isEditable && !isCurrentlyDragging && (
-              <div
-                className="pointer-events-auto absolute bottom-0 right-0 z-20 h-4 w-4 cursor-nw-resize transition-colors duration-200 hover:bg-white/15"
-                onMouseDown={(e) => handleResizeStart(e, 'bottom-right')}
-                title="Resize"
-              >
-                <div className="absolute bottom-1 right-1 h-1 w-1 rounded-full bg-white/60" />
-                <div className="absolute bottom-1 right-2 h-1 w-1 rounded-full bg-white/40" />
-                <div className="absolute bottom-2 right-1 h-1 w-1 rounded-full bg-white/40" />
-              </div>
+              <FlowTooltip label="Resize" side="left">
+                <div
+                  className="pointer-events-auto absolute bottom-0 right-0 z-20 h-4 w-4 cursor-nw-resize transition-colors duration-200 hover:bg-white/15"
+                  onMouseDown={(e) => handleResizeStart(e, 'bottom-right')}
+                >
+                  <div className="absolute bottom-1 right-1 h-1 w-1 rounded-full bg-white/60" />
+                  <div className="absolute bottom-1 right-2 h-1 w-1 rounded-full bg-white/40" />
+                  <div className="absolute bottom-2 right-1 h-1 w-1 rounded-full bg-white/40" />
+                </div>
+              </FlowTooltip>
             )}
           </div>
 
@@ -1218,6 +1230,7 @@ export function AppFileWindow({
             </div>
           ) : null}
         </div>
+        </FlowTooltip>
       </div>
       
 

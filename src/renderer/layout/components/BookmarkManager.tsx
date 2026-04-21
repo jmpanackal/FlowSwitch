@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Search, Bookmark, Globe, Folder, Star, Plus, Link, Trash2 } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 type BookmarkItem = {
   id: string;
@@ -126,15 +127,16 @@ export function BookmarkManager({
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform hover:scale-105 bg-flow-bg-tertiary"
-                    draggable
-                    onDragStart={(e) => handleDragStart(e, bookmark)}
-                    onDragEnd={handleDragEnd}
-                    title="Drag to add to profile"
-                  >
-                    <span className="text-sm">{bookmark.icon || "🔗"}</span>
-                  </div>
+                  <FlowTooltip label="Drag to add to profile">
+                    <div 
+                      className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform hover:scale-105 bg-flow-bg-tertiary"
+                      draggable
+                      onDragStart={(e) => handleDragStart(e, bookmark)}
+                      onDragEnd={handleDragEnd}
+                    >
+                      <span className="text-sm">{bookmark.icon || "🔗"}</span>
+                    </div>
+                  </FlowTooltip>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 mb-1">
                       <h4 className="text-flow-text-primary text-sm font-medium truncate">{bookmark.name}</h4>

@@ -5,6 +5,7 @@ import { useInstalledApps } from "../../hooks/useInstalledApps";
 import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
 import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface App {
   name: string;
@@ -370,27 +371,28 @@ export function AddAppModal({
                       <span className="text-center text-sm font-medium">{app.name}</span>
                     </button>
                     <div className="absolute right-0.5 top-0.5 z-10">
-                      <button
-                        type="button"
-                        className="rounded-md p-0.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
-                        title={`More actions for ${app.name}`}
-                        aria-label={`More actions for ${app.name}`}
-                        aria-haspopup="menu"
-                        aria-expanded={catalogOverflow?.rowKey === rowKey}
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          setCatalogOverflow((prev) =>
-                            prev?.rowKey === rowKey
-                              ? null
-                              : {
-                                  rowKey,
-                                  anchor: e.currentTarget as HTMLElement,
-                                },
-                          );
-                        }}
-                      >
-                        <MoreVertical className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
-                      </button>
+                      <FlowTooltip label={`More actions for ${app.name}`}>
+                        <button
+                          type="button"
+                          className="rounded-md p-0.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                          aria-label={`More actions for ${app.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={catalogOverflow?.rowKey === rowKey}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setCatalogOverflow((prev) =>
+                              prev?.rowKey === rowKey
+                                ? null
+                                : {
+                                    rowKey,
+                                    anchor: e.currentTarget as HTMLElement,
+                                  },
+                            );
+                          }}
+                        >
+                          <MoreVertical className="h-3.5 w-3.5" strokeWidth={2} aria-hidden />
+                        </button>
+                      </FlowTooltip>
                       {catalogOverflow?.rowKey === rowKey ? (
                         <SidebarOverlayMenu
                           open

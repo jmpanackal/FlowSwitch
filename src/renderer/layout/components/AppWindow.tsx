@@ -6,6 +6,7 @@ import {
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
 import { Settings, Trash2, Move, Shield, Minimize2, File, Folder, Link } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 import { LucideIcon } from "lucide-react";
 
 // Type guards for app types
@@ -223,26 +224,22 @@ export function AppWindow({
         
         {/* ENHANCED: Concise tooltip that appears close to the indicator */}
         {contentIndicatorHovered && (
-          <div className="absolute top-full left-1/2 transform -translate-x-1/2 mt-2 z-50 pointer-events-none">
-            <div className="bg-gray-900 text-white text-xs rounded-lg px-3 py-2 shadow-lg border border-gray-700 min-w-max max-w-48">
-              <div className="font-medium mb-1">
+          <div className="absolute top-full left-1/2 z-50 mt-2 -translate-x-1/2 transform pointer-events-none">
+            <div className="flow-tooltip-inner-pop min-w-max max-w-48 rounded-md border border-flow-border bg-flow-surface-elevated px-3 py-2 text-xs text-flow-text-primary shadow-flow-shadow-lg">
+              <div className="mb-1 font-medium text-flow-text-primary">
                 {totalContent} {contentLabel}
                 {relatedTabs.length > 0 && files.length > 0 && (
-                  <div className="text-gray-400 text-xs">
+                  <div className="text-xs text-flow-text-muted">
                     {relatedTabs.length} tabs • {files.length} files
                   </div>
                 )}
               </div>
               <div className="space-y-0.5">
                 {tooltipContent.map((item, index) => (
-                  <div key={index} className="text-gray-300 truncate">
+                  <div key={index} className="truncate text-flow-text-secondary">
                     {item}
                   </div>
                 ))}
-              </div>
-              {/* Arrow pointing up to the indicator */}
-              <div className="absolute bottom-full left-1/2 transform -translate-x-1/2">
-                <div className="w-0 h-0 border-l-4 border-r-4 border-b-4 border-l-transparent border-r-transparent border-b-gray-900"></div>
               </div>
             </div>
           </div>
@@ -537,7 +534,11 @@ export function AppWindow({
               {app.name}
             </span>
             {app.runAsAdmin && (
-              <Shield className="w-3 h-3 text-yellow-400 mt-1" title="Run as Admin" />
+              <FlowTooltip label="Run as Admin">
+                <span className="mt-1 inline-flex">
+                  <Shield className="w-3 h-3 text-yellow-400" aria-hidden />
+                </span>
+              </FlowTooltip>
             )}
           </div>
         </div>
@@ -582,45 +583,48 @@ export function AppWindow({
         {/* Settings and Actions - ENHANCED WITH BETTER CLICK HANDLING */}
         {(isHovered || showSettings) && isEditable && !isCurrentlyDragging && (
           <div className="absolute -top-2 -right-2 flex gap-1 pointer-events-auto z-[60]">
-            <button
-              onMouseDown={(e) => {
-                // Prevent mouseDown from propagating to prevent drag
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={handleMinimizeClick}
-              className="w-6 h-6 bg-flow-accent-purple/90 hover:bg-flow-accent-purple rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
-              title="Minimize App"
-              type="button"
-            >
-              <Minimize2 className="w-3 h-3 text-white pointer-events-none" />
-            </button>
-            <button
-              onMouseDown={(e) => {
-                // Prevent mouseDown from propagating to prevent drag
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={handleSettingsClick}
-              className="w-6 h-6 bg-white/90 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
-              title="App Settings"
-              type="button"
-            >
-              <Settings className="w-3 h-3 text-gray-700 pointer-events-none" />
-            </button>
-            <button
-              onMouseDown={(e) => {
-                // Prevent mouseDown from propagating to prevent drag
-                e.preventDefault();
-                e.stopPropagation();
-              }}
-              onClick={handleDeleteClick}
-              className="w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
-              title="Delete App"
-              type="button"
-            >
-              <Trash2 className="w-3 h-3 text-white pointer-events-none" />
-            </button>
+            <FlowTooltip label="Minimize App">
+              <button
+                onMouseDown={(e) => {
+                  // Prevent mouseDown from propagating to prevent drag
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={handleMinimizeClick}
+                className="w-6 h-6 bg-flow-accent-purple/90 hover:bg-flow-accent-purple rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
+                type="button"
+              >
+                <Minimize2 className="w-3 h-3 text-white pointer-events-none" />
+              </button>
+            </FlowTooltip>
+            <FlowTooltip label="App Settings">
+              <button
+                onMouseDown={(e) => {
+                  // Prevent mouseDown from propagating to prevent drag
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={handleSettingsClick}
+                className="w-6 h-6 bg-white/90 hover:bg-white rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
+                type="button"
+              >
+                <Settings className="w-3 h-3 text-gray-700 pointer-events-none" />
+              </button>
+            </FlowTooltip>
+            <FlowTooltip label="Delete App">
+              <button
+                onMouseDown={(e) => {
+                  // Prevent mouseDown from propagating to prevent drag
+                  e.preventDefault();
+                  e.stopPropagation();
+                }}
+                onClick={handleDeleteClick}
+                className="w-6 h-6 bg-red-500 hover:bg-red-600 rounded-full flex items-center justify-center transition-colors shadow-lg hover:scale-110 cursor-pointer"
+                type="button"
+              >
+                <Trash2 className="w-3 h-3 text-white pointer-events-none" />
+              </button>
+            </FlowTooltip>
           </div>
         )}
         

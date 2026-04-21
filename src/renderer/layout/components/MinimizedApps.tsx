@@ -9,6 +9,7 @@ import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface MinimizedApp {
   name: string;
@@ -433,8 +434,8 @@ export function MinimizedApps({
         app.name.toLowerCase().includes("browser");
 
       return (
-        <div className="inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-lg">
-          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate" title={app.name}>
+        <div className="flow-tooltip-inner-pop inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-flow-shadow-lg">
+          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate">
             {app.name}
           </div>
           <div className="text-xs text-flow-text-muted mb-2 whitespace-normal">
@@ -481,8 +482,8 @@ export function MinimizedApps({
       const file = hoveredFileData;
       const monitorInfo = getMonitorInfo(file.targetMonitor || "monitor-1");
       return (
-        <div className="inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-lg">
-          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate" title={file.name}>
+        <div className="flow-tooltip-inner-pop inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-flow-shadow-lg">
+          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate">
             {file.name}
           </div>
           <div className="text-xs text-flow-text-muted mb-1">
@@ -591,30 +592,32 @@ export function MinimizedApps({
                       <div className="pointer-events-auto flex min-h-[24px] w-full shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 backdrop-blur-md">
                         <div className="flex min-h-[24px] w-full items-stretch">
                           {onMoveToMonitor ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => handleMaximize(e, index)}
-                              className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
-                                onRemoveApp ? "border-r border-white/[0.06]" : ""
-                              }`}
-                              title={`Place on ${monitorInfo.name}`}
-                              aria-label={`Place ${app.name} on ${monitorInfo.name}`}
-                            >
-                              <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
-                            </button>
+                            <FlowTooltip label={`Place on ${monitorInfo.name}`}>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => handleMaximize(e, index)}
+                                className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
+                                  onRemoveApp ? "border-r border-white/[0.06]" : ""
+                                }`}
+                                aria-label={`Place ${app.name} on ${monitorInfo.name}`}
+                              >
+                                <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                              </button>
+                            </FlowTooltip>
                           ) : null}
                           {onRemoveApp ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => handleDelete(e, index)}
-                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
-                              title="Remove from minimized row"
-                              aria-label="Remove from minimized row"
-                            >
-                              <X className="h-3 w-3" strokeWidth={2.25} />
-                            </button>
+                            <FlowTooltip label="Remove from minimized row">
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => handleDelete(e, index)}
+                                className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
+                                aria-label="Remove from minimized row"
+                              >
+                                <X className="h-3 w-3" strokeWidth={2.25} />
+                              </button>
+                            </FlowTooltip>
                           ) : null}
                         </div>
                       </div>
@@ -673,14 +676,10 @@ export function MinimizedApps({
                       <div className="w-full text-center">
                         <span
                           className={`${compact ? "text-[11px]" : "text-xs"} block truncate font-medium text-flow-text-primary`}
-                          title={app.name}
                         >
                           {app.name}
                         </span>
-                        <span
-                          className="block truncate text-[10px] text-flow-text-muted"
-                          title={monitorInfo.name}
-                        >
+                        <span className="block truncate text-[10px] text-flow-text-muted">
                           {monitorInfo.name}
                         </span>
                       </div>
@@ -744,30 +743,32 @@ export function MinimizedApps({
                       <div className="pointer-events-auto flex min-h-[24px] w-full shrink-0 items-stretch border-b border-white/[0.06] bg-black/20 text-white/75 backdrop-blur-md">
                         <div className="flex min-h-[24px] w-full items-stretch">
                           {onMoveFileToMonitor ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => handleFileMaximize(e, index)}
-                              className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
-                                onRemoveFile ? "border-r border-white/[0.06]" : ""
-                              }`}
-                              title={`Place on ${monitorInfo.name}`}
-                              aria-label={`Place ${file.name} on ${monitorInfo.name}`}
-                            >
-                              <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
-                            </button>
+                            <FlowTooltip label={`Place on ${monitorInfo.name}`}>
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => handleFileMaximize(e, index)}
+                                className={`flex min-h-0 min-w-0 flex-1 items-center justify-center text-white/45 transition-colors hover:bg-white/[0.06] hover:text-white/90 ${
+                                  onRemoveFile ? "border-r border-white/[0.06]" : ""
+                                }`}
+                                aria-label={`Place ${file.name} on ${monitorInfo.name}`}
+                              >
+                                <Square className="h-2.5 w-2.5" strokeWidth={2.5} />
+                              </button>
+                            </FlowTooltip>
                           ) : null}
                           {onRemoveFile ? (
-                            <button
-                              type="button"
-                              onMouseDown={(e) => e.stopPropagation()}
-                              onClick={(e) => handleFileDelete(e, index)}
-                              className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
-                              title="Remove from minimized row"
-                              aria-label="Remove from minimized row"
-                            >
-                              <X className="h-3 w-3" strokeWidth={2.25} />
-                            </button>
+                            <FlowTooltip label="Remove from minimized row">
+                              <button
+                                type="button"
+                                onMouseDown={(e) => e.stopPropagation()}
+                                onClick={(e) => handleFileDelete(e, index)}
+                                className="flex min-h-0 min-w-0 flex-1 items-center justify-center bg-transparent text-red-500 transition-colors hover:bg-red-600 hover:text-white"
+                                aria-label="Remove from minimized row"
+                              >
+                                <X className="h-3 w-3" strokeWidth={2.25} />
+                              </button>
+                            </FlowTooltip>
                           ) : null}
                         </div>
                       </div>
@@ -788,11 +789,10 @@ export function MinimizedApps({
                       <div className="w-full text-center">
                         <span
                           className={`${compact ? "text-[11px]" : "text-xs"} block truncate font-medium text-flow-text-primary`}
-                          title={file.name}
                         >
                           {file.name}
                         </span>
-                        <span className="block truncate text-[10px] text-flow-text-muted" title={monitorInfo.name}>
+                        <span className="block truncate text-[10px] text-flow-text-muted">
                           {monitorInfo.name}
                         </span>
                       </div>

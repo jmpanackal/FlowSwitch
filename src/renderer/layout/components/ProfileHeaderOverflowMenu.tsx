@@ -9,6 +9,7 @@ import {
   Upload,
   Download,
 } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 type ProfileHeaderOverflowMenuProps = {
   disabled: boolean;
@@ -63,23 +64,26 @@ export function ProfileHeaderOverflowMenu({
 
   return (
     <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!disabled) setOpen((v) => !v);
-        }}
-        className={`inline-flex items-center justify-center rounded-lg p-2 text-flow-text-secondary transition-colors duration-150 ease-out hover:bg-white/[0.06] md:px-2.5 md:py-2 ${
-          disabled ? "cursor-not-allowed opacity-50" : ""
-        }`}
-        title="More actions"
-        aria-expanded={open}
-        aria-haspopup="menu"
-      >
-        <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
-        <span className="sr-only">More profile actions</span>
-      </button>
+      <FlowTooltip label="More actions">
+        <span className="inline-flex">
+          <button
+            type="button"
+            disabled={disabled}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!disabled) setOpen((v) => !v);
+            }}
+            className={`inline-flex items-center justify-center rounded-lg p-2 text-flow-text-secondary transition-colors duration-150 ease-out hover:bg-white/[0.06] md:px-2.5 md:py-2 ${
+              disabled ? "cursor-not-allowed opacity-50" : ""
+            }`}
+            aria-expanded={open}
+            aria-haspopup="menu"
+          >
+            <MoreHorizontal className="h-5 w-5" strokeWidth={1.75} />
+            <span className="sr-only">More profile actions</span>
+          </button>
+        </span>
+      </FlowTooltip>
       {open && !disabled ? (
         <div className={menuPanelClass} role="menu">
           <button

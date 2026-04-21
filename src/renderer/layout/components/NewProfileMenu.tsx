@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { LayoutGrid, Plus, Scan } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 type NewProfileMenuProps = {
   disabled: boolean;
@@ -43,33 +44,37 @@ export function NewProfileMenu({
 
   const blocked = disabled || busy;
 
+  const triggerHint =
+    blocked && !disabled
+      ? "Please wait…"
+      : disabled
+        ? "Cannot create a profile while in edit mode"
+        : "Create profile";
+
   return (
     <div className="relative" ref={rootRef}>
-      <button
-        type="button"
-        disabled={blocked}
-        onClick={(e) => {
-          e.stopPropagation();
-          if (!blocked) setOpen((v) => !v);
-        }}
-        className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-all duration-150 ease-out ${
-          blocked
-            ? "text-flow-text-muted cursor-not-allowed opacity-50"
-            : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
-        }`}
-        title={
-          blocked && !disabled
-            ? "Please wait…"
-            : disabled
-              ? "Cannot create a profile while in edit mode"
-              : "Create profile"
-        }
-        aria-expanded={open}
-        aria-haspopup="menu"
-      >
-        <Plus className="w-3 h-3 shrink-0" strokeWidth={2} />
-        {busy ? "Working…" : "New"}
-      </button>
+      <FlowTooltip label={triggerHint}>
+        <span className="inline-flex">
+          <button
+            type="button"
+            disabled={blocked}
+            onClick={(e) => {
+              e.stopPropagation();
+              if (!blocked) setOpen((v) => !v);
+            }}
+            className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-all duration-150 ease-out ${
+              blocked
+                ? "text-flow-text-muted cursor-not-allowed opacity-50"
+                : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
+            }`}
+            aria-expanded={open}
+            aria-haspopup="menu"
+          >
+            <Plus className="w-3 h-3 shrink-0" strokeWidth={2} />
+            {busy ? "Working…" : "New"}
+          </button>
+        </span>
+      </FlowTooltip>
       {open && !blocked ? (
         <div className={menuPanelClass} role="menu">
           <button

@@ -2,6 +2,7 @@ import { useState } from "react";
 import { X, Volume2, VolumeX, Shield, Power, Save, Monitor, Minimize2, FileText, Folder, Plus, Trash2 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
+import { FlowTooltip } from "./ui/tooltip";
 
 interface AppSettingsProps {
   app: {
@@ -289,30 +290,36 @@ export function AppSettings({
                   </div>
                   <div className="flex items-center gap-1">
                     {index > 0 && (
-                      <button
-                        onClick={() => moveFile(index, index - 1)}
-                        className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
-                        title="Move up"
-                      >
-                        ↑
-                      </button>
+                      <FlowTooltip label="Move up">
+                        <button
+                          type="button"
+                          onClick={() => moveFile(index, index - 1)}
+                          className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
+                        >
+                          ↑
+                        </button>
+                      </FlowTooltip>
                     )}
                     {index < associatedFiles.length - 1 && (
-                      <button
-                        onClick={() => moveFile(index, index + 1)}
-                        className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
-                        title="Move down"
-                      >
-                        ↓
-                      </button>
+                      <FlowTooltip label="Move down">
+                        <button
+                          type="button"
+                          onClick={() => moveFile(index, index + 1)}
+                          className="p-1 text-flow-text-muted hover:text-flow-text-primary transition-colors"
+                        >
+                          ↓
+                        </button>
+                      </FlowTooltip>
                     )}
-                    <button
-                      onClick={() => handleRemoveFile(file.id)}
-                      className="p-1 text-flow-accent-red hover:text-red-400 transition-colors"
-                      title="Remove file"
-                    >
-                      <Trash2 className="w-3 h-3" />
-                    </button>
+                    <FlowTooltip label="Remove file">
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveFile(file.id)}
+                        className="p-1 text-flow-accent-red hover:text-red-400 transition-colors"
+                      >
+                        <Trash2 className="w-3 h-3" />
+                      </button>
+                    </FlowTooltip>
                   </div>
                 </div>
               ))}
