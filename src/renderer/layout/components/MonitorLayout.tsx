@@ -1726,10 +1726,9 @@ export function MonitorLayout({
       );
       const px = ((e.clientX - rect.left) / rect.width) * 100;
       const py = ((e.clientY - rect.top) / rect.height) * 100;
-      const pointerInMonitorPercent = {
-        x: Math.max(0, Math.min(100, px)),
-        y: Math.max(0, Math.min(100, py)),
-      };
+      // Keep raw percentages so handleItemDrag can detect off-monitor pointer
+      // during cross-monitor drags and clear local snap/stack prediction.
+      const pointerInMonitorPercent = { x: px, y: py };
       handleItemDragRef.current(fanMonitorId, appIndex, "app", { x: newX, y: newY }, pointerInMonitorPercent);
     };
 
@@ -1778,6 +1777,38 @@ export function MonitorLayout({
 
   const appDragZonesActive =
     isEditMode && (localDragState.isDragging || !!(dragState?.isDragging && dragState.dragData?.type === 'app'));
+
+  const renderCrossMonitorSnapPreview = (monitor: any) => {
+    if (!isEditMode) return null;
+    if (!dragState?.isDragging || dragState.dragData?.type !== "app") return null;
+    const sourceMonitorId =
+      dragState.dragData.sourceMonitorId
+      ?? dragState.dragData.monitorId
+      ?? null;
+    if (!sourceMonitorId || sourceMonitorId === monitor.id) return null;
+    if (
+      externalSnapState.monitorId !== monitor.id
+      || !externalSnapState.snapZone
+    ) {
+      return null;
+    }
+
+    const zone = externalSnapState.snapZone;
+    const zoneFlush = zone.size.width >= 99 && zone.size.height >= 99;
+    const zoneRadius = zoneFlush ? "rounded-none" : "rounded-lg";
+
+    return (
+      <div
+        className={`absolute ${zoneRadius} pointer-events-none z-40 border border-flow-accent-blue ring-1 ring-flow-accent-blue bg-flow-accent-blue/16 shadow-[0_0_0_1px_rgba(56,189,248,0.4)] transition-all duration-150`}
+        style={{
+          left: `${zone.position.x - zone.size.width / 2}%`,
+          top: `${zone.position.y - zone.size.height / 2}%`,
+          width: `${zone.size.width}%`,
+          height: `${zone.size.height}%`,
+        }}
+      />
+    );
+  };
 
   // Snap zone chrome is disabled during app drags — stacking uses icon hit targets + hover preview only.
   const renderSnapZones = (monitor: any) => {
@@ -2238,6 +2269,7 @@ export function MonitorLayout({
                       
                       {/* Monitor-Specific Snap Zones */}
                       {renderSnapZones(monitor)}
+                      {renderCrossMonitorSnapPreview(monitor)}
                       
                       {totalItems === 0 && !isEditMode && (
                         <div className="absolute inset-4 flex items-center justify-center">
