@@ -1,6 +1,8 @@
 {
   "name": "flowswitch",
   "version": "0.1.0",
+  "description": "Windows desktop app for profile-based workspace and window flows.",
+  "author": "FlowSwitch",
   "main": "src/main/main.js",
   "scripts": {
     "predev": "node scripts/free-port.mjs 5173",
@@ -14,7 +16,11 @@
     "dev:electron": "electron .",
     "dev": "npm-run-all -p dev:frontend dev:electron",
     "dev:launch-trace": "node scripts/dev-with-launch-trace.mjs",
-    "dev:launch-automation": "node scripts/run-launch-automation.mjs"
+    "dev:launch-automation": "node scripts/run-launch-automation.mjs",
+    "dist:prepare": "npm run build",
+    "dist:win": "npm run dist:prepare && electron-builder --win --x64 --publish never",
+    "dist": "npm run dist:prepare && electron-builder --publish never",
+    "website:sync-latest": "node scripts/sync-website-latest-json.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -25,6 +31,7 @@
     "autoprefixer": "^10.4.0",
     "concurrently": "^7.6.0",
     "electron": "^33.4.11",
+    "electron-builder": "^25.1.8",
     "eslint": "^9.0.0",
     "eslint-plugin-react-hooks": "^7.0.1",
     "globals": "^15.0.0",
@@ -52,5 +59,59 @@
     "tailwind-merge": "^3.3.1",
     "windows-shortcuts": "^0.1.6",
     "winreg": "^1.2.5"
+  },
+  "build": {
+    "appId": "app.flowswitch.desktop",
+    "productName": "FlowSwitch",
+    "copyright": "Copyright © FlowSwitch",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "**/*",
+      "!website{,/**/*}",
+      "!release{,/**/*}",
+      "!**/.cursor{,/**/*}",
+      "!**/.git{,/**/*}",
+      "!**/.github{,/**/*}",
+      "!.eslintcache",
+      "!docs{,/**/*}"
+    ],
+    "asar": true,
+    "asarUnpack": [
+      "**/*.node"
+    ],
+    "extraResources": [
+      {
+        "from": "scripts/windows-shell-item-icon.ps1",
+        "to": "scripts/windows-shell-item-icon.ps1"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        },
+        {
+          "target": "portable",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "public/flowswitch-logo.png"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowElevation": true,
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "FlowSwitch-${version}-win-${arch}-installer.${ext}"
+    },
+    "portable": {
+      "artifactName": "FlowSwitch-${version}-win-${arch}-portable.${ext}"
+    }
   }
 }
