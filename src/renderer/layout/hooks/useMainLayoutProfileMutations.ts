@@ -14,6 +14,61 @@ import {
   type MonitorPositionDragRow,
 } from "../utils/sharedMonitorLayout";
 import type { ProfileLayoutDragActions } from "./useLayoutCustomDrag";
+import {
+  buildStackClusters,
+  computeStackPreservingSnapAssignments,
+  indicesOccupyingZone,
+  snapZoneForApp,
+} from "../utils/monitorLayoutStacking";
+import { getSnapZonesForMonitor } from "../utils/monitorSnapZones";
+
+function buildAppsWithMergedInsert(
+  apps: any[],
+  insertApp: any,
+  mergeIntoAppIndex: number,
+  monitor: any,
+): any[] {
+  const anchor = apps[mergeIntoAppIndex];
+  if (!anchor) return [...apps, insertApp];
+  const zones = getSnapZonesForMonitor(monitor);
+  const zone = snapZoneForApp(anchor, zones);
+  const laid = {
+    ...insertApp,
+    position: { ...anchor.position },
+    size: { ...anchor.size },
+  };
+  if (!zone) {
+    return [...apps, laid];
+  }
+  const occ = indicesOccupyingZone(apps, zones, zone);
+  const insertAt = Math.max(...occ) + 1;
+  return [...apps.slice(0, insertAt), laid, ...apps.slice(insertAt)];
+}
+
+function buildAppsWithMergedInsertMany(
+  apps: any[],
+  insertApps: any[],
+  mergeIntoAppIndex: number,
+  monitor: any,
+): any[] {
+  const anchor = apps[mergeIntoAppIndex];
+  if (!anchor || insertApps.length === 0) {
+    return insertApps.length ? [...apps, ...insertApps] : apps;
+  }
+  const zones = getSnapZonesForMonitor(monitor);
+  const zone = snapZoneForApp(anchor, zones);
+  const laid = insertApps.map((insertApp) => ({
+    ...insertApp,
+    position: { ...anchor.position },
+    size: { ...anchor.size },
+  }));
+  if (!zone) {
+    return [...apps, ...laid];
+  }
+  const occ = indicesOccupyingZone(apps, zones, zone);
+  const insertAt = Math.max(...occ) + 1;
+  return [...apps.slice(0, insertAt), ...laid, ...apps.slice(insertAt)];
+}
 
 /** Selection state for the right-hand inspector (mirrors prior MainLayout inline type). */
 export type MainLayoutSelectedApp = {
@@ -212,6 +267,7 @@ export function useMainLayoutProfileMutations({
     profileId: string,
     monitorId: string,
     newApp: any,
+    mergeIntoAppIndex?: number,
   ) => {
     setProfiles((prev) =>
       prev.map((profile) => {
@@ -227,20 +283,25 @@ export function useMainLayoutProfileMutations({
             `${newApp.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         };
 
-        console.log("➕ ADDING APP WITH INSTANCE ID:", {
-          name: appWithInstanceId.name,
-          instanceId: appWithInstanceId.instanceId,
-          monitorId,
-        });
-
         return {
           ...profile,
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id !== monitorId) return monitor;
 
+            const nextApps =
+              typeof mergeIntoAppIndex === "number"
+              && monitor.apps[mergeIntoAppIndex]
+                ? buildAppsWithMergedInsert(
+                    monitor.apps,
+                    appWithInstanceId,
+                    mergeIntoAppIndex,
+                    monitor,
+                  )
+                : [...monitor.apps, appWithInstanceId];
+
             return {
               ...monitor,
-              apps: [...monitor.apps, appWithInstanceId],
+              apps: nextApps,
             };
           }),
           appCount: profile.appCount + 1,
@@ -511,6 +572,8 @@ export function useMainLayoutProfileMutations({
     targetMonitorId: string,
     newPosition?: { x: number; y: number },
     newSize?: { width: number; height: number },
+    mergeIntoAppIndex?: number,
+    stackSourceIndices?: number[],
   ) => {
     setProfiles((prev) =>
       prev.map((profile) => {
@@ -522,52 +585,42 @@ export function useMainLayoutProfileMutations({
         if (!sourceMonitor || !sourceMonitor.apps[appIndex])
           return profile;
 
-        const appToMove = sourceMonitor.apps[appIndex];
+        const stackSet = new Set(
+          Array.isArray(stackSourceIndices) && stackSourceIndices.length > 0
+            ? stackSourceIndices
+            : [appIndex],
+        );
+        if (!stackSet.has(appIndex)) stackSet.add(appIndex);
+        const ordered = [...stackSet].sort((a, b) => a - b);
+        for (const i of ordered) {
+          if (!sourceMonitor.apps[i]) return profile;
+        }
 
-        console.log("🔄 MOVING BETWEEN MONITORS:", {
-          app: appToMove.name,
-          from: sourceMonitorId,
-          to: targetMonitorId,
-          newPosition,
-          newSize,
-        });
+        const appsToMove = ordered.map((i) => sourceMonitor.apps[i]!);
 
-        // Check if this is a browser app
-        const isBrowser =
-          appToMove.name.toLowerCase().includes("chrome") ||
-          appToMove.name.toLowerCase().includes("browser") ||
-          appToMove.name.toLowerCase().includes("firefox") ||
-          appToMove.name.toLowerCase().includes("safari") ||
-          appToMove.name.toLowerCase().includes("edge");
-
-        // Create app object for target monitor
-        const movedApp = {
+        const movedApps = appsToMove.map((appToMove) => ({
           ...appToMove,
           monitorId: targetMonitorId,
-          position: newPosition || { x: 50, y: 50 }, // Default center position
-          size: newSize || appToMove.size, // Keep original size unless specified
-          instanceId: appToMove.instanceId, // NEW: Preserve instance ID when moving
-        };
+          position: newPosition || { x: 50, y: 50 },
+          size: newSize || appToMove.size,
+          instanceId: appToMove.instanceId,
+        }));
 
-        // Update browser tabs if this is a browser app
         let updatedBrowserTabs = profile.browserTabs || [];
-        if (isBrowser) {
+        for (const appToMove of appsToMove) {
+          const isBrowser =
+            appToMove.name.toLowerCase().includes("chrome") ||
+            appToMove.name.toLowerCase().includes("browser") ||
+            appToMove.name.toLowerCase().includes("firefox") ||
+            appToMove.name.toLowerCase().includes("safari") ||
+            appToMove.name.toLowerCase().includes("edge");
+          if (!isBrowser) continue;
           updatedBrowserTabs = updatedBrowserTabs.map((tab) => {
-            // NEW: Match by instance ID for precise tab association
             if (
               tab.monitorId === sourceMonitorId &&
               tab.browser === appToMove.name &&
               tab.appInstanceId === appToMove.instanceId
             ) {
-              console.log(
-                "🌐 UPDATING BROWSER TAB MONITOR (INSTANCE-SPECIFIC):",
-                {
-                  tab: tab.name,
-                  instanceId: appToMove.instanceId,
-                  from: sourceMonitorId,
-                  to: targetMonitorId,
-                },
-              );
               return { ...tab, monitorId: targetMonitorId };
             }
             return tab;
@@ -579,18 +632,39 @@ export function useMainLayoutProfileMutations({
           browserTabs: updatedBrowserTabs,
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id === sourceMonitorId) {
-              // Remove from source monitor
               return {
                 ...monitor,
                 apps: monitor.apps.filter(
-                  (_: any, index: number) => index !== appIndex,
+                  (_: any, index: number) => !stackSet.has(index),
                 ),
               };
-            } else if (monitor.id === targetMonitorId) {
-              // Add to target monitor
+            }
+            if (monitor.id === targetMonitorId) {
+              const canMerge =
+                typeof mergeIntoAppIndex === "number"
+                && monitor.apps[mergeIntoAppIndex];
+              let nextApps: any[];
+              if (canMerge) {
+                nextApps =
+                  movedApps.length === 1
+                    ? buildAppsWithMergedInsert(
+                        monitor.apps,
+                        movedApps[0]!,
+                        mergeIntoAppIndex!,
+                        monitor,
+                      )
+                    : buildAppsWithMergedInsertMany(
+                        monitor.apps,
+                        movedApps,
+                        mergeIntoAppIndex!,
+                        monitor,
+                      );
+              } else {
+                nextApps = [...monitor.apps, ...movedApps];
+              }
               return {
                 ...monitor,
-                apps: [...monitor.apps, movedApp],
+                apps: nextApps,
               };
             }
             return monitor;
@@ -607,6 +681,7 @@ export function useMainLayoutProfileMutations({
     targetMonitorId?: string,
     newPosition?: { x: number; y: number },
     newSize?: { width: number; height: number },
+    mergeIntoAppIndex?: number,
   ) => {
     setProfiles((prev) =>
       prev.map((profile) => {
@@ -704,9 +779,19 @@ export function useMainLayoutProfileMutations({
           // Add to target monitor
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id === finalTargetMonitorId) {
+              const nextApps =
+                typeof mergeIntoAppIndex === "number"
+                && monitor.apps[mergeIntoAppIndex]
+                  ? buildAppsWithMergedInsert(
+                      monitor.apps,
+                      newApp,
+                      mergeIntoAppIndex,
+                      monitor,
+                    )
+                  : [...monitor.apps, newApp];
               return {
                 ...monitor,
-                apps: [...monitor.apps, newApp],
+                apps: nextApps,
               };
             }
             return monitor;
@@ -767,10 +852,21 @@ export function useMainLayoutProfileMutations({
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id !== monitorId) return monitor;
 
-            return {
+            const next = {
               ...monitor,
               predefinedLayout: layout,
             };
+            const assignments = computeStackPreservingSnapAssignments(next);
+            const nextApps = next.apps.map((app: any, index: number) => {
+              const u = assignments.find((a) => a.appIndex === index);
+              if (!u) return app;
+              return {
+                ...app,
+                position: u.position,
+                size: u.size,
+              };
+            });
+            return { ...next, apps: nextApps };
           }),
         };
       }),
@@ -958,6 +1054,40 @@ export function useMainLayoutProfileMutations({
     addBrowserTab,
   };
 
+  const bringStackMemberToFront = useCallback(
+    (profileId: string, monitorId: string, appIndex: number) => {
+      setProfiles((prev) =>
+        prev.map((profile) => {
+          if (profile.id !== profileId) return profile;
+          return {
+            ...profile,
+            monitors: profile.monitors.map((monitor) => {
+              if (monitor.id !== monitorId) return monitor;
+              const zones = getSnapZonesForMonitor(monitor);
+              const clusters = buildStackClusters(monitor.apps, zones);
+              const cluster = clusters.find((c) => c.indices.includes(appIndex));
+              if (!cluster || cluster.indices.length < 2) return monitor;
+
+              const sorted = [...cluster.indices].sort((a, b) => a - b);
+              const extract = sorted.map((i) => monitor.apps[i]!);
+              const rel = sorted.indexOf(appIndex);
+              const [one] = extract.splice(rel, 1);
+              extract.push(one!);
+
+              const next = [...monitor.apps];
+              sorted.forEach((origIdx, j) => {
+                next[origIdx] = extract[j]!;
+              });
+
+              return { ...monitor, apps: next };
+            }),
+          };
+        }),
+      );
+    },
+    [],
+  );
+
   const handleAutoSnapApps = useCallback(
     (
       monitorId: string,
@@ -968,11 +1098,6 @@ export function useMainLayoutProfileMutations({
       }[],
     ) => {
       if (!currentProfile) return;
-
-      console.log("🎯 AUTO-SNAP APPS BATCH UPDATE:", {
-        monitorId,
-        updatesCount: appUpdates.length,
-      });
 
       setProfiles((prev) =>
         prev.map((profile) => {
@@ -989,9 +1114,6 @@ export function useMainLayoutProfileMutations({
                     (u) => u.appIndex === index,
                   );
                   if (update) {
-                    console.log(
-                      `🎯 AUTO-SNAP: ${app.name} -> zone at (${update.position.x}, ${update.position.y})`,
-                    );
                     return {
                       ...app,
                       position: update.position,
@@ -1007,8 +1129,6 @@ export function useMainLayoutProfileMutations({
           };
         }),
       );
-
-      console.log("✅ AUTO-SNAP BATCH UPDATE COMPLETE");
     },
     [currentProfile],
   );
@@ -1125,6 +1245,7 @@ export function useMainLayoutProfileMutations({
     updateBrowserTabs,
     addBrowserTab,
     handleAutoSnapApps,
+    bringStackMemberToFront,
     duplicateProfile,
     deleteProfile,
     renameProfile,

@@ -8,12 +8,18 @@ import {
 import type { FlowProfile } from "../../../types/flow-profile";
 import type { DragState, DragSourceType } from "../types/dragTypes";
 import {
-  computeDropZonesForAppCount,
   getAppColor,
   getAppIcon,
   getBrowserColor,
   getBrowserIcon,
 } from "../utils/layoutDropPresentation";
+import {
+  findAppIndexForIconStackMergeHover,
+  findClosestSnapZone,
+  frontIndexInStack,
+  indicesOccupyingZone,
+} from "../utils/monitorLayoutStacking";
+import { countStackUnits, getSnapZonesForMonitor } from "../utils/monitorSnapZones";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
@@ -26,7 +32,12 @@ export type ProfileLayoutDragActions = {
     appIndex: number,
     fileData: unknown,
   ) => void;
-  addApp: (profileId: string, monitorId: string, newApp: unknown) => void;
+  addApp: (
+    profileId: string,
+    monitorId: string,
+    newApp: unknown,
+    mergeIntoAppIndex?: number,
+  ) => void;
   addAppToMinimized: (profileId: string, newApp: unknown) => void;
   moveAppBetweenMonitors: (
     profileId: string,
@@ -35,6 +46,8 @@ export type ProfileLayoutDragActions = {
     targetMonitorId: string,
     position: { x: number; y: number },
     size: { width: number; height: number },
+    mergeIntoAppIndex?: number,
+    stackSourceIndices?: number[],
   ) => void;
   moveMinimizedAppToMonitor: (
     profileId: string,
@@ -42,6 +55,7 @@ export type ProfileLayoutDragActions = {
     targetMonitorId: string,
     position: { x: number; y: number },
     size: { width: number; height: number },
+    mergeIntoAppIndex?: number,
   ) => void;
   moveAppToMinimized: (
     profileId: string,
@@ -191,7 +205,7 @@ export function useLayoutCustomDrag({
       }
 
       const monitorElement = document.querySelector(
-        `[data-monitor-id="${targetMonitorId}"]`,
+        `[data-monitor-id="${targetMonitorId}"].monitor-container`,
       );
       if (!monitorElement) return;
 
@@ -204,42 +218,74 @@ export function useLayoutCustomDrag({
       };
 
       const targetMonitor = currentProfile.monitors?.find((m: any) => m.id === targetMonitorId);
-      const isPortrait = targetMonitor?.orientation === "portrait";
+      if (!targetMonitor) return;
+
       const sourceMonitorId = dragData.sourceMonitorId || dragData.monitorId || null;
       const isIncomingApp = dragData.type === "app"
         && (dragData.source === "sidebar"
           || dragData.source === "minimized"
           || (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId));
-      const prospectiveAppCount = (targetMonitor?.apps?.length || 0) + (isIncomingApp ? 1 : 0);
+      // Count **units** (stacked apps = 1 slot) so the dynamic grid reflects
+      // the post-drop layout. An incoming stack still lands as a single unit
+      // (it will occupy one zone), so the addend is 1 regardless of size.
+      const currentUnitCount = countStackUnits(targetMonitor.apps || []);
+      const prospectiveAppCount =
+        currentUnitCount + (isIncomingApp ? 1 : 0);
 
-      const zones = computeDropZonesForAppCount(isPortrait, prospectiveAppCount);
-      let activeZone = zones[0];
-      let bestDistance = Number.POSITIVE_INFINITY;
-      for (const zone of zones) {
-        const distance = Math.sqrt(
-          (rawPosition.x - zone.position.x) ** 2
-          + (rawPosition.y - zone.position.y) ** 2,
+      const zones = getSnapZonesForMonitor(targetMonitor, prospectiveAppCount);
+      const activeZone =
+        findClosestSnapZone(zones, rawPosition) ?? zones[0] ?? {
+          id: "full",
+          position: { x: 50, y: 50 },
+          size: { width: 100, height: 100 },
+        };
+
+      const appsTarget = targetMonitor.apps || [];
+      const selfSameMonitor =
+        dragData.type === "app"
+        && dragData.source === "monitor"
+        && sourceMonitorId === targetMonitorId
+        && typeof dragData.appIndex === "number";
+      const excludeAppIndex = selfSameMonitor
+        ? (dragData.appIndex as number)
+        : undefined;
+
+      // Prefer icon-ellipse merge hit (most precise visual target). Fall back
+      // to zone-level occupancy: if the active snap zone already has an app,
+      // stack on the front-most occupant. This mirrors the within-monitor
+      // "drop on occupied zone = stack" rule so all drag paths agree.
+      const iconMergeHit = findAppIndexForIconStackMergeHover(appsTarget, rawPosition, {
+        excludeAppIndex,
+      });
+      let mergeIntoAppIndex: number | undefined =
+        typeof iconMergeHit === "number" && appsTarget[iconMergeHit]
+          ? iconMergeHit
+          : undefined;
+      if (mergeIntoAppIndex === undefined) {
+        const occupants = indicesOccupyingZone(
+          appsTarget,
+          zones,
+          activeZone,
+          excludeAppIndex,
         );
-        if (distance < bestDistance) {
-          bestDistance = distance;
-          activeZone = zone;
+        if (occupants.length > 0) {
+          mergeIntoAppIndex = frontIndexInStack(occupants);
         }
       }
 
-      const position = {
+      let position = {
         x: activeZone.position.x,
         y: activeZone.position.y,
       };
-      const snappedSize = {
+      let snappedSize = {
         width: activeZone.size.width,
         height: activeZone.size.height,
       };
-
-      console.log("🎯 DROP ON MONITOR:", {
-        targetMonitorId,
-        position,
-        dragData,
-      });
+      if (mergeIntoAppIndex !== undefined) {
+        const anchorApp = appsTarget[mergeIntoAppIndex]!;
+        position = { x: anchorApp.position.x, y: anchorApp.position.y };
+        snappedSize = { width: anchorApp.size.width, height: anchorApp.size.height };
+      }
 
       if (dragData.source === "sidebar") {
         if (dragData.type === "content" || dragData.type === "file") {
@@ -267,7 +313,7 @@ export function useLayoutCustomDrag({
               associatedFiles: [],
             };
 
-            addApp(currentProfile.id, targetMonitorId, newApp);
+            addApp(currentProfile.id, targetMonitorId, newApp, mergeIntoAppIndex);
 
             const newTab = {
               name: dragData.name,
@@ -320,7 +366,7 @@ export function useLayoutCustomDrag({
               ],
             };
 
-            addApp(currentProfile.id, targetMonitorId, newApp);
+            addApp(currentProfile.id, targetMonitorId, newApp, mergeIntoAppIndex);
           }
         } else {
           const newApp: any = {
@@ -342,7 +388,12 @@ export function useLayoutCustomDrag({
             associatedFiles: [],
           };
 
-          addApp(currentProfile.id, targetMonitorId, newApp);
+          addApp(
+            currentProfile.id,
+            targetMonitorId,
+            newApp,
+            mergeIntoAppIndex,
+          );
         }
       } else if (
         dragData.source === "monitor"
@@ -355,6 +406,10 @@ export function useLayoutCustomDrag({
           targetMonitorId,
           position,
           snappedSize,
+          mergeIntoAppIndex,
+          Array.isArray(dragData.stackMemberIndices) && dragData.stackMemberIndices.length > 1
+            ? dragData.stackMemberIndices
+            : undefined,
         );
       } else if (dragData.source === "minimized") {
         moveMinimizedAppToMonitor(
@@ -363,6 +418,7 @@ export function useLayoutCustomDrag({
           targetMonitorId,
           position,
           snappedSize,
+          mergeIntoAppIndex,
         );
       }
     },
@@ -520,57 +576,55 @@ export function useLayoutCustomDrag({
 
   const handleGlobalMouseUp = useCallback(
     (e: MouseEvent) => {
-      if (!dragStateRef.current.isDragging) return;
-
+      const hadActiveLayoutDrag = dragStateRef.current.isDragging;
       const currentProfile = currentProfileRef.current;
 
-      console.log("🎯 CUSTOM DRAG END:", {
-        x: e.clientX,
-        y: e.clientY,
-      });
-
-      const elementBelow = document.elementFromPoint(
-        e.clientX,
-        e.clientY,
-      );
-      const dropTarget = elementBelow?.closest(
-        "[data-drop-target]",
-      );
-
-      if (
-        dropTarget
-        && dragStateRef.current.dragData
-        && currentProfile
-      ) {
-        const targetType = dropTarget.getAttribute(
-          "data-drop-target",
+      if (hadActiveLayoutDrag) {
+        const elementBelow = document.elementFromPoint(
+          e.clientX,
+          e.clientY,
         );
-        const targetId = dropTarget.getAttribute("data-target-id");
+        const dropTarget = elementBelow?.closest(
+          "[data-drop-target]",
+        );
 
-        console.log("🎯 DROP TARGET FOUND:", {
-          targetType,
-          targetId,
-          dragData: dragStateRef.current.dragData,
+        if (
+          dropTarget
+          && dragStateRef.current.dragData
+          && currentProfile
+        ) {
+          const targetType = dropTarget.getAttribute(
+            "data-drop-target",
+          );
+          const targetId = dropTarget.getAttribute("data-target-id");
+
+          handleCustomDrop(
+            dragStateRef.current.dragData,
+            targetType,
+            targetId,
+            { x: e.clientX, y: e.clientY },
+          );
+        }
+
+        setDragState({
+          isDragging: false,
+          dragData: null,
+          startPosition: { x: 0, y: 0 },
+          currentPosition: { x: 0, y: 0 },
+          sourceType: null,
+          sourceId: null,
+          dragPreview: null,
         });
 
-        handleCustomDrop(
-          dragStateRef.current.dragData,
-          targetType,
-          targetId,
-          { x: e.clientX, y: e.clientY },
-        );
+        queueMicrotask(() => {
+          document.dispatchEvent(
+            new CustomEvent("flowswitch:clear-monitor-layout-local-drag"),
+          );
+        });
       }
 
-      setDragState({
-        isDragging: false,
-        dragData: null,
-        startPosition: { x: 0, y: 0 },
-        currentPosition: { x: 0, y: 0 },
-        sourceType: null,
-        sourceId: null,
-        dragPreview: null,
-      });
-
+      // `flowswitch:dragend` may clear layout drag before this `mouseup` runs; still
+      // detach so we never leave orphaned document listeners.
       document.removeEventListener(
         "mousemove",
         handleGlobalMouseMove,
