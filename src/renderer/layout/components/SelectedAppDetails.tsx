@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
+import { FlowTooltip } from "./ui/tooltip";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
   Settings,
@@ -414,33 +415,41 @@ export function SelectedAppDetails({
 
         <div className="space-y-2">
           <div className="grid grid-cols-2 gap-2">
-            <button
-              type="button"
-              disabled
-              aria-disabled="true"
-              title="Coming soon: swap this slot for another app from search."
-              className={inspectorPanelGridButtonDisabledClass}
-            >
-              <Replace className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Replace
-            </button>
-            <button
-              type="button"
-              onClick={() => onDeleteApp?.()}
-              disabled={!onDeleteApp || !isProfileSlot}
-              aria-disabled={!onDeleteApp || !isProfileSlot}
-              title={
+            <FlowTooltip label="Coming soon: swap this slot for another app from search.">
+              <span className="inline-flex w-full">
+                <button
+                  type="button"
+                  disabled
+                  aria-disabled="true"
+                  className={`${inspectorPanelGridButtonDisabledClass} w-full`}
+                >
+                  <Replace className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Replace
+                </button>
+              </span>
+            </FlowTooltip>
+            <FlowTooltip
+              label={
                 !isProfileSlot
                   ? "Only apps on the layout can be removed here"
-                  : onDeleteApp
-                    ? undefined
-                    : "Remove is unavailable"
+                  : !onDeleteApp
+                    ? "Remove is unavailable"
+                    : undefined
               }
-              className={inspectorPanelDangerButtonClass}
             >
-              <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-              Remove
-            </button>
+              <span className="inline-flex w-full">
+                <button
+                  type="button"
+                  onClick={() => onDeleteApp?.()}
+                  disabled={!onDeleteApp || !isProfileSlot}
+                  aria-disabled={!onDeleteApp || !isProfileSlot}
+                  className={`${inspectorPanelDangerButtonClass} w-full`}
+                >
+                  <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                  Remove
+                </button>
+              </span>
+            </FlowTooltip>
           </div>
 
           {showAddToLayout ? (
@@ -543,25 +552,30 @@ export function SelectedAppDetails({
             </p>
           )}
           <div className="mt-2 flex flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => void handleRevealInExplorer()}
-              disabled={!canRevealInExplorer}
-              aria-disabled={!canRevealInExplorer}
-              title={
+            <FlowTooltip
+              label={
                 canRevealInExplorer
                   ? "Show executable or saved shortcut in File Explorer"
                   : "Set an executable path above to open its location on disk."
               }
-              className={
-                canRevealInExplorer
-                  ? inspectorPanelCompactButtonClass
-                  : inspectorPanelCompactButtonDisabledClass
-              }
             >
-              <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
-              Open in Explorer
-            </button>
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  onClick={() => void handleRevealInExplorer()}
+                  disabled={!canRevealInExplorer}
+                  aria-disabled={!canRevealInExplorer}
+                  className={
+                    canRevealInExplorer
+                      ? inspectorPanelCompactButtonClass
+                      : inspectorPanelCompactButtonDisabledClass
+                  }
+                >
+                  <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
+                  Open in Explorer
+                </button>
+              </span>
+            </FlowTooltip>
           </div>
           {revealPathError ? (
             <p className="mt-1.5 text-[11px] leading-snug text-flow-accent-red" role="status">
@@ -1059,19 +1073,20 @@ export function SelectedAppDetails({
                     }}
                     className="group flex items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                   >
-                    <span
-                      draggable
-                      onDragStart={(e) => {
-                        e.stopPropagation();
-                        e.dataTransfer.setData("text/plain", dragTabPayload(index));
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
-                      title="Drag to reorder"
-                      aria-hidden
-                    >
-                      <GripVertical className="h-4 w-4" />
-                    </span>
+                    <FlowTooltip label="Drag to reorder">
+                      <span
+                        draggable
+                        onDragStart={(e) => {
+                          e.stopPropagation();
+                          e.dataTransfer.setData("text/plain", dragTabPayload(index));
+                          e.dataTransfer.effectAllowed = "move";
+                        }}
+                        className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
+                        aria-hidden
+                      >
+                        <GripVertical className="h-4 w-4" />
+                      </span>
+                    </FlowTooltip>
                     <Globe className="w-4 h-4 flex-shrink-0 text-flow-text-muted" />
                     <div className="flex-1 min-w-0">
                       <div className="text-sm font-medium text-flow-text-primary truncate">{tab.name}</div>
@@ -1167,19 +1182,20 @@ export function SelectedAppDetails({
                   }}
                   className="group flex shrink-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                 >
-                  <span
-                    draggable
-                    onDragStart={(e) => {
-                      e.stopPropagation();
-                      e.dataTransfer.setData("text/plain", dragAssocPayload(index));
-                      e.dataTransfer.effectAllowed = "move";
-                    }}
-                    className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
-                    title="Drag to reorder"
-                    aria-hidden
-                  >
-                    <GripVertical className="h-4 w-4" />
-                  </span>
+                  <FlowTooltip label="Drag to reorder">
+                    <span
+                      draggable
+                      onDragStart={(e) => {
+                        e.stopPropagation();
+                        e.dataTransfer.setData("text/plain", dragAssocPayload(index));
+                        e.dataTransfer.effectAllowed = "move";
+                      }}
+                      className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
+                      aria-hidden
+                    >
+                      <GripVertical className="h-4 w-4" />
+                    </span>
+                  </FlowTooltip>
                   {file.type === "url" || file.url ? (
                     <Link2 className="h-4 w-4 flex-shrink-0 text-flow-accent-blue" />
                   ) : (

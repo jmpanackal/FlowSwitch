@@ -9,14 +9,15 @@ import { LaunchControl } from "./components/LaunchControl";
 import { TitleBarAppMenu } from "./components/TitleBarAppMenu";
 import { AppChromeModals } from "./components/AppChromeModals";
 import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
+import { NewProfileMenu } from "./components/NewProfileMenu";
 import { ProfileCard } from "./components/ProfileCard";
+import { FlowTooltip } from "./components/ui/tooltip";
 import { MonitorLayout } from "./components/MonitorLayout";
 import {
   FLOW_SHELL_INSPECTOR_MARGIN_CLASS,
   FLOW_SHELL_INSPECTOR_WIDTH_CLASS,
 } from "./constants/flowShellInspector";
 import { ProfileSettings } from "./components/ProfileSettings";
-import { CreateProfileModal } from "./components/CreateProfileModal";
 import { AppManager } from "./components/AppManager";
 import {
   ContentManager,
@@ -38,7 +39,6 @@ import {
 import { SelectedAppDetails } from "./components/SelectedAppDetails";
 import {
   Play,
-  Plus,
   Settings,
   Edit,
   PenLine,
@@ -58,7 +58,7 @@ import {
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
 import type { FlowProfile, ProfileSavePayload } from "../../types/flow-profile";
-import { toSerializableProfiles } from "../../types/flow-profile";
+import { normalizeFlowProfile, toSerializableProfiles } from "../../types/flow-profile";
 import {
   deleteLibraryFolder,
   deleteLibraryItem,
@@ -82,6 +82,14 @@ import {
 import { ProfileIconFrame } from "./utils/profileHeaderPresentation";
 import { formatUnit } from "../utils/pluralize";
 import { prefetchInstalledAppsCatalog } from "../hooks/useInstalledApps";
+import type { MemoryCapture } from "./utils/buildNewProfile";
+import {
+  buildEmptyFlowProfile,
+  buildMemoryFlowProfileFromCapture,
+  fetchSystemMonitorsForProfile,
+  uniqueProfileDisplayName,
+  validateMemoryCapture,
+} from "./utils/buildNewProfile";
 
 const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
 
@@ -112,8 +120,11 @@ export default function App() {
     selectedProfileForSettings,
     setSelectedProfileForSettings,
   ] = useState<string | null>(null);
-  const [showCreateProfile, setShowCreateProfile] =
-    useState(false);
+  const [isProfileCreationBusy, setIsProfileCreationBusy] = useState(false);
+  const [headerNameEditOpen, setHeaderNameEditOpen] = useState(false);
+  const [headerNameDraft, setHeaderNameDraft] = useState("");
+  const headerNameInputRef = useRef<HTMLInputElement>(null);
+  const skipNextHeaderRenameBlurCommitRef = useRef(false);
   const [appChromeModal, setAppChromeModal] = useState<
     null | "preferences" | "about"
   >(null);
@@ -298,6 +309,116 @@ export default function App() {
     currentProfile,
     profileDragActionsRef,
   });
+
+  const scheduleLaunchFeedbackClear = useCallback(() => {
+    if (launchFeedbackTimeoutRef.current) {
+      window.clearTimeout(launchFeedbackTimeoutRef.current);
+    }
+    launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setLaunchFeedback({
+        status: "idle",
+        message: "",
+      });
+      launchFeedbackTimeoutRef.current = null;
+    }, 7000);
+  }, [launchFeedbackTimeoutRef, setLaunchFeedback]);
+
+  const handleNewEmptyProfile = useCallback(async () => {
+    if (isEditMode || isProfileCreationBusy) return;
+    setIsProfileCreationBusy(true);
+    try {
+      const detectedMonitors = await fetchSystemMonitorsForProfile();
+      const newId = `profile-${Date.now()}`;
+      setProfiles((prev) => {
+        const name = uniqueProfileDisplayName("New profile", prev);
+        const raw = buildEmptyFlowProfile({
+          id: newId,
+          name,
+          detectedMonitors,
+          existingProfiles: prev,
+        });
+        return [...prev, normalizeFlowProfile(raw)];
+      });
+      setSelectedProfile(newId);
+    } finally {
+      setIsProfileCreationBusy(false);
+    }
+  }, [isEditMode, isProfileCreationBusy, setProfiles, setSelectedProfile]);
+
+  const handleNewFromCapturedLayout = useCallback(async () => {
+    if (isEditMode || isProfileCreationBusy) return;
+    if (!window.electron?.captureRunningAppLayout) {
+      setLaunchFeedback({
+        status: "error",
+        message: "Layout capture is not available in this build.",
+      });
+      scheduleLaunchFeedbackClear();
+      return;
+    }
+    setIsProfileCreationBusy(true);
+    try {
+      let capture: MemoryCapture;
+      try {
+        capture = (await window.electron.captureRunningAppLayout()) as MemoryCapture;
+      } catch {
+        setLaunchFeedback({
+          status: "error",
+          message: "Failed to capture running app layout.",
+        });
+        scheduleLaunchFeedbackClear();
+        return;
+      }
+      const validationError = validateMemoryCapture(capture);
+      if (validationError) {
+        setLaunchFeedback({
+          status: "error",
+          message: validationError,
+        });
+        scheduleLaunchFeedbackClear();
+        return;
+      }
+      const newId = `memory-${Date.now()}`;
+      setProfiles((prev) => {
+        const name = uniqueProfileDisplayName("New profile", prev);
+        const raw = buildMemoryFlowProfileFromCapture(capture, name, newId, prev);
+        return [...prev, normalizeFlowProfile(raw)];
+      });
+      setSelectedProfile(newId);
+    } finally {
+      setIsProfileCreationBusy(false);
+    }
+  }, [
+    isEditMode,
+    isProfileCreationBusy,
+    scheduleLaunchFeedbackClear,
+    setLaunchFeedback,
+    setProfiles,
+    setSelectedProfile,
+  ]);
+
+  useEffect(() => {
+    setHeaderNameEditOpen(false);
+  }, [selectedProfile]);
+
+  useEffect(() => {
+    if (!headerNameEditOpen) return;
+    const el = headerNameInputRef.current;
+    if (!el) return;
+    el.focus();
+    el.select();
+  }, [headerNameEditOpen]);
+
+  const commitHeaderProfileRename = useCallback(() => {
+    if (skipNextHeaderRenameBlurCommitRef.current) {
+      skipNextHeaderRenameBlurCommitRef.current = false;
+      return;
+    }
+    if (!currentProfile) return;
+    const next = headerNameDraft.trim();
+    setHeaderNameEditOpen(false);
+    if (!next || next === currentProfile.name) return;
+    renameProfile(currentProfile.id, next, currentProfile.description);
+  }, [currentProfile, headerNameDraft, renameProfile]);
 
   const buildSavePayload = useCallback((): ProfileSavePayload => ({
     profiles: toSerializableProfiles(profiles),
@@ -1178,23 +1299,12 @@ export default function App() {
                         Profiles
                       </h2>
                     </div>
-                    <button
-                      onClick={() => setShowCreateProfile(true)}
+                    <NewProfileMenu
                       disabled={isEditMode}
-                      className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-all duration-150 ease-out ${
-                        isEditMode
-                          ? "text-flow-text-muted cursor-not-allowed opacity-50"
-                          : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
-                      }`}
-                      title={
-                        isEditMode
-                          ? "Cannot create new profile while in edit mode"
-                          : "Create new profile"
-                      }
-                    >
-                      <Plus className="w-3 h-3" />
-                      New
-                    </button>
+                      busy={isProfileCreationBusy}
+                      onCreateEmpty={() => void handleNewEmptyProfile()}
+                      onCaptureCurrentLayout={() => void handleNewFromCapturedLayout()}
+                    />
                   </div>
 
                   {isEditMode && (
@@ -1361,9 +1471,51 @@ export default function App() {
                     </div>
                     <div className="flex min-w-0 flex-col gap-1.5">
                       <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        <h2 className="min-w-0 truncate text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl">
-                          {currentProfile.name}
-                        </h2>
+                        {headerNameEditOpen && !isEditMode ? (
+                          <input
+                            ref={headerNameInputRef}
+                            value={headerNameDraft}
+                            onChange={(e) => setHeaderNameDraft(e.target.value)}
+                            onBlur={() => commitHeaderProfileRename()}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") {
+                                e.preventDefault();
+                                headerNameInputRef.current?.blur();
+                              }
+                              if (e.key === "Escape") {
+                                e.preventDefault();
+                                skipNextHeaderRenameBlurCommitRef.current = true;
+                                setHeaderNameDraft(currentProfile.name);
+                                setHeaderNameEditOpen(false);
+                              }
+                            }}
+                            maxLength={120}
+                            aria-label="Profile name"
+                            className="min-w-0 max-w-full rounded-md border border-flow-border/60 bg-flow-bg-primary/80 px-2 py-0.5 text-xl font-extrabold tracking-tight text-flow-text-primary shadow-sm outline-none ring-flow-accent-blue/40 focus:ring-2 md:text-2xl"
+                          />
+                        ) : (
+                          <FlowTooltip
+                            label={isEditMode ? undefined : "Click to rename"}
+                          >
+                            <button
+                              type="button"
+                              disabled={isEditMode}
+                              onClick={() => {
+                                if (isEditMode) return;
+                                skipNextHeaderRenameBlurCommitRef.current = false;
+                                setHeaderNameDraft(currentProfile.name);
+                                setHeaderNameEditOpen(true);
+                              }}
+                              className={`min-w-0 truncate text-left text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl ${
+                                isEditMode
+                                  ? "cursor-default"
+                                  : "cursor-text rounded-md hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
+                              }`}
+                            >
+                              {currentProfile.name}
+                            </button>
+                          </FlowTooltip>
+                        )}
                       </div>
                       <div className="flex flex-wrap items-center gap-1.5">
                         {currentProfile.autoLaunchOnBoot && (
@@ -1414,7 +1566,8 @@ export default function App() {
                       }
                       onDuplicate={() => duplicateProfile(currentProfile.id)}
                       onDelete={() => deleteProfile(currentProfile.id)}
-                      onNewProfile={() => setShowCreateProfile(true)}
+                      onNewEmptyProfile={() => void handleNewEmptyProfile()}
+                      onNewFromCapturedLayout={() => void handleNewFromCapturedLayout()}
                     />
                     <LaunchControl
                       isEditMode={isEditMode}
@@ -1472,24 +1625,30 @@ export default function App() {
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <button
-                    type="button"
-                    disabled
-                    title="Select a profile to edit its monitor layout"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
-                  >
-                    <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
-                    Edit layout
-                  </button>
-                  <button
-                    type="button"
-                    disabled
-                    title="Select a profile for preferences and import/export"
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
-                  >
-                    <Settings className="w-4 h-4" />
-                    Preferences
-                  </button>
+                  <FlowTooltip label="Select a profile to edit its monitor layout">
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                      >
+                        <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
+                        Edit layout
+                      </button>
+                    </span>
+                  </FlowTooltip>
+                  <FlowTooltip label="Select a profile for preferences and import/export">
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
+                      >
+                        <Settings className="w-4 h-4" />
+                        Preferences
+                      </button>
+                    </span>
+                  </FlowTooltip>
                   <button
                     disabled
                     className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-accent-blue text-flow-text-primary opacity-50 cursor-not-allowed"
@@ -1761,22 +1920,26 @@ export default function App() {
 
         {/* Right Sidebar Toggle Button (when closed) */}
         {!rightSidebarOpen && (selectedApp || librarySelection) ? (
-          <button
-            type="button"
-            onClick={() => setRightSidebarOpen(true)}
-            className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
-            style={{
-              top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
-              transform: "translateY(-50%)",
-            }}
-            title={
+          <FlowTooltip
+            label={
               librarySelection
                 ? "Open library item details"
                 : "Open app details"
             }
+            side="left"
           >
-            <ChevronLeft className="w-4 h-4" />
-          </button>
+            <button
+              type="button"
+              onClick={() => setRightSidebarOpen(true)}
+              className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
+              style={{
+                top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
+                transform: "translateY(-50%)",
+              }}
+            >
+              <ChevronLeft className="w-4 h-4" />
+            </button>
+          </FlowTooltip>
         ) : null}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
@@ -1865,15 +2028,6 @@ export default function App() {
             }
           }}
           allProfiles={profiles}
-        />
-
-        <CreateProfileModal
-          isOpen={showCreateProfile}
-          onClose={() => setShowCreateProfile(false)}
-          onCreateProfile={(newProfile) => {
-            setProfiles((prev) => [...prev, newProfile]);
-            setShowCreateProfile(false);
-          }}
         />
 
         <AppChromeModals

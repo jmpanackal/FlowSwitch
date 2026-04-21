@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { FlowTooltip } from "./ui/tooltip";
 
 /** Primary surface: monospace path/URL, full width, click to copy. */
 export const clickCopyPathBlockButtonClassName =
@@ -80,14 +81,15 @@ export function ClickCopyPathBlock({
 
   return (
     <div className="space-y-1">
-      <button
-        type="button"
-        title="Copy to clipboard"
-        onClick={() => void handleClick()}
-        className={clickCopyPathBlockButtonClassName}
-      >
-        {trimmed}
-      </button>
+      <FlowTooltip label="Copy to clipboard">
+        <button
+          type="button"
+          onClick={() => void handleClick()}
+          className={clickCopyPathBlockButtonClassName}
+        >
+          {trimmed}
+        </button>
+      </FlowTooltip>
       <div className={clickCopyPathFooterClassName}>
         <p className={clickCopyPathHintClassName}>{hint}</p>
         {notice ? (

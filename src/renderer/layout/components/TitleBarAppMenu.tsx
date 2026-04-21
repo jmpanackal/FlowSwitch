@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { ChevronDown, Info, Settings } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 type TitleBarAppMenuProps = {
   onAppPreferences: () => void;
@@ -106,6 +107,7 @@ export function TitleBarAppMenu({
 
   return (
     <div className="app-no-drag relative" ref={rootRef}>
+      <FlowTooltip label="FlowSwitch menu" side="bottom">
       <button
         ref={triggerRef}
         type="button"
@@ -116,7 +118,6 @@ export function TitleBarAppMenu({
         className="inline-flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-flow-text-primary transition-colors hover:bg-white/[0.08]"
         aria-expanded={open}
         aria-haspopup="menu"
-        title="FlowSwitch menu"
       >
         <img
           src="/flowswitch-logo.png"
@@ -136,6 +137,7 @@ export function TitleBarAppMenu({
           aria-hidden
         />
       </button>
+      </FlowTooltip>
       {menu}
     </div>
   );

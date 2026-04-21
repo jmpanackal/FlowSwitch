@@ -14,6 +14,10 @@ import {
   type ProfileListResult,
   type ProfileSavePayload,
 } from "../../../types/flow-profile";
+import {
+  monitorLayoutPositionsDiffer,
+  syncAllProfilesMonitorLayoutPositions,
+} from "../utils/sharedMonitorLayout";
 
 type UseProfilesPersistenceOptions = {
   /** React `useState` setter — stable identity; listed in effect deps for lint clarity only. */
@@ -69,7 +73,11 @@ export function useProfilesPersistence({
         const normalizedProfiles = Array.isArray(rawProfiles)
           ? rawProfiles.map(normalizeFlowProfile)
           : [];
-        setProfiles(normalizedProfiles);
+        const harmonized = syncAllProfilesMonitorLayoutPositions(normalizedProfiles);
+        if (monitorLayoutPositionsDiffer(normalizedProfiles, harmonized)) {
+          skipNextAutosaveRef.current = false;
+        }
+        setProfiles(harmonized);
         setSelectedProfileId((prev) => prev || normalizedProfiles[0]?.id || "");
 
         if (Array.isArray(listResult)) {

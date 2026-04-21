@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, X, Shield, AlertCircle } from 'lucide-react';
 import { useInstalledApps } from '../../hooks/useInstalledApps';
+import { FlowTooltip } from './ui/tooltip';
 
 interface AppSearchControlProps {
   restrictedApps: string[];
@@ -171,13 +172,15 @@ export function AppSearchControl({
                   {app}
                 </span>
                 
-                <button
-                  onClick={() => handleRemoveApp(app)}
-                  className="opacity-0 group-hover:opacity-100 p-1 text-flow-text-muted hover:text-flow-accent-red hover:bg-flow-accent-red/10 rounded transition-all"
-                  title={`Remove ${app} from restricted apps`}
-                >
-                  <X className="w-4 h-4" />
-                </button>
+                <FlowTooltip label={`Remove ${app} from restricted apps`}>
+                  <button
+                    type="button"
+                    onClick={() => handleRemoveApp(app)}
+                    className="opacity-0 group-hover:opacity-100 p-1 text-flow-text-muted hover:text-flow-accent-red hover:bg-flow-accent-red/10 rounded transition-all"
+                  >
+                    <X className="w-4 h-4" />
+                  </button>
+                </FlowTooltip>
               </div>
             ))}
           </div>

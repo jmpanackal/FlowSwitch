@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { Play } from "lucide-react";
+import { FlowTooltip } from "./ui/tooltip";
 
 type LaunchControlProps = {
   isEditMode: boolean;
@@ -62,31 +63,34 @@ export function LaunchControl({
 
   if (!isLaunching) {
     return (
-      <button
-        type="button"
-        onClick={onLaunch}
-        disabled={isEditMode}
-        title={launchTitle}
-        className={`group ${launchShellClass} ${launchIdleInteractiveClass}`}
-      >
-        <div className="flex w-full flex-col justify-center gap-2">
-          <div className="flex items-center justify-center gap-1">
-            <Play
-              className="h-5 w-5 shrink-0 transition-transform duration-200 ease-out group-hover:scale-105"
-              strokeWidth={1.75}
-              aria-hidden
-            />
-            <span className="text-sm font-semibold leading-tight">
-              Launch profile
-            </span>
-          </div>
-          {secondaryLine ? (
-            <span className="max-w-full truncate text-center text-xs font-normal leading-snug text-flow-text-primary/80">
-              {secondaryLine}
-            </span>
-          ) : null}
-        </div>
-      </button>
+      <FlowTooltip label={launchTitle}>
+        <span className="inline-flex">
+          <button
+            type="button"
+            onClick={onLaunch}
+            disabled={isEditMode}
+            className={`group ${launchShellClass} ${launchIdleInteractiveClass}`}
+          >
+            <div className="flex w-full flex-col justify-center gap-2">
+              <div className="flex items-center justify-center gap-1">
+                <Play
+                  className="h-5 w-5 shrink-0 transition-transform duration-200 ease-out group-hover:scale-105"
+                  strokeWidth={1.75}
+                  aria-hidden
+                />
+                <span className="text-sm font-semibold leading-tight">
+                  Launch profile
+                </span>
+              </div>
+              {secondaryLine ? (
+                <span className="max-w-full truncate text-center text-xs font-normal leading-snug text-flow-text-primary/80">
+                  {secondaryLine}
+                </span>
+              ) : null}
+            </div>
+          </button>
+        </span>
+      </FlowTooltip>
     );
   }
 

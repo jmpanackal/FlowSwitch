@@ -15,7 +15,19 @@ const hiddenProcessNamePatterns = [
   /^widgetboard$/i,
   /^applicationframehost$/i,
   /^startmenuexperiencehost$/i,
+  // Windows Settings (modern SystemSettings.exe) — OS UI, not a workspace app
+  /^systemsettings$/i,
   /^flowswitch$/i, // Exclude FlowSwitch itself from window placement
+  // NVIDIA / GeForce satellite processes (layout capture; not user-facing apps)
+  /^nvrla$/i,
+  /^nvsphelper/i,
+  /^nvbroadcast/i,
+  /^nvoawrapper/i,
+  /^nvdisplay\.container/i,
+  /^nvidia nvdlisr/i,
+  /nvidia\s*message\s*bus/i,
+  /^nvcontainer$/i,
+  /^nvidia$/i,
 ];
 
 const hiddenWindowTitlePatterns = [
@@ -23,12 +35,17 @@ const hiddenWindowTitlePatterns = [
   /^default ime/i,
   /^microsoft text input application/i,
   /^program manager$/i,
-  /flowswitch/i, // Exclude FlowSwitch windows by title
+  // Do not match "FlowSwitch" in titles: other apps (e.g. Cursor) include the repo/product name.
+  // The FlowSwitch app itself is excluded via /^flowswitch$/i in hiddenProcessNamePatterns.
   /^loading$/i, // Loading windows
   /splash/i, // Splash screens
   /please wait/i, // Loading indicators
   /starting up/i, // Startup windows
   /initializing/i, // Initialization windows
+  /nvidia.*overlay/i,
+  /geforce.*overlay/i,
+  /in-game\s+overlay/i,
+  /^nvidia geforce overlay$/i,
 ];
 
 function getRunningWindowProcesses() {

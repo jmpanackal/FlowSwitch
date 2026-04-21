@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { Clock, Calendar, ChevronDown, RotateCcw, Copy } from 'lucide-react';
 import { TimePickerControl } from './TimePickerControl';
+import { FlowTooltip } from './ui/tooltip';
 
 interface WeeklySchedule {
   [key: string]: {
@@ -251,13 +252,15 @@ export function WeeklyScheduleControl({ value, onChange, disabled = false }: Wee
                     
                     {/* Copy Time Action */}
                     {isEnabled && enabledDays.length > 1 && (
-                      <button
-                        onClick={() => copyTimeToAll(daySchedule.time)}
-                        className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue hover:bg-flow-accent-blue/10 rounded transition-colors"
-                        title="Copy this time to all enabled days"
-                      >
-                        <Copy className="w-3 h-3" />
-                      </button>
+                      <FlowTooltip label="Copy this time to all enabled days">
+                        <button
+                          type="button"
+                          onClick={() => copyTimeToAll(daySchedule.time)}
+                          className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue hover:bg-flow-accent-blue/10 rounded transition-colors"
+                        >
+                          <Copy className="w-3 h-3" />
+                        </button>
+                      </FlowTooltip>
                     )}
                   </div>
                 </div>

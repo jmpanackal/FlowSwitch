@@ -13,6 +13,9 @@ After review, move them to `Reviewed Raw Archive` and keep this section small.
 
 - hide apps button for apps in sidebar that user decides they will never launch with flowswitch (also add filter to show/hide hidden apps)
 - change profile cards to display a list of app icons under instead of x monitors, x apps, x tabs, makes it easier to tell whats in the profile
+- add ability to save profile with app layout memory via hotkey (new profile or overwrite current profile) needs to have confirmation modal. Also ability to set hotkeys to launch profiles (both are important)
+- launch free and paid tiers, free has access to everythind but only three profiles, paid has access to everything and unlimited profiles.
+- App should be downloaded as free tier from website. if the users pays they get a product license they can use to convert their product to paid tier
 
 ## Reviewed Raw Archive (Reference Only)
 

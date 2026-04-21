@@ -7,6 +7,7 @@ import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
+import { FlowTooltip } from "./ui/tooltip";
 
 // Enhanced content types for the unified system
 export interface ContentFolder {
@@ -771,30 +772,35 @@ export function ContentManager({
         onMouseDown={stopContentRowPointer}
       >
         <div className="relative">
-          <button
-            type="button"
-            disabled={!currentProfile}
-            title={
+          <FlowTooltip
+            label={
               !currentProfile
                 ? "Select a profile first"
                 : "Add to a monitor or minimized row"
             }
-            aria-label={`Add ${item.name} to layout`}
-            aria-expanded={compactAddMenu?.key === k}
-            aria-haspopup="menu"
-            onClick={(e) => {
-              stopContentRowPointer(e);
-              setAppDropdownOpen(null);
-              setCompactAddMenu((prev) =>
-                prev?.key === k
-                  ? null
-                  : { key: k, anchor: e.currentTarget as HTMLElement },
-              );
-            }}
-            className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
           >
-            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
-          </button>
+            <span className="inline-flex">
+              <button
+                type="button"
+                disabled={!currentProfile}
+                aria-label={`Add ${item.name} to layout`}
+                aria-expanded={compactAddMenu?.key === k}
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  stopContentRowPointer(e);
+                  setAppDropdownOpen(null);
+                  setCompactAddMenu((prev) =>
+                    prev?.key === k
+                      ? null
+                      : { key: k, anchor: e.currentTarget as HTMLElement },
+                  );
+                }}
+                className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+              </button>
+            </span>
+          </FlowTooltip>
           {compactAddMenu?.key === k ? (
             <SidebarOverlayMenu
               open
@@ -824,19 +830,24 @@ export function ContentManager({
                 </div>
               )}
               <div className="my-0.5 h-px bg-flow-border/50" role="none" />
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!currentProfile || !onPlaceContentOnMinimized}
-                title={!currentProfile ? "Select a profile first" : undefined}
-                className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={(e) => {
-                  stopContentRowPointer(e);
-                  handleAddContentToMinimized(item);
-                }}
+              <FlowTooltip
+                label={!currentProfile ? "Select a profile first" : undefined}
               >
-                Minimized row
-              </button>
+                <span className="flex w-full">
+                  <button
+                    type="button"
+                    role="menuitem"
+                    disabled={!currentProfile || !onPlaceContentOnMinimized}
+                    className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                    onClick={(e) => {
+                      stopContentRowPointer(e);
+                      handleAddContentToMinimized(item);
+                    }}
+                  >
+                    Minimized row
+                  </button>
+                </span>
+              </FlowTooltip>
               <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
                 Drag the row to drop on a tile. Row click: path and “Opens with”
                 in the panel.
@@ -857,26 +868,35 @@ export function ContentManager({
         onMouseDown={stopContentRowPointer}
       >
         <div className="relative">
-          <button
-            type="button"
-            disabled={!currentProfile}
-            title="Add folder contents as one layout tile"
-            aria-label={`Add folder ${folder.name} to layout`}
-            aria-expanded={compactAddMenu?.key === k}
-            aria-haspopup="menu"
-            onClick={(e) => {
-              stopContentRowPointer(e);
-              setAppDropdownOpen(null);
-              setCompactAddMenu((prev) =>
-                prev?.key === k
-                  ? null
-                  : { key: k, anchor: e.currentTarget as HTMLElement },
-              );
-            }}
-            className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+          <FlowTooltip
+            label={
+              !currentProfile
+                ? "Select a profile first"
+                : "Add folder contents as one layout tile"
+            }
           >
-            <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
-          </button>
+            <span className="inline-flex">
+              <button
+                type="button"
+                disabled={!currentProfile}
+                aria-label={`Add folder ${folder.name} to layout`}
+                aria-expanded={compactAddMenu?.key === k}
+                aria-haspopup="menu"
+                onClick={(e) => {
+                  stopContentRowPointer(e);
+                  setAppDropdownOpen(null);
+                  setCompactAddMenu((prev) =>
+                    prev?.key === k
+                      ? null
+                      : { key: k, anchor: e.currentTarget as HTMLElement },
+                  );
+                }}
+                className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
+              </button>
+            </span>
+          </FlowTooltip>
           {compactAddMenu?.key === k ? (
             <SidebarOverlayMenu
               open
@@ -1141,17 +1161,23 @@ export function ContentManager({
             </div>
 
             <div className="flex-shrink-0 flex items-center gap-1">
-              <button
-                onClick={(e) => handleToggleFavorite(e, folder.id, true)}
-                className={`p-1.5 rounded transition-colors ${
-                  folder.isFavorite 
-                    ? 'text-red-400 hover:text-red-300' 
-                    : 'text-flow-text-muted hover:text-red-400'
-                }`}
-                title={folder.isFavorite ? "Remove from favorites" : "Add to favorites"}
+              <FlowTooltip
+                label={
+                  folder.isFavorite ? "Remove from favorites" : "Add to favorites"
+                }
               >
-                <Heart className={`w-4 h-4 ${folder.isFavorite ? 'fill-current' : ''}`} />
-              </button>
+                <button
+                  type="button"
+                  onClick={(e) => handleToggleFavorite(e, folder.id, true)}
+                  className={`p-1.5 rounded transition-colors ${
+                    folder.isFavorite 
+                      ? 'text-red-400 hover:text-red-300' 
+                      : 'text-flow-text-muted hover:text-red-400'
+                  }`}
+                >
+                  <Heart className={`w-4 h-4 ${folder.isFavorite ? 'fill-current' : ''}`} />
+                </button>
+              </FlowTooltip>
               <ChevronRight className="w-4 h-4 text-flow-text-muted" />
             </div>
           </div>
@@ -1227,17 +1253,23 @@ export function ContentManager({
           </div>
 
           <div className="flex-shrink-0 flex items-center gap-1">
-            <button
-              onClick={(e) => handleToggleFavorite(e, folder.id, true)}
-              className={`p-1 rounded transition-colors ${
-                folder.isFavorite 
-                  ? 'text-red-400 hover:text-red-300' 
-                  : 'text-flow-text-muted hover:text-red-400'
-              }`}
-              title={folder.isFavorite ? "Remove from favorites" : "Add to favorites"}
+            <FlowTooltip
+              label={
+                folder.isFavorite ? "Remove from favorites" : "Add to favorites"
+              }
             >
-              <Heart className={`w-3 h-3 ${folder.isFavorite ? 'fill-current' : ''}`} />
-            </button>
+              <button
+                type="button"
+                onClick={(e) => handleToggleFavorite(e, folder.id, true)}
+                className={`p-1 rounded transition-colors ${
+                  folder.isFavorite 
+                    ? 'text-red-400 hover:text-red-300' 
+                    : 'text-flow-text-muted hover:text-red-400'
+                }`}
+              >
+                <Heart className={`w-3 h-3 ${folder.isFavorite ? 'fill-current' : ''}`} />
+              </button>
+            </FlowTooltip>
             <ChevronRight className="w-3 h-3 text-flow-text-muted" />
           </div>
         </div>
@@ -1577,14 +1609,15 @@ export function ContentManager({
       >
         <div className="flex min-w-0 items-center gap-2">
           {compact ? (
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
-              title={CONTENT_SIDEBAR_COMPACT_HELP}
-              aria-label={CONTENT_SIDEBAR_COMPACT_HELP}
-            >
-              <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-            </button>
+            <FlowTooltip label={CONTENT_SIDEBAR_COMPACT_HELP}>
+              <button
+                type="button"
+                className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
+                aria-label={CONTENT_SIDEBAR_COMPACT_HELP}
+              >
+                <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+              </button>
+            </FlowTooltip>
           ) : (
             <>
               <Link
@@ -1641,16 +1674,17 @@ export function ContentManager({
             </span>
           ) : null}
           <div className="relative">
-            <button
-              type="button"
-              onClick={() => setShowAddMenu(!showAddMenu)}
-              className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-flow-text-secondary transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
-              title="Add Content"
-            >
-              <Plus className="h-3 w-3" />
-              Add
-              <ChevronDown className="h-3 w-3" />
-            </button>
+            <FlowTooltip label="Add Content">
+              <button
+                type="button"
+                onClick={() => setShowAddMenu(!showAddMenu)}
+                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-flow-text-secondary transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+              >
+                <Plus className="h-3 w-3" />
+                Add
+                <ChevronDown className="h-3 w-3" />
+              </button>
+            </FlowTooltip>
 
             {showAddMenu && (
               <div className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 w-40 min-w-0 py-0.5">
@@ -1707,67 +1741,73 @@ export function ContentManager({
         {!compact ? (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
-              <select
-                value={selectedType}
-                onChange={(e) =>
-                  setSelectedType(
-                    e.target.value as "all" | "link" | "file" | "folder",
-                  )
-                }
-                className="rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
-                title="Filter by content type"
-              >
-                <option value="all">All Types</option>
-                <option value="link">Links</option>
-                <option value="file">Files</option>
-                <option value="folder">Folders</option>
-              </select>
+              <FlowTooltip label="Filter by content type">
+                <select
+                  value={selectedType}
+                  onChange={(e) =>
+                    setSelectedType(
+                      e.target.value as "all" | "link" | "file" | "folder",
+                    )
+                  }
+                  className="w-full rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                >
+                  <option value="all">All Types</option>
+                  <option value="link">Links</option>
+                  <option value="file">Files</option>
+                  <option value="folder">Folders</option>
+                </select>
+              </FlowTooltip>
 
-              <select
-                value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as SortOption)}
-                className="rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
-                title="Sort content by"
-              >
-                <option value="name">Name</option>
-                <option value="lastUsed">Recent</option>
-                <option value="dateAdded">Added</option>
-                <option value="type">Type</option>
-                <option value="favorites">Favorites</option>
-              </select>
+              <FlowTooltip label="Sort content by">
+                <select
+                  value={sortBy}
+                  onChange={(e) => setSortBy(e.target.value as SortOption)}
+                  className="w-full rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                >
+                  <option value="name">Name</option>
+                  <option value="lastUsed">Recent</option>
+                  <option value="dateAdded">Added</option>
+                  <option value="type">Type</option>
+                  <option value="favorites">Favorites</option>
+                </select>
+              </FlowTooltip>
             </div>
 
             <div className="flex items-center gap-2">
-              <select
-                value={viewMode}
-                onChange={(e) => setViewMode(e.target.value as ViewMode)}
-                className="flex-1 rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
-                title="Change view mode"
-              >
-                <option value="normal">Normal</option>
-                <option value="detailed">Detailed</option>
-                <option value="simplified">Compact</option>
-              </select>
+              <FlowTooltip label="Change view mode">
+                <select
+                  value={viewMode}
+                  onChange={(e) => setViewMode(e.target.value as ViewMode)}
+                  className="min-w-0 flex-1 rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                >
+                  <option value="normal">Normal</option>
+                  <option value="detailed">Detailed</option>
+                  <option value="simplified">Compact</option>
+                </select>
+              </FlowTooltip>
 
-              <button
-                type="button"
-                onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
-                className={`inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs transition-colors ${
-                  showFavoritesOnly
-                    ? "border border-flow-accent-blue/30 bg-flow-accent-blue/20 text-flow-accent-blue"
-                    : "border border-flow-border bg-flow-surface text-flow-text-secondary hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
-                }`}
-                title={
+              <FlowTooltip
+                label={
                   showFavoritesOnly ? "Show all content" : "Show favorites only"
                 }
               >
-                <Heart
-                  className={`h-3 w-3 ${showFavoritesOnly ? "fill-current" : ""}`}
-                />
-                <span className="whitespace-nowrap">
-                  {showFavoritesOnly ? "Favs" : "All"}
-                </span>
-              </button>
+                <button
+                  type="button"
+                  onClick={() => setShowFavoritesOnly(!showFavoritesOnly)}
+                  className={`inline-flex items-center gap-1 rounded px-3 py-1.5 text-xs transition-colors ${
+                    showFavoritesOnly
+                      ? "border border-flow-accent-blue/30 bg-flow-accent-blue/20 text-flow-accent-blue"
+                      : "border border-flow-border bg-flow-surface text-flow-text-secondary hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
+                  }`}
+                >
+                  <Heart
+                    className={`h-3 w-3 ${showFavoritesOnly ? "fill-current" : ""}`}
+                  />
+                  <span className="whitespace-nowrap">
+                    {showFavoritesOnly ? "Favs" : "All"}
+                  </span>
+                </button>
+              </FlowTooltip>
             </div>
           </div>
         ) : null}

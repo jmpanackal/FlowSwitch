@@ -17,6 +17,7 @@ import {
 } from "../utils/sidebarExplicitPlacement";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
+import { FlowTooltip } from "./ui/tooltip";
 
 type AppType = {
   name: string;
@@ -311,14 +312,15 @@ export function AppManager({
     return (
       <div className="flex min-h-0 flex-1 flex-col">
         <div className="flex shrink-0 items-center justify-between gap-2 border-b border-flow-border/50 px-3 py-2.5">
-          <button
-            type="button"
-            className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
-            title={APPS_SIDEBAR_HELP}
-            aria-label={APPS_SIDEBAR_HELP}
-          >
-            <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-          </button>
+          <FlowTooltip label={APPS_SIDEBAR_HELP}>
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
+              aria-label={APPS_SIDEBAR_HELP}
+            >
+              <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+            </button>
+          </FlowTooltip>
           <div className="min-w-0 flex-1">
             {installedAppsListLoading ? (
               <div className="text-right">
@@ -399,12 +401,12 @@ export function AppManager({
                 className="flow-card-quiet rounded-lg"
               >
                 <div className="flex items-center gap-3 p-3">
+                  <FlowTooltip label="Drag to add to monitor or minimized apps">
                   <div 
                     className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
                     style={{ backgroundColor: `${app.color ?? '#888'}20` }}
                     onMouseDown={(e) => handleMouseDown(e, app)}
                     onClick={(e) => e.stopPropagation()}
-                    title="Drag to add to monitor or minimized apps"
                   >
                     {iconSrc ? (
                       <>
@@ -432,6 +434,7 @@ export function AppManager({
                       <Settings className="w-4 h-4 text-white opacity-90" aria-hidden />
                     )}
                   </div>
+                  </FlowTooltip>
                   <div
                     className={`flex-1 min-w-0${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
                     onClick={
@@ -458,7 +461,9 @@ export function AppManager({
                       </h4>
                       <div className="flex items-center gap-1">
                         {layoutFlags.runAsAdmin && (
-                          <span className="text-yellow-400 text-xs" title="Run as Admin">⚡</span>
+                          <FlowTooltip label="Run as Admin">
+                            <span className="text-yellow-400 text-xs">⚡</span>
+                          </FlowTooltip>
                         )}
                         {layoutFlags.forceCloseOnExit && (
                           <Power className="w-3 h-3 text-flow-accent-red" />
@@ -480,33 +485,34 @@ export function AppManager({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="relative">
-                      <button
-                        type="button"
-                        className="rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
-                        title={`More actions for ${app.name}`}
-                        aria-label={`More actions for ${app.name}`}
-                        aria-haspopup="menu"
-                        aria-expanded={
-                          overflowMenuOpen?.catalogKey === catalogKey
-                        }
-                        onClick={(e) => {
-                          stopRowPointerForDrag(e);
-                          setOverflowMenuOpen((prev) =>
-                            prev?.catalogKey === catalogKey
-                              ? null
-                              : {
-                                  catalogKey,
-                                  anchor: e.currentTarget as HTMLElement,
-                                },
-                          );
-                        }}
-                      >
-                        <MoreVertical
-                          className="h-3.5 w-3.5"
-                          strokeWidth={2}
-                          aria-hidden
-                        />
-                      </button>
+                      <FlowTooltip label={`More actions for ${app.name}`}>
+                        <button
+                          type="button"
+                          className="rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                          aria-label={`More actions for ${app.name}`}
+                          aria-haspopup="menu"
+                          aria-expanded={
+                            overflowMenuOpen?.catalogKey === catalogKey
+                          }
+                          onClick={(e) => {
+                            stopRowPointerForDrag(e);
+                            setOverflowMenuOpen((prev) =>
+                              prev?.catalogKey === catalogKey
+                                ? null
+                                : {
+                                    catalogKey,
+                                    anchor: e.currentTarget as HTMLElement,
+                                  },
+                            );
+                          }}
+                        >
+                          <MoreVertical
+                            className="h-3.5 w-3.5"
+                            strokeWidth={2}
+                            aria-hidden
+                          />
+                        </button>
+                      </FlowTooltip>
                       {overflowMenuOpen?.catalogKey === catalogKey ? (
                         <SidebarOverlayMenu
                           open
@@ -543,23 +549,26 @@ export function AppManager({
                               role="separator"
                               aria-hidden
                             />
-                            <button
-                              type="button"
-                              role="menuitem"
-                              disabled={!currentProfile || !onAddAppToMinimized}
-                              title={
-                                !currentProfile
-                                  ? "Select a profile first"
-                                  : undefined
+                            <FlowTooltip
+                              label={
+                                !currentProfile ? "Select a profile first" : undefined
                               }
-                              className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                              onClick={(e) => {
-                                stopRowPointerForDrag(e);
-                                handleAddInstalledToMinimized(app);
-                              }}
                             >
-                              Minimized row
-                            </button>
+                              <span className="flex w-full">
+                                <button
+                                  type="button"
+                                  role="menuitem"
+                                  disabled={!currentProfile || !onAddAppToMinimized}
+                                  className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                  onClick={(e) => {
+                                    stopRowPointerForDrag(e);
+                                    handleAddInstalledToMinimized(app);
+                                  }}
+                                >
+                                  Minimized row
+                                </button>
+                              </span>
+                            </FlowTooltip>
                           </div>
                           <div
                             className="my-1 h-px bg-flow-border/60"

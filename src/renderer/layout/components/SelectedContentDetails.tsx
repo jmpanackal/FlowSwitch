@@ -21,6 +21,7 @@ import {
   inspectorPanelListButtonClass,
 } from "./inspectorStyles";
 import { getCompatibleOpensWithApps } from "../utils/contentOpensWithOptions";
+import { FlowTooltip } from "./ui/tooltip";
 
 export type LibrarySelection =
   | { kind: "item"; item: ContentItem }
@@ -417,15 +418,16 @@ export function SelectedContentDetails({
                   ) : null}
                 </div>
                 {row.detail && row.entryKind !== "missing" ? (
-                  <button
-                    type="button"
-                    title="Copy path or URL"
-                    aria-label={`Copy ${row.name}`}
-                    onClick={() => void copyText(row.detail, "Copied")}
-                    className="shrink-0 rounded p-1 text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
-                  >
-                    <Copy className="h-3.5 w-3.5" aria-hidden />
-                  </button>
+                  <FlowTooltip label="Copy path or URL">
+                    <button
+                      type="button"
+                      aria-label={`Copy ${row.name}`}
+                      onClick={() => void copyText(row.detail, "Copied")}
+                      className="shrink-0 rounded p-1 text-flow-text-muted hover:bg-flow-surface hover:text-flow-text-primary"
+                    >
+                      <Copy className="h-3.5 w-3.5" aria-hidden />
+                    </button>
+                  </FlowTooltip>
                 ) : null}
               </li>
             ))}
