@@ -15,6 +15,8 @@ const hiddenProcessNamePatterns = [
   /^widgetboard$/i,
   /^applicationframehost$/i,
   /^startmenuexperiencehost$/i,
+  // Windows Settings (modern SystemSettings.exe) — OS UI, not a workspace app
+  /^systemsettings$/i,
   /^flowswitch$/i, // Exclude FlowSwitch itself from window placement
   // NVIDIA / GeForce satellite processes (layout capture; not user-facing apps)
   /^nvrla$/i,
