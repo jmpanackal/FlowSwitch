@@ -106,6 +106,12 @@ Exposed from `src/preload.js` (typed in `src/types/preload.d.ts`), including:
 
 ---
 
+## Releases (Windows)
+
+Publishing is driven by **Git tags**: push `v*` matching `package.json` `version` (for example `v0.1.0` for version `0.1.0`). [`.github/workflows/release.yml`](.github/workflows/release.yml) builds installers on `windows-latest` and uploads the NSIS and portable `.exe` files to the GitHub Release. The marketing site reads `website/latest.json` for the download URLs; run `npm run website:sync-latest` after changing version or repo. Details: [`website/README.md`](website/README.md).
+
+---
+
 ## Contributing
 
 See **[AGENTS.md](./AGENTS.md)** for branch naming, commit conventions, and the default QA checklist (lint, typecheck, build, manual flows).

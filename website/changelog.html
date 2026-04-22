@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="description" content="FlowSwitch release notes." />
+    <meta name="theme-color" content="#0b0c10" />
+    <title>FlowSwitch — Changelog</title>
+    <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.css" />
+    <link rel="stylesheet" href="./styles.css?v=8" />
+    <script defer src="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.min.js"></script>
+    <script defer src="./site-core.js"></script>
+  </head>
+  <body class="page-sub">
+    <a class="skip-link" href="#main">Skip to content</a>
+    <header class="site-header">
+      <div class="wrap site-header__inner">
+        <a class="brand" href="./">
+          <img src="./assets/flowswitch-logo.png" width="34" height="34" alt="" />
+          <span>FlowSwitch</span>
+        </a>
+        <nav class="nav" aria-label="Site">
+          <a href="./">Home</a>
+          <a href="./changelog.html" aria-current="page">Changelog</a>
+          <a href="./privacy.html">Privacy</a>
+        </nav>
+        <a class="btn-header-cta" href="./index.html#download">Download</a>
+      </div>
+    </header>
+
+    <main id="main" class="inner-page wrap prose">
+      <h1>Changelog</h1>
+      <p>High-level release notes for FlowSwitch.</p>
+
+      <h2>0.1.0</h2>
+      <ul class="list">
+        <li>Initial Windows packaging: NSIS installer and portable executable.</li>
+        <li>Marketing site with download links.</li>
+      </ul>
+    </main>
+
+    <footer class="site-footer">
+      <div class="wrap site-footer__grid">
+        <div class="site-footer__brand">
+          <a href="./" class="brand brand--footer">
+            <img src="./assets/flowswitch-logo.png" alt="" width="32" height="32" />
+            <span>FlowSwitch</span>
+          </a>
+        </div>
+        <div>
+          <h3 class="site-footer__heading">Product</h3>
+          <ul class="site-footer__links">
+            <li><a href="./index.html#how-it-works">How it works</a></li>
+            <li><a href="./index.html#download">Download</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="site-footer__heading">Legal</h3>
+          <ul class="site-footer__links">
+            <li><a href="./privacy.html">Privacy</a></li>
+            <li><a href="./changelog.html" aria-current="page">Changelog</a></li>
+          </ul>
+        </div>
+        <div>
+          <h3 class="site-footer__heading">Stack</h3>
+          <p class="site-footer__fine">
+            <a href="https://vitejs.dev/">Vite</a> · <a href="https://www.electronjs.org/">Electron</a>
+          </p>
+        </div>
+      </div>
+      <div class="wrap site-footer__bottom">
+        <p><a href="./">Back to home</a></p>
+      </div>
+    </footer>
+  </body>
+</html>
