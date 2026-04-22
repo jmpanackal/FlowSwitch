@@ -10,6 +10,8 @@ module.exports = [
       'dist/**',
       'node_modules/**',
       '.cursor/**',
+      'website/**',
+      'release/**',
     ],
   },
   js.configs.recommended,

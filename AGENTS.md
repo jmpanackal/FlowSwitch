@@ -11,6 +11,8 @@ Repository-level source of truth for workflow, quality, and change hygiene.
 - Typecheck (full): `npm run typecheck:full`
 - Tests: `npm run test`
 - Production build: `npm run build`
+- Package Windows (NSIS + portable): `npm run dist:win` (output in `release/`)
+- Sync marketing `latest.json`: `npm run website:sync-latest` (optional env `FLOWSWITCH_GITHUB_REPO=owner/repo`)
 
 ## Latest Launch Diagnostics Log
 

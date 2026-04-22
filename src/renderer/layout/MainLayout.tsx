@@ -293,6 +293,7 @@ export default function App() {
     updateBrowserTabs,
     addBrowserTab,
     handleAutoSnapApps,
+    bringStackMemberToFront,
     duplicateProfile,
     deleteProfile,
     renameProfile,
@@ -1817,6 +1818,16 @@ export default function App() {
                   onClearAppSelection={handleClearAppSelection}
                   onFileSelect={() => {}} // REMOVED: No standalone file selection
                   onAutoSnapApps={handleAutoSnapApps}
+                  onBringStackMemberToFront={
+                    currentProfile
+                      ? (monitorId, appIndex) =>
+                          bringStackMemberToFront(
+                            currentProfile.id,
+                            monitorId,
+                            appIndex,
+                          )
+                      : undefined
+                  }
                   large={!rightSidebarOpen}
                 />
               </div>

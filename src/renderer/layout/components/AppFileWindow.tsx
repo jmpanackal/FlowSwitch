@@ -68,7 +68,10 @@ interface AppFileWindowProps {
     isActive?: boolean;
   }[];
   onDragStart: () => void;
-  onDrag: (position: { x: number; y: number }) => void;
+  onDrag: (
+    position: { x: number; y: number },
+    pointerInMonitorPercent?: { x: number; y: number },
+  ) => void;
   onDragEnd: () => void;
   onCustomDragStart?: (startPos: { x: number; y: number }) => void;
   /** Optional — tile chrome uses minimize / maximize / close instead. */
@@ -216,6 +219,53 @@ export function AppFileWindow({
     startPosition: { x: 0, y: 0 },
     monitorElement: null as HTMLElement | null
   });
+
+  /** Same function instances passed to add/removeEventListener for document drag. */
+  const docDragPairRef = useRef<{
+    move: (e: MouseEvent) => void;
+    up: () => void;
+  } | null>(null);
+
+  const dragItemRef = useRef(item);
+  dragItemRef.current = item;
+  const onDragRef = useRef(onDrag);
+  onDragRef.current = onDrag;
+  const onDragEndRef = useRef(onDragEnd);
+  onDragEndRef.current = onDragEnd;
+
+  const detachDocumentDragListeners = () => {
+    const pair = docDragPairRef.current;
+    if (!pair) return;
+    document.removeEventListener("mousemove", pair.move);
+    document.removeEventListener("mouseup", pair.up, true);
+    document.removeEventListener("pointerup", pair.up, true);
+    document.removeEventListener("pointercancel", pair.up, true);
+    docDragPairRef.current = null;
+  };
+
+  const finalizeDocumentPercentDrag = () => {
+    if (!dragStateRef.current.isDragging) {
+      detachDocumentDragListeners();
+      // Parent can clear layout drag (e.g. HTML5 dragend before mouseup) while this
+      // tile still has localDragging — always drop the local tint/listeners.
+      setLocalDragging(false);
+      return;
+    }
+    dragStateRef.current.isDragging = false;
+    detachDocumentDragListeners();
+    restoreDocumentTextSelection();
+    setLocalDragging(false);
+    mouseStateRef.current.dragInitiated = false;
+    mouseStateRef.current.isMouseDown = false;
+    try {
+      onDragEndRef.current();
+    } catch {
+      // Profile update can throw; tile chrome is already cleared above.
+    }
+  };
+
+  const finalizeDocumentPercentDragRef = useRef(finalizeDocumentPercentDrag);
+  finalizeDocumentPercentDragRef.current = finalizeDocumentPercentDrag;
 
   // Timer and state for click vs drag detection
   const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
@@ -629,17 +679,20 @@ export function AppFileWindow({
     onDragStart();
   };
 
-  const handleDragEndEvent = (e: React.DragEvent) => {
-    console.log('📦 UNIFIED WINDOW DRAG END');
-    
-    const globalDragEndEvent = new CustomEvent('flowswitch:dragend', {
-      bubbles: true
-    });
-    
-    document.dispatchEvent(globalDragEndEvent);
+  const handleDragEndEvent = (_e: React.DragEvent) => {
+    document.dispatchEvent(
+      new CustomEvent("flowswitch:dragend", { bubbles: true }),
+    );
     delete (window as any).flowswitchDragData;
-    // Must run so MonitorLayout clears localDragState (snap/drag chrome) after HTML5 drag.
-    onDragEnd();
+
+    // Native `dragend` can fire before `document` `mouseup`. In that case MonitorLayout
+    // already ran `onDragEnd` from this handler while percent-drag state (`localDragging`)
+    // was still true — finalize clears the tile tint and document listeners.
+    const hadPercentDrag = dragStateRef.current.isDragging;
+    finalizeDocumentPercentDragRef.current();
+    if (!hadPercentDrag) {
+      onDragEnd();
+    }
   };
 
   // ENHANCED MOUSE SYSTEM with click vs drag detection
@@ -767,13 +820,62 @@ export function AppFileWindow({
     
     setLocalDragging(true);
     onDragStart();
-    
+
     // Remove click detection listeners and add drag listeners
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
     document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-    
-    document.addEventListener('mousemove', handleGlobalMouseMove);
-    document.addEventListener('mouseup', handleGlobalMouseUp);
+
+    detachDocumentDragListeners();
+
+    const move = (e: MouseEvent) => {
+      if (!dragStateRef.current.isDragging || !dragStateRef.current.monitorElement) {
+        return;
+      }
+
+      const it = dragItemRef.current;
+      const deltaX = e.clientX - dragStateRef.current.startX;
+      const deltaY = e.clientY - dragStateRef.current.startY;
+
+      const monitorRect = dragStateRef.current.monitorElement.getBoundingClientRect();
+
+      const percentDeltaX = (deltaX / monitorRect.width) * 100;
+      const percentDeltaY = (deltaY / monitorRect.height) * 100;
+
+      const newX = Math.max(
+        it.size.width / 2,
+        Math.min(
+          100 - it.size.width / 2,
+          dragStateRef.current.startPosition.x + percentDeltaX,
+        ),
+      );
+
+      const newY = Math.max(
+        it.size.height / 2,
+        Math.min(
+          100 - it.size.height / 2,
+          dragStateRef.current.startPosition.y + percentDeltaY,
+        ),
+      );
+
+      const newPosition = { x: newX, y: newY };
+      const pointerX = ((e.clientX - monitorRect.left) / monitorRect.width) * 100;
+      const pointerY = ((e.clientY - monitorRect.top) / monitorRect.height) * 100;
+      // Keep raw percentages so parent can tell when pointer is off-monitor
+      // during cross-monitor drags (values can be <0 or >100).
+      onDragRef.current(newPosition, { x: pointerX, y: pointerY });
+    };
+
+    const up = () => {
+      finalizeDocumentPercentDragRef.current();
+    };
+
+    docDragPairRef.current = { move, up };
+    document.addEventListener("mousemove", move);
+    // Capture + pointer lifecycle: same-monitor zone drags must end even when a child
+    // stops propagation or the OS delivers `pointerup` without a bubbled `mouseup`.
+    document.addEventListener("mouseup", up, true);
+    document.addEventListener("pointerup", up, true);
+    document.addEventListener("pointercancel", up, true);
   };
 
   // Handle app selection on click (when not in edit mode)
@@ -799,6 +901,44 @@ export function AppFileWindow({
     }
   };
 
+  useEffect(() => {
+    const onClearMonitorLayoutDrag = () => {
+      finalizeDocumentPercentDragRef.current();
+    };
+    document.addEventListener(
+      "flowswitch:clear-monitor-layout-local-drag",
+      onClearMonitorLayoutDrag,
+    );
+    return () => {
+      document.removeEventListener(
+        "flowswitch:clear-monitor-layout-local-drag",
+        onClearMonitorLayoutDrag,
+      );
+    };
+  }, []);
+
+  // Reconcile: MonitorLayout can clear `isDragging` (clear event / dragend) while this
+  // tile still has an active percent-drag ref or `localDragging` — e.g. lost `mouseup`
+  // or ref still true. Always tear down local drag chrome when the parent says this tile
+  // is no longer the dragged one (do not call `onDragEnd` here; parent already ended).
+  useEffect(() => {
+    if (!isDragging && (localDragging || dragStateRef.current.isDragging)) {
+      dragStateRef.current.isDragging = false;
+      setLocalDragging(false);
+      detachDocumentDragListeners();
+    }
+  }, [isDragging, localDragging]);
+
+  // Drag visuals only make sense in edit mode; force-clear any stale local drag state
+  // when edit mode turns off so released tiles cannot stay tinted.
+  useEffect(() => {
+    if (isEditable) return;
+    if (!localDragging && !dragStateRef.current.isDragging) return;
+    dragStateRef.current.isDragging = false;
+    setLocalDragging(false);
+    detachDocumentDragListeners();
+  }, [isEditable, localDragging]);
+
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
@@ -807,62 +947,9 @@ export function AppFileWindow({
       }
       document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
       document.removeEventListener('mouseup', handleMouseUpForClickDetection);
-      document.removeEventListener('mousemove', handleGlobalMouseMove);
-      document.removeEventListener('mouseup', handleGlobalMouseUp);
+      finalizeDocumentPercentDragRef.current();
     };
   }, []);
-
-  const handleGlobalMouseMove = (e: MouseEvent) => {
-    if (!dragStateRef.current.isDragging || !dragStateRef.current.monitorElement) {
-      return;
-    }
-    
-    const deltaX = e.clientX - dragStateRef.current.startX;
-    const deltaY = e.clientY - dragStateRef.current.startY;
-    
-    const monitorRect = dragStateRef.current.monitorElement.getBoundingClientRect();
-    
-    const percentDeltaX = (deltaX / monitorRect.width) * 100;
-    const percentDeltaY = (deltaY / monitorRect.height) * 100;
-    
-    const newX = Math.max(
-      item.size.width / 2,
-      Math.min(
-        100 - item.size.width / 2,
-        dragStateRef.current.startPosition.x + percentDeltaX
-      )
-    );
-    
-    const newY = Math.max(
-      item.size.height / 2,
-      Math.min(
-        100 - item.size.height / 2,
-        dragStateRef.current.startPosition.y + percentDeltaY
-      )
-    );
-    
-    const newPosition = { x: newX, y: newY };
-    onDrag(newPosition);
-  };
-
-  const handleGlobalMouseUp = (e: MouseEvent) => {
-    if (!dragStateRef.current.isDragging) return;
-    
-    console.log('🏁 DRAG END');
-    
-    dragStateRef.current.isDragging = false;
-    setLocalDragging(false);
-    
-    document.removeEventListener('mousemove', handleGlobalMouseMove);
-    document.removeEventListener('mouseup', handleGlobalMouseUp);
-    restoreDocumentTextSelection();
-    
-    onDragEnd();
-    
-    // Reset mouse state
-    mouseStateRef.current.dragInitiated = false;
-    mouseStateRef.current.isMouseDown = false;
-  };
 
   const handleResizeStart = (e: React.MouseEvent, direction: string) => {
     if (!isEditable) return;
@@ -923,7 +1010,9 @@ export function AppFileWindow({
     setIsExpanded(!isExpanded);
   };
 
-  const isCurrentlyDragging = isDragging || localDragging;
+  // Keep visual highlight tied to parent drag truth to avoid stale local flags
+  // painting a tile as "dragging" after drop.
+  const isCurrentlyDragging = isDragging;
 
   // Visual styling based on state
   const getVisualState = () => {
@@ -937,6 +1026,9 @@ export function AppFileWindow({
   };
 
   const visualState = getVisualState();
+  const monitorTileIdleBackground = monitorPreviewSurface
+    ? "transparent"
+    : `${mainColor}20`;
 
   const getStyling = () => {
     switch (visualState) {
@@ -955,7 +1047,7 @@ export function AppFileWindow({
       default:
         return {
           ring: isEditable ? 'ring-white/30 hover:ring-white/55' : 'ring-white/20',
-          background: `${mainColor}20`,
+          background: monitorTileIdleBackground,
           innerGlow: '',
         };
     }
@@ -1065,7 +1157,7 @@ export function AppFileWindow({
       <div 
         className={outerClassName}
         style={outerPositionStyle}
-        draggable={isEditable}
+        draggable={monitorPreviewSurface ? false : isEditable}
         onDragStart={handleDragStartEvent}
         onDragEnd={handleDragEndEvent}
         data-unified-window="true"
