@@ -400,6 +400,28 @@ a:hover {
   color: var(--text-muted);
 }
 
+.download-error {
+  max-width: 36rem;
+  margin: 1.25rem auto 0;
+  padding: 1rem 1.15rem;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  color: #fecaca;
+  text-align: center;
+  background: rgba(220, 38, 38, 0.12);
+  border: 1px solid rgba(248, 113, 113, 0.35);
+  border-radius: var(--radius);
+}
+
+.download-error a {
+  color: #fde68a;
+}
+
+.download-error code {
+  font-size: 0.85em;
+  color: #fecaca;
+}
+
 .link-portable {
   font-weight: 500;
   color: var(--text-secondary) !important;

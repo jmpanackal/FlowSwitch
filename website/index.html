@@ -32,7 +32,7 @@
       rel="stylesheet"
     />
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.css" />
-    <link rel="stylesheet" href="./styles.css?v=8" />
+    <link rel="stylesheet" href="./styles.css?v=9" />
     <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
     <script defer src="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.min.js"></script>
@@ -56,7 +56,13 @@
           <a href="./changelog.html">Changelog</a>
           <a href="./privacy.html">Privacy</a>
         </nav>
-        <a href="#download" id="header-download" class="btn-header-cta" role="button">Download</a>
+        <a
+          href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
+          id="header-download"
+          class="btn-header-cta"
+          role="button"
+          data-download-link="1"
+        >Download</a>
       </div>
     </header>
 
@@ -78,7 +84,13 @@
             <div class="download-glow-ring">
               <div class="download-glow-ring__inner">
                 <div class="btn-split">
-                  <a href="#download" id="download-installer" class="btn-split-seg btn-split-seg--main" role="button">
+                  <a
+                    href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
+                    id="download-installer"
+                    class="btn-split-seg btn-split-seg--main"
+                    role="button"
+                    data-download-link="1"
+                  >
                     <svg
                       class="btn-icon"
                       xmlns="http://www.w3.org/2000/svg"
@@ -120,7 +132,20 @@
             <p class="hero-download-meta" id="download-version-meta">
               v0.1.0 &middot; Supports Windows 10+
               <br />
-              <a href="#download" id="download-portable" class="link-portable">Portable .exe &rarr;</a>
+              <a
+                href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-portable.exe"
+                id="download-portable"
+                class="link-portable"
+                data-download-link="1"
+                >Portable .exe &rarr;</a>
+            </p>
+            <p id="download-error" class="download-error" hidden>
+              Could not refresh release metadata. If the button opens a GitHub error page, the Windows build may not
+              be attached to
+              <a href="https://github.com/jmpanackal/FlowSwitch/releases/tag/v0.1.0">release v0.1.0</a>
+              yet—check
+              <a href="https://github.com/jmpanackal/FlowSwitch/actions">Actions</a>
+              for the Release workflow, then confirm both <code>.exe</code> files appear under that release.
             </p>
           </div>
         </div>
