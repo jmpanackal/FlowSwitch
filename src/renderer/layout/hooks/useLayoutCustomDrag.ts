@@ -70,6 +70,12 @@ export type ProfileLayoutDragActions = {
     profileId: string,
     sourceMonitorId: string,
     appIndex: number,
+    targetMonitorId?: string,
+  ) => void;
+  updateMinimizedAppTargetMonitor: (
+    profileId: string,
+    appIndex: number,
+    targetMonitorId: string,
   ) => void;
   addBrowserTab: (profileId: string, tab: unknown) => void;
 };
@@ -454,7 +460,10 @@ export function useLayoutCustomDrag({
   );
 
   const handleDropOnMinimized = useCallback(
-    (dragData: any) => {
+    (
+      dragData: any,
+      targetMonitorId: string | null,
+    ) => {
       const currentProfile = currentProfileRef.current;
       const actions = profileDragActionsRef.current;
       if (!currentProfile || !actions) return;
@@ -463,15 +472,36 @@ export function useLayoutCustomDrag({
         addAppToMinimized,
         addBrowserTab,
         moveAppToMinimized,
+        updateMinimizedAppTargetMonitor,
       } = actions;
 
       console.log("🎯 DROP ON MINIMIZED:", dragData);
 
       if (dragData.source === "monitor") {
+        const targetMonitor =
+          targetMonitorId ||
+          dragData.sourceMonitorId ||
+          currentProfile.monitors.find((m) => m.primary)?.id ||
+          "monitor-1";
         moveAppToMinimized(
           currentProfile.id,
           dragData.sourceMonitorId,
           dragData.appIndex,
+          targetMonitor,
+        );
+      } else if (
+        dragData.source === "minimized" &&
+        dragData.type === "app" &&
+        typeof dragData.appIndex === "number"
+      ) {
+        const targetMonitor =
+          targetMonitorId ||
+          currentProfile.monitors.find((m) => m.primary)?.id ||
+          "monitor-1";
+        updateMinimizedAppTargetMonitor(
+          currentProfile.id,
+          dragData.appIndex,
+          targetMonitor,
         );
       } else if (dragData.source === "sidebar") {
         if (dragData.type === "content" || dragData.type === "file") {
@@ -587,7 +617,7 @@ export function useLayoutCustomDrag({
       if (targetType === "monitor" && targetId) {
         handleDropOnMonitor(dragData, targetId, dropPosition);
       } else if (targetType === "minimized") {
-        handleDropOnMinimized(dragData);
+        handleDropOnMinimized(dragData, targetId);
       }
     },
     [currentProfileRef, handleDropOnMonitor, handleDropOnMinimized],

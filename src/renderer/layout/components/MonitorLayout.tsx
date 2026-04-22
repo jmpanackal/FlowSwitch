@@ -7,15 +7,15 @@ import {
   PenLine,
   Save,
   MoreHorizontal,
+  Package,
 } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
-import { MinimizedApps } from "./MinimizedApps";
 import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
 import { FlowTooltip } from "./ui/tooltip";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
-import { matchesMonitorAppSelection } from "../utils/appSelection";
+import { matchesMinimizedAppSelection, matchesMonitorAppSelection } from "../utils/appSelection";
 import {
   buildMonitorLayoutHardwareKey,
   sortMonitorsForLayoutSync,
@@ -176,6 +176,7 @@ interface MinimizedApp {
   volume?: number;
   launchBehavior?: 'new' | 'focus' | 'minimize';
   targetMonitor?: string;
+  instanceId?: string;
   sourcePosition?: { x: number; y: number };
   sourceSize?: { width: number; height: number };
   browserTabs?: { name: string; url: string; isActive: boolean }[];
@@ -334,6 +335,8 @@ export function MonitorLayout({
     dropBand: null,
     stackHoverTargetAppIndex: null,
   });
+  const [minimizedDropPreviewMonitorId, setMinimizedDropPreviewMonitorId] =
+    useState<string | null>(null);
 
   const lastValidSnapStateRef = useRef<{
     snapZone: SnapZone | null;
@@ -1328,6 +1331,41 @@ export function MonitorLayout({
     monitors,
   ]);
 
+  useEffect(() => {
+    if (
+      !isEditMode ||
+      !dragState?.isDragging ||
+      dragState.dragData?.type !== "app"
+    ) {
+      setMinimizedDropPreviewMonitorId(null);
+      return;
+    }
+
+    const { x: clientX, y: clientY } = dragState.currentPosition;
+    const stack = document.elementsFromPoint(clientX, clientY);
+    let hoveredMonitorId: string | null = null;
+
+    for (const node of stack) {
+      if (!(node instanceof HTMLElement)) continue;
+      if (node.closest('[data-app-drag-overlay="true"]')) continue;
+      const dropTarget = node.closest('[data-minimized-drop-target="true"]');
+      if (!(dropTarget instanceof HTMLElement)) continue;
+      const id = dropTarget.getAttribute("data-target-id");
+      if (id) {
+        hoveredMonitorId = id;
+        break;
+      }
+    }
+
+    setMinimizedDropPreviewMonitorId(hoveredMonitorId);
+  }, [
+    dragState?.isDragging,
+    dragState?.dragData?.type,
+    dragState?.currentPosition?.x,
+    dragState?.currentPosition?.y,
+    isEditMode,
+  ]);
+
   const isItemInZone = (item: App, zone: SnapZone): boolean => {
     const positionTolerance = 15;
     const sizeTolerance = 15;
@@ -1820,6 +1858,73 @@ export function MonitorLayout({
   const appDragZonesActive =
     isEditMode && (localDragState.isDragging || !!(dragState?.isDragging && dragState.dragData?.type === 'app'));
 
+  const defaultMinimizedMonitorId =
+    monitors.find((m) => m.primary)?.id ?? monitors[0]?.id ?? "monitor-1";
+  const minimizedAppsByMonitor = useMemo(() => {
+    const groups: Record<string, { app: MinimizedApp; appIndex: number }[]> = {};
+    for (const monitor of monitors) {
+      groups[monitor.id] = [];
+    }
+    minimizedApps.forEach((app, appIndex) => {
+      const target =
+        app.targetMonitor && groups[app.targetMonitor] !== undefined
+          ? app.targetMonitor
+          : defaultMinimizedMonitorId;
+      if (!groups[target]) groups[target] = [];
+      groups[target]!.push({ app, appIndex });
+    });
+    return groups;
+  }, [defaultMinimizedMonitorId, minimizedApps, monitors]);
+
+  const handleMiniTaskbarDragStart = useCallback(
+    (
+      app: MinimizedApp,
+      appIndex: number,
+      startPos: { x: number; y: number },
+    ) => {
+      const previewIconSrc = safeIconSrc(app.iconPath ?? undefined);
+      const preview = (
+        <div className="flex items-center gap-2">
+          {previewIconSrc ? (
+            <img src={previewIconSrc} alt={app.name} className="h-4 w-4 rounded object-contain" />
+          ) : app.icon ? (
+            <app.icon className="h-4 w-4" />
+          ) : (
+            <Package className="h-4 w-4 text-flow-text-muted" />
+          )}
+          <span>{app.name}</span>
+        </div>
+      );
+
+      const dragData = {
+        source: "minimized" as const,
+        type: "app" as const,
+        appIndex,
+        name: app.name,
+        icon: app.icon,
+        iconPath: app.iconPath ?? null,
+        executablePath: app.executablePath ?? null,
+        shortcutPath: app.shortcutPath ?? null,
+        launchUrl: app.launchUrl ?? null,
+        color: app.color,
+        app: {
+          name: app.name,
+          icon: app.icon,
+          iconPath: app.iconPath ?? null,
+          executablePath: app.executablePath ?? null,
+          shortcutPath: app.shortcutPath ?? null,
+          launchUrl: app.launchUrl ?? null,
+          color: app.color,
+          volume: app.volume,
+          targetMonitor: app.targetMonitor,
+        },
+      };
+
+      onCustomDragStart(dragData, "minimized", "minimized", startPos, preview);
+    },
+    [onCustomDragStart],
+  );
+
   const renderCrossMonitorSnapPreview = (monitor: any) => {
     if (!isEditMode) return null;
     if (!dragState?.isDragging || dragState.dragData?.type !== "app") return null;
@@ -2090,6 +2195,7 @@ export function MonitorLayout({
                 : (large ? 'h-72' : 'h-52');
               const stackGapPx = Math.max(5, Math.round(4 + 12 * displayPreviewScale));
               const totalItems = monitor.apps.length; // Only count apps now
+              const minimizedForMonitor = minimizedAppsByMonitor[monitor.id] || [];
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
               const clampedPreview = clampPreviewPosition(monitor, preview, displayPreviewScale);
               
@@ -2551,6 +2657,81 @@ export function MonitorLayout({
                       </div>
                     </div>
                   </div>
+                  <div className={`mx-auto ${baseWidth}`}>
+                    {(() => {
+                      const minimizedDropActive =
+                        isEditMode &&
+                        dragState?.isDragging &&
+                        dragState.dragData?.type === "app" &&
+                        minimizedDropPreviewMonitorId === monitor.id;
+                      return (
+                    <div
+                      className={`relative mt-1.5 flex min-h-9 items-center gap-1 overflow-x-auto rounded-lg border px-1.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm scrollbar-elegant transition-colors ${
+                        minimizedDropActive
+                          ? "ring-1 ring-flow-accent-blue border-flow-accent-blue bg-flow-accent-blue/14 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]"
+                          : "border-white/10 bg-black/45"
+                      }`}
+                      onMouseDown={() => onClearAppSelection?.()}
+                      aria-label={`${monitor.name} minimized apps`}
+                      data-drop-target="minimized"
+                      data-minimized-drop-target="true"
+                      data-target-id={monitor.id}
+                    >
+                      {minimizedForMonitor.length === 0 && !minimizedDropActive ? (
+                        <span className="px-1 text-[10px] text-white/35">Minimized Apps</span>
+                      ) : minimizedForMonitor.map(({ app, appIndex }) => {
+                        const iconSrc = safeIconSrc(app.iconPath ?? undefined);
+                        const selected = matchesMinimizedAppSelection(selectedApp, appIndex, app);
+                        return (
+                          <FlowTooltip key={`${monitor.id}-min-${app.instanceId || appIndex}`} label={app.name}>
+                            <button
+                              type="button"
+                              onMouseDown={(e) => {
+                                e.stopPropagation();
+                                if (!isEditMode) return;
+                                e.preventDefault();
+                                handleMiniTaskbarDragStart(app, appIndex, {
+                                  x: e.clientX,
+                                  y: e.clientY,
+                                });
+                              }}
+                              onClick={() => {
+                                if (isEditMode) return;
+                                onAppSelect?.(app, "minimized", undefined, appIndex);
+                              }}
+                              className={`group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                                selected
+                                  ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
+                                  : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
+                              }`}
+                              aria-label={`Restore ${app.name} to ${monitor.name}`}
+                            >
+                              {iconSrc ? (
+                                <img
+                                  src={iconSrc}
+                                  alt=""
+                                  className="h-5 w-5 object-contain"
+                                  draggable={false}
+                                />
+                              ) : app.icon ? (
+                                <app.icon className="h-5 w-5 text-white/90" />
+                              ) : (
+                                <Package className="h-5 w-5 text-white/60" />
+                              )}
+                            </button>
+                          </FlowTooltip>
+                        );
+                      })}
+                      {minimizedDropActive ? (
+                        <div
+                          className="pointer-events-none h-8 w-8 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
+                          aria-hidden
+                        />
+                      ) : null}
+                    </div>
+                      );
+                    })()}
+                  </div>
                 </div>
               );
             })}
@@ -2559,34 +2740,6 @@ export function MonitorLayout({
         </div>
       </div>
       
-      {/* Minimized Apps: overflow visible so hover popovers are not clipped; min-height fits one full tile row */}
-      <div className="flex-shrink-0 border-t border-flow-border/30 min-h-[clamp(7.5rem,12vh,11rem)] overflow-x-hidden overflow-y-visible">
-        <div
-          className={`scrollbar-elegant min-h-0 max-h-[min(40vh,18rem)] overflow-y-auto overflow-x-hidden [scrollbar-gutter:stable] ${
-            densePreviewMode || layoutColumnHeight < 720 ? 'px-2 py-1' : 'px-3 py-1.5'
-          }`}
-        >
-          <MinimizedApps 
-            apps={minimizedApps}
-            files={[]} // No more standalone files
-            browserTabs={browserTabs}
-            isEditMode={isEditMode}
-            selectedApp={selectedApp}
-            dragState={dragState || null}
-            onCustomDragStart={onCustomDragStart}
-            onAppSelect={onAppSelect}
-            onFileSelect={() => {}} // No more file selection
-            onMoveToMonitor={onMoveMinimizedAppToMonitor}
-            onMoveFileToMonitor={() => {}} // No more file moves
-            onRemoveApp={onRemoveMinimizedApp}
-            onRemoveFile={() => {}} // No more file removal
-            monitors={monitors}
-            compact={layoutColumnHeight > 0 && layoutColumnHeight < 760}
-            onClearAppSelection={onClearAppSelection}
-          />
-        </div>
-      </div>
-
       {dragState?.isDragging
       && dragState.dragData?.type === "app"
       && externalSnapState.stackHoverTargetAppIndex != null

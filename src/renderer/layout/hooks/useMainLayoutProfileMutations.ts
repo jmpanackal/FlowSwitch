@@ -415,6 +415,7 @@ export function useMainLayoutProfileMutations({
     profileId: string,
     monitorId: string,
     appIndex: number,
+    targetMonitorId?: string,
   ) => {
     setProfiles((prev) =>
       prev.map((profile) => {
@@ -491,7 +492,7 @@ export function useMainLayoutProfileMutations({
           color: appToMove.color,
           volume: appToMove.volume || 0,
           launchBehavior: "minimize" as const,
-          targetMonitor: monitorId, // Remember the actual source monitor
+          targetMonitor: targetMonitorId || monitorId,
           sourcePosition: appToMove.position, // Remember the original position
           sourceSize: appToMove.size, // Remember the original size
           browserTabs:
@@ -562,6 +563,26 @@ export function useMainLayoutProfileMutations({
         );
       }
     }
+  };
+
+  const updateMinimizedAppTargetMonitor = (
+    profileId: string,
+    appIndex: number,
+    targetMonitorId: string,
+  ) => {
+    setProfiles((prev) =>
+      prev.map((profile) => {
+        if (profile.id !== profileId) return profile;
+        return {
+          ...profile,
+          minimizedApps: (profile.minimizedApps || []).map((app, index) =>
+            index === appIndex
+              ? { ...app, targetMonitor: targetMonitorId }
+              : app,
+          ),
+        };
+      }),
+    );
   };
 
   // NEW: Move app between monitors
@@ -1050,6 +1071,7 @@ export function useMainLayoutProfileMutations({
     addApp,
     addAppToMinimized,
     moveAppToMinimized,
+    updateMinimizedAppTargetMonitor,
     moveAppBetweenMonitors,
     moveMinimizedAppToMonitor,
     addBrowserTab,
