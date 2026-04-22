@@ -26,6 +26,15 @@ import {
 } from "../utils/documentTextSelection";
 
 export type ProfileLayoutDragActions = {
+  updateApp: (
+    profileId: string,
+    monitorId: string,
+    appIndex: number,
+    updates: {
+      position?: { x: number; y: number };
+      size?: { width: number; height: number };
+    },
+  ) => void;
   associateFileWithApp: (
     profileId: string,
     monitorId: string,
@@ -98,6 +107,7 @@ export function useLayoutCustomDrag({
       if (!currentProfile || !actions) return;
 
       const {
+        updateApp,
         associateFileWithApp,
         addApp,
         addBrowserTab,
@@ -411,6 +421,24 @@ export function useLayoutCustomDrag({
             ? dragData.stackMemberIndices
             : undefined,
         );
+      } else if (
+        dragData.source === "monitor"
+        && dragData.sourceMonitorId === targetMonitorId
+        && typeof dragData.appIndex === "number"
+      ) {
+        updateApp(currentProfile.id, targetMonitorId, dragData.appIndex, {
+          position,
+          size: snappedSize,
+        });
+        if (Array.isArray(dragData.stackMemberIndices)) {
+          for (const idx of dragData.stackMemberIndices) {
+            if (idx === dragData.appIndex) continue;
+            updateApp(currentProfile.id, targetMonitorId, idx, {
+              position,
+              size: snappedSize,
+            });
+          }
+        }
       } else if (dragData.source === "minimized") {
         moveMinimizedAppToMonitor(
           currentProfile.id,

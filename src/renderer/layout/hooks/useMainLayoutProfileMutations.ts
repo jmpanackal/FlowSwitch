@@ -1045,6 +1045,7 @@ export function useMainLayoutProfileMutations({
   };
 
   profileDragActionsRef.current = {
+    updateApp,
     associateFileWithApp,
     addApp,
     addAppToMinimized,
