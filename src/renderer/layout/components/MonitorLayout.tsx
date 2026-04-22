@@ -90,7 +90,7 @@ function StackPreviewFollower({
               <SourceIcon className="h-6 w-6 text-white" />
             ) : null}
           </div>
-          <div className="relative z-10 flex h-9 w-9 items-center justify-center rounded-lg border-2 border-flow-accent-blue bg-black/80">
+          <div className="relative z-10 flex h-9 w-9 items-center justify-center rounded-lg border-2 border-white/40 bg-black/80">
             {targetIconSrc ? (
               <img src={targetIconSrc} alt="" className="h-6 w-6 object-contain" draggable={false} />
             ) : TargetIcon ? (
@@ -1596,6 +1596,19 @@ export function MonitorLayout({
       localDragState.lastValidSnapState?.dropBand ||
       lastValidSnapStateRef.current?.dropBand ||
       "merge";
+    const draggedIsMergingIntoOccupiedZone =
+      !!(
+        resolvedSnapZone
+        && dragEndZones
+        && monitor
+        && currentDropBand === "merge"
+      )
+      && indicesOccupyingZone(
+        monitor.apps,
+        dragEndZones,
+        resolvedSnapZone,
+        itemIndex,
+      ).length > 0;
 
     const sameSourceZone =
       !!resolvedSnapZone &&
@@ -1656,6 +1669,9 @@ export function MonitorLayout({
           };
           updateCallback(monitorId, itemIndex, layout);
           applyCoDrag(layout);
+          if (draggedIsMergingIntoOccupiedZone) {
+            onBringStackMemberToFront?.(monitorId, itemIndex);
+          }
         }
       }
     } finally {
