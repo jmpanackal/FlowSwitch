@@ -13,6 +13,9 @@ Thumbs.db
 out/
 release/
 
+# Staged Windows installers for static site hosting (use website:stage-downloads)
+website/downloads/*.exe
+
 # Tailwind cache
 .pnpm-debug.log
 tailwind.config.js.backup

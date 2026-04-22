@@ -49,7 +49,10 @@ jobs:
       - name: Upload release assets
         uses: softprops/action-gh-release@v2
         with:
-          files: release/*.exe
+          generate_release_notes: true
+          files: |
+            release/FlowSwitch-*-win-x64-installer.exe
+            release/FlowSwitch-*-win-x64-portable.exe
           fail_on_unmatched_files: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

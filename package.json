@@ -20,7 +20,8 @@
     "dist:prepare": "npm run build",
     "dist:win": "npm run dist:prepare && electron-builder --win --x64 --publish never",
     "dist": "npm run dist:prepare && electron-builder --publish never",
-    "website:sync-latest": "node scripts/sync-website-latest-json.mjs"
+    "website:sync-latest": "node scripts/sync-website-latest-json.mjs",
+    "website:stage-downloads": "node scripts/stage-website-downloads.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
