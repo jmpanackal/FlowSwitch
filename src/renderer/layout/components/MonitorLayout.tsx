@@ -347,6 +347,7 @@ export function MonitorLayout({
     size: { width: number; height: number };
   } | null>(null);
   const dragSourceZoneIdRef = useRef<string | null>(null);
+  const lastDragPositionRef = useRef<{ x: number; y: number } | null>(null);
   /**
    * When dragging the front tile of a stack, indices of co-located stack members (for drag-end
    * sync only — during drag we update the dragged tile only to avoid N profile writes per frame).
@@ -366,6 +367,7 @@ export function MonitorLayout({
       stackCoDragIndicesRef.current = null;
       dragOriginRef.current = null;
       dragSourceZoneIdRef.current = null;
+      lastDragPositionRef.current = null;
       frozenDragZonesRef.current = null;
       lastValidSnapStateRef.current = null;
       setLocalDragState({
@@ -1430,6 +1432,7 @@ export function MonitorLayout({
       stackHoverTargetAppIndex: null,
       lastValidSnapState: null,
     });
+    lastDragPositionRef.current = null;
   };
 
   const handleItemDrag = (
@@ -1457,6 +1460,7 @@ export function MonitorLayout({
     // Prefer the zone set captured at drag-start so dynamic layouts do not
     // flip grids while the tile is in flight.
     const zones = frozenDragZonesRef.current ?? getSnapZones(monitor);
+    lastDragPositionRef.current = { ...newPosition };
     if (pointerOutsideSourceMonitor) {
       const dragged = monitor.apps[itemIndex];
       const freeLayout = dragged
@@ -1553,11 +1557,32 @@ export function MonitorLayout({
 
   const handleItemDragEnd = (monitorId: string, itemIndex: number, itemType: "app") => {
     const updateCallback = onUpdateApp;
+    const monitor = monitors.find((m) => m.id === monitorId);
+    const dragEndZones =
+      monitor
+        ? (frozenDragZonesRef.current ?? getSnapZones(monitor))
+        : null;
+    const draggedAtRelease =
+      monitor && monitor.apps && monitor.apps[itemIndex]
+        ? monitor.apps[itemIndex]
+        : null;
+    const dragPositionAtRelease =
+      lastDragPositionRef.current
+      || draggedAtRelease?.position
+      || null;
+    const releasePositionSnapZone =
+      dragEndZones && dragPositionAtRelease
+        ? findClosestZone(dragEndZones, dragPositionAtRelease)
+        : null;
 
     const currentSnapZone =
       localDragState.snapZone ||
       localDragState.lastValidSnapState?.snapZone ||
       lastValidSnapStateRef.current?.snapZone;
+    const resolvedSnapZone =
+      releasePositionSnapZone ||
+      currentSnapZone ||
+      null;
     const currentConflictItem =
       localDragState.conflictItem ||
       localDragState.lastValidSnapState?.conflictItem ||
@@ -1573,8 +1598,8 @@ export function MonitorLayout({
       "merge";
 
     const sameSourceZone =
-      !!currentSnapZone &&
-      currentSnapZone.id === dragSourceZoneIdRef.current &&
+      !!resolvedSnapZone &&
+      resolvedSnapZone.id === dragSourceZoneIdRef.current &&
       currentDropBand === "merge";
 
     const coDrag = stackCoDragIndicesRef.current;
@@ -1589,7 +1614,7 @@ export function MonitorLayout({
     };
 
     try {
-      if (currentSnapZone && updateCallback) {
+      if (resolvedSnapZone && updateCallback) {
         if (sameSourceZone) {
           const origin = dragOriginRef.current;
           if (origin) {
@@ -1605,8 +1630,8 @@ export function MonitorLayout({
           itemType === "app"
         ) {
           const primaryLayout = {
-            position: { x: currentSnapZone.position.x, y: currentSnapZone.position.y },
-            size: { width: currentSnapZone.size.width, height: currentSnapZone.size.height },
+            position: { x: resolvedSnapZone.position.x, y: resolvedSnapZone.position.y },
+            size: { width: resolvedSnapZone.size.width, height: resolvedSnapZone.size.height },
           };
           try {
             onUpdateAppsWithDisplacement(
@@ -1626,8 +1651,8 @@ export function MonitorLayout({
           }
         } else {
           const layout = {
-            position: { x: currentSnapZone.position.x, y: currentSnapZone.position.y },
-            size: { width: currentSnapZone.size.width, height: currentSnapZone.size.height },
+            position: { x: resolvedSnapZone.position.x, y: resolvedSnapZone.position.y },
+            size: { width: resolvedSnapZone.size.width, height: resolvedSnapZone.size.height },
           };
           updateCallback(monitorId, itemIndex, layout);
           applyCoDrag(layout);
@@ -1637,6 +1662,7 @@ export function MonitorLayout({
       stackCoDragIndicesRef.current = null;
       dragOriginRef.current = null;
       dragSourceZoneIdRef.current = null;
+      lastDragPositionRef.current = null;
       frozenDragZonesRef.current = null;
       lastValidSnapStateRef.current = null;
       setLocalDragState({
@@ -1815,10 +1841,6 @@ export function MonitorLayout({
     const globalAppDragActive = !!(dragState?.isDragging && dragState.dragData && dragState.dragData.type === 'app');
 
     if (!isEditMode) {
-      return null;
-    }
-
-    if (appDragZonesActive) {
       return null;
     }
 
