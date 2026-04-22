@@ -15,8 +15,11 @@
       }
     }
     const repo = String(data.githubRepository || '').replace(/^\/+|\/+$/g, '');
-    const tag = encodeURIComponent(String(data.releaseTag || ''));
-    const file = encodeURIComponent(String(fileName || ''));
+    const tag = String(data.releaseTag || '').trim();
+    const file = String(fileName || '').trim();
+    if (!/^[\w.-]+$/.test(tag) || !/^[\w.-]+$/.test(file)) {
+      return `https://github.com/${repo}/releases`;
+    }
     return `https://github.com/${repo}/releases/download/${tag}/${file}`;
   };
 
@@ -62,7 +65,10 @@
 
   const showDownloadError = () => {
     const err = byId('download-error');
-    if (err) err.hidden = false;
+    if (err) {
+      err.hidden = false;
+      err.setAttribute('aria-live', 'polite');
+    }
   };
 
   if (byId('download-installer')) {
@@ -103,6 +109,7 @@
   document.addEventListener('click', (e) => {
     const a = e.target.closest('a[href^="#"]');
     if (!a || !lenis) return;
+    if (a.dataset.downloadLink === '1') return;
     const hash = a.getAttribute('href');
     if (!hash || hash === '#') return;
     const id = hash.slice(1);

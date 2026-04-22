@@ -30,6 +30,8 @@ The logo file `flowswitch-logo.png` is duplicated here from `public/` so the mar
 
    Wait for the **Release** workflow to finish, then confirm the release assets match the filenames in `website/latest.json` under `files` (for example `FlowSwitch-0.1.0-win-x64-installer.exe` and `FlowSwitch-0.1.0-win-x64-portable.exe`).
 
+If download links open GitHub’s **Not Found** page, the tag exists but the workflow did not attach the `.exe` files (failed job, wrong glob, or Actions disabled). Open **Actions → Release** for that tag and fix the failing step; the marketing page also shows a hint if `latest.json` fails to load.
+
 3. Replace placeholder support text on `privacy.html` before broad marketing.
 
 ## Build the Windows installer (local)
