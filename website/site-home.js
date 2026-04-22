@@ -158,31 +158,6 @@
     );
   });
 
-  document.querySelectorAll('.faq-item').forEach((item) => {
-    const trigger = item.querySelector('.faq-trigger');
-    const panel = item.querySelector('.faq-panel');
-    if (!trigger || !panel) return;
-    trigger.addEventListener('click', () => {
-      const opening = !item.classList.contains('is-open');
-      if (opening) {
-        document.querySelectorAll('.faq-item').forEach((other) => {
-          other.classList.remove('is-open');
-          const ot = other.querySelector('.faq-trigger');
-          const op = other.querySelector('.faq-panel');
-          if (ot) ot.setAttribute('aria-expanded', 'false');
-          if (op) op.setAttribute('aria-hidden', 'true');
-        });
-        item.classList.add('is-open');
-        trigger.setAttribute('aria-expanded', 'true');
-        panel.setAttribute('aria-hidden', 'false');
-      } else {
-        item.classList.remove('is-open');
-        trigger.setAttribute('aria-expanded', 'false');
-        panel.setAttribute('aria-hidden', 'true');
-      }
-    });
-  });
-
   window.addEventListener('load', () => {
     ScrollTrigger.refresh();
   });

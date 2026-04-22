@@ -29,7 +29,6 @@
 
     const primary = byId('download-installer');
     const secondary = byId('download-portable');
-    const splitMenu = byId('download-split-menu');
     const headerDl = byId('header-download');
     const meta = byId('download-version-meta');
     const ver = data?.version || '';
@@ -53,13 +52,6 @@
       const portableUrl = releaseFileUrl(data, port);
       secondary.href = portableUrl;
       secondary.removeAttribute('aria-disabled');
-      if (splitMenu && !splitMenu.dataset.portableWired) {
-        splitMenu.dataset.portableWired = '1';
-        splitMenu.addEventListener('click', () => {
-          window.location.assign(portableUrl);
-        });
-        splitMenu.removeAttribute('aria-disabled');
-      }
     }
   };
 
@@ -162,5 +154,30 @@
     if (!L || !window.location.hash || window.location.hash.length < 2) return;
     const el = document.getElementById(window.location.hash.slice(1));
     if (el) L.scrollTo(el, { offset: -scrollOffset(), duration: 0.01 });
+  });
+
+  document.querySelectorAll('.faq-item').forEach((item) => {
+    const trigger = item.querySelector('.faq-trigger');
+    const panel = item.querySelector('.faq-panel');
+    if (!trigger || !panel) return;
+    trigger.addEventListener('click', () => {
+      const opening = !item.classList.contains('is-open');
+      if (opening) {
+        document.querySelectorAll('.faq-item').forEach((other) => {
+          other.classList.remove('is-open');
+          const ot = other.querySelector('.faq-trigger');
+          const op = other.querySelector('.faq-panel');
+          if (ot) ot.setAttribute('aria-expanded', 'false');
+          if (op) op.setAttribute('aria-hidden', 'true');
+        });
+        item.classList.add('is-open');
+        trigger.setAttribute('aria-expanded', 'true');
+        panel.setAttribute('aria-hidden', 'false');
+      } else {
+        item.classList.remove('is-open');
+        trigger.setAttribute('aria-expanded', 'false');
+        panel.setAttribute('aria-hidden', 'true');
+      }
+    });
   });
 })();

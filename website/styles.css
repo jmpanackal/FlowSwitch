@@ -107,6 +107,9 @@ h1, h2, h3, h4, h5, h6, .brand {
     opacity: 1 !important;
     transform: none !important;
   }
+  .faq-panel {
+    transition: none;
+  }
 }
 
 a {
@@ -211,13 +214,15 @@ a:hover {
   font-weight: 600;
   font-size: 0.9rem;
   text-decoration: none;
-  background: var(--brand-cta);
+  background: var(--brand-primary);
   color: #fff !important;
-  transition: background 0.2s ease, transform 0.2s ease;
+  transition: background 0.2s ease, transform 0.2s ease, box-shadow 0.2s ease;
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.35);
 }
 
 .btn-header-cta:hover {
-  background: #ea580c;
+  background: var(--brand-primary-deep);
+  box-shadow: 0 0 0 1px rgba(14, 165, 233, 0.5);
 }
 
 @media (max-width: 720px) {
@@ -380,14 +385,8 @@ a:hover {
 
 .btn-split-seg--main {
   flex: 1 1 auto;
-  padding-left: 1.75rem;
-}
-
-.btn-split-seg--menu {
-  flex: 0 0 52px;
-  min-width: 52px;
-  padding: 0;
-  border-left: 1px solid rgba(255, 255, 255, 0.08);
+  width: 100%;
+  padding: 0 1.75rem;
 }
 
 .btn-split-seg:hover {
@@ -811,19 +810,24 @@ a:hover {
 }
 
 .faq-panel {
-  display: grid;
-  grid-template-rows: 0fr;
-  transition: grid-template-rows 0.45s cubic-bezier(0.22, 1, 0.36, 1);
+  max-height: 0;
+  overflow: hidden;
+  opacity: 0;
+  padding: 0 1.35rem;
+  transition:
+    max-height 0.45s cubic-bezier(0.22, 1, 0.36, 1),
+    opacity 0.25s ease,
+    padding 0.35s ease;
 }
 
 .faq-item.is-open .faq-panel {
-  grid-template-rows: 1fr;
+  max-height: 24rem;
+  opacity: 1;
+  padding: 0 1.35rem 1.15rem;
 }
 
 .faq-panel-inner {
-  min-height: 0;
   overflow: hidden;
-  padding: 0 1.35rem 1.15rem;
 }
 
 .faq-panel-inner p {
@@ -916,6 +920,14 @@ a:hover {
   margin: 0;
   max-width: 16rem;
   line-height: 1.5;
+}
+
+.site-footer__status {
+  margin: 0.65rem 0 0;
+  max-width: 18rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+  color: var(--text-muted);
 }
 
 .site-footer__heading {
