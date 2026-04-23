@@ -96,4 +96,32 @@
     syncHeader();
     window.addEventListener("scroll", syncHeader, { passive: true });
   }
+
+  /* Smooth same-page # navigation without `html { scroll-behavior: smooth }`, which can
+     conflict with wheel/trackpad scrolling on long sticky sections (marketing home). */
+  document.addEventListener("click", (event) => {
+    const target = event.target;
+    if (!(target instanceof Element)) return;
+    const anchor = target.closest("a[href^=\"#\"]");
+    if (!(anchor instanceof HTMLAnchorElement)) return;
+
+    const hash = anchor.getAttribute("href");
+    if (!hash || hash === "#" || hash.length < 2) return;
+
+    let url;
+    try {
+      url = new URL(anchor.href);
+    } catch {
+      return;
+    }
+
+    if (url.pathname !== window.location.pathname || url.search !== window.location.search) return;
+
+    const el = document.getElementById(hash.slice(1));
+    if (!el) return;
+
+    event.preventDefault();
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
+  });
 })();

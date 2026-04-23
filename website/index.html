@@ -6,13 +6,13 @@
     <title>FlowSwitch - One profile. Your whole workspace.</title>
     <meta
       name="description"
-      content="FlowSwitch captures monitor layouts, app windows, launch flows, and browser context so your desktop can switch states as fast as you do."
+      content="Create a profile from what's running or from scratch, arrange it per monitor, then launch to restore the full layout on Windows with FlowSwitch."
     />
-    <meta name="theme-color" content="#0a0a0a" />
+    <meta name="theme-color" content="#080808" />
     <meta property="og:title" content="FlowSwitch - One profile. Your whole workspace." />
     <meta
       property="og:description"
-      content="Take shortcuts, not detours. Capture, arrange, and switch your whole workspace in one action."
+      content="Create a profile from what's running or from scratch, arrange it per monitor, launch to restore the full layout."
     />
     <meta property="og:type" content="website" />
     <meta property="og:image" content="./assets/flowswitch-logo.png" />
@@ -20,7 +20,7 @@
     <meta name="twitter:title" content="FlowSwitch - One profile. Your whole workspace." />
     <meta
       name="twitter:description"
-      content="Capture, arrange, and switch your whole workspace in one action. Built for people who live in their terminals."
+      content="Create a profile from what's running or from scratch, arrange it per monitor, launch to restore the full layout."
     />
     <meta name="twitter:image" content="./assets/flowswitch-logo.png" />
     <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
@@ -31,9 +31,9 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=36" />
-    <script defer src="./site-core.js?v=2"></script>
-    <script defer src="./site-home.js?v=1"></script>
+    <link rel="stylesheet" href="./styles.css?v=73" />
+    <script defer src="./site-core.js?v=3"></script>
+    <script defer src="./site-home.js?v=5"></script>
   </head>
   <body class="page-home">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -57,7 +57,6 @@
           <a href="#features">Features</a>
           <a href="#faq">FAQ</a>
           <a href="./changelog.html">Changelog</a>
-          <a href="./privacy.html">Privacy</a>
         </nav>
 
         <div class="site-header__actions">
@@ -79,7 +78,6 @@
           <a href="#features">Features</a>
           <a href="#faq">FAQ</a>
           <a href="./changelog.html">Changelog</a>
-          <a href="./privacy.html">Privacy</a>
           <a href="#waitlist">Join waitlist</a>
           <a
             href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
@@ -93,15 +91,23 @@
 
     <main id="main">
       <section class="hero" id="top">
-        <div class="hero__grain" aria-hidden="true"></div>
-        <div class="hero__glow" aria-hidden="true"></div>
+        <!-- FlowBackground v2 — branching stream fields (see website/flows.ts) -->
+        <div class="flow-background" aria-hidden="true" data-flow-background>
+          <canvas class="flow-background__canvas" data-flow-canvas></canvas>
+          <div class="flow-background__veil"></div>
+          <div class="flow-background__glow flow-background__glow--a"></div>
+          <div class="flow-background__glow flow-background__glow--b"></div>
+          <div class="flow-background__glow flow-background__glow--c"></div>
+          <div class="flow-background__grid"></div>
+          <div class="flow-background__grain"></div>
+        </div>
 
         <div class="hero__content">
           <a class="hero__badge" href="./changelog.html" id="download-version-meta">`v0.1.0 · Early access`</a>
           <h1>Switch your setup. Maintain your flow.</h1>
           <p class="hero__subhead">
-            Take control of your desktop. Capture your current arrangement, design new ones, and switch between them in
-            an instant. The simplest way to organize your space.
+            Take control of your desktop. Create profiles from what's running or from scratch, arrange them per monitor,
+            and switch in an instant. The simplest way to organize your space.
           </p>
 
           <div class="hero__actions">
@@ -129,111 +135,399 @@
           <div class="demo__sticky-wrap">
             <div class="section-heading section-heading--demo">
               <p class="section-heading__overline">HOW IT WORKS</p>
-              <h2>Take shortcuts, not detours.</h2>
-              <p>Three steps. One keystroke.</p>
+              <h2 class="section-heading__title-gradient">Create. Arrange. Launch.</h2>
+              <p>Create a profile from what's running or from scratch, arrange it per monitor, launch to restore the full layout.</p>
             </div>
 
+            <div class="demo__monitor-column">
             <div class="demo__monitor-shell">
               <div class="demo__sticky-card" data-demo-card>
-                <aside class="demo__steps" aria-label="Workflow steps">
-              <button type="button" class="demo-step is-active" data-step-target="0">
-                <span class="demo-step__id">C1</span>
-                <span class="demo-step__text">
-                  <strong>Capture Center</strong>
-                  <small>Reads every window, position, and active app in seconds.</small>
-                </span>
-              </button>
-              <button type="button" class="demo-step" data-step-target="1">
-                <span class="demo-step__id">A2</span>
-                <span class="demo-step__text">
-                  <strong>Layout Studio</strong>
-                  <small>Drag profiles into exact positions on each screen.</small>
-                </span>
-              </button>
-              <button type="button" class="demo-step" data-step-target="2">
-                <span class="demo-step__id">S3</span>
-                <span class="demo-step__text">
-                  <strong>Quick Launch</strong>
-                  <small>One keystroke launches apps, layout, and browser context.</small>
-                </span>
-              </button>
-              <button type="button" class="demo-step" data-step-target="3">
-                <span class="demo-step__id">APP</span>
-                <span class="demo-step__text">
-                  <strong>FlowSwitch.app</strong>
-                  <small>The profile switcher for your full workspace state.</small>
-                </span>
-              </button>
-                </aside>
-
-                <div class="demo__viewer">
-                  <article class="demo-panel is-active" data-step-panel="0">
-                    <p class="demo-panel__kicker">C1 · Capture Center</p>
-                    <h3>Capture your current setup</h3>
-                    <p>Reads every window, position, and active app in seconds.</p>
+                <div class="demo__viewer demo__viewer--tabs-only">
+                  <div class="demo__stage" aria-live="polite">
+                  <article class="demo-panel is-active" data-step-panel="0" id="demo-panel-0" role="tabpanel" aria-labelledby="demo-tab-0">
+                    <h3 class="sr-only">Create — profile from what's running or from scratch; windows stay open when you save from memory</h3>
                     <div class="demo-window demo-window--capture" aria-hidden="true">
-                      <div class="demo-window__chip"><span class="dot dot--a"></span><span>capture.exe</span></div>
-                      <div class="demo-window__chip"><span class="dot dot--b"></span><span>chrome</span></div>
-                      <div class="demo-window__chip"><span class="dot dot--c"></span><span>terminal</span></div>
-                      <div class="demo-window__chip"><span class="dot dot--a"></span><span>slack</span></div>
+                      <div class="capture-stage">
+                        <div class="capture-stage__screen">
+                          <div class="capture-mini capture-mini--chrome">
+                            <div class="capture-mini__bar">
+                              <span class="capture-mini__traffic" aria-hidden="true"></span>
+                              <span>Chrome</span>
+                            </div>
+                            <div class="capture-mini__body">
+                              <div class="demo-mock demo-mock--chrome" aria-hidden="true">
+                                <div class="demo-mock__chrome-tabs">
+                                  <span class="demo-mock__chrome-tab demo-mock__chrome-tab--on"></span>
+                                  <span class="demo-mock__chrome-tab"></span>
+                                </div>
+                                <div class="demo-mock__chrome-omni">
+                                  <span class="demo-mock__chrome-lock"></span>
+                                  <span class="demo-mock__chrome-url">docs.flowswitch.dev</span>
+                                </div>
+                                <div class="demo-mock__chrome-page">
+                                  <span class="demo-mock__chrome-hero"></span>
+                                  <span class="demo-mock__chrome-line"></span>
+                                  <span class="demo-mock__chrome-line demo-mock__chrome-line--mid"></span>
+                                  <span class="demo-mock__chrome-line demo-mock__chrome-line--short"></span>
+                                </div>
+                              </div>
+                            </div>
+                            <span class="capture-mini__badge">Saved to profile</span>
+                          </div>
+                          <div class="capture-mini capture-mini--slack">
+                            <div class="capture-mini__bar">
+                              <span class="capture-mini__traffic" aria-hidden="true"></span>
+                              <span>Slack</span>
+                            </div>
+                            <div class="capture-mini__body">
+                              <div class="demo-mock demo-mock--slack" aria-hidden="true">
+                                <div class="demo-mock__slack-shell">
+                                  <div class="demo-mock__slack-rail">
+                                    <span class="demo-mock__slack-dot"></span>
+                                    <span class="demo-mock__slack-dot demo-mock__slack-dot--hi"></span>
+                                    <span class="demo-mock__slack-dot"></span>
+                                  </div>
+                                  <div class="demo-mock__slack-feed">
+                                    <span class="demo-mock__slack-channel">#engineering</span>
+                                    <div class="demo-mock__slack-msg">
+                                      <span class="demo-mock__slack-avatar"></span>
+                                      <span class="demo-mock__slack-lines">
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--name"></span>
+                                        <span class="demo-mock__slack-line"></span>
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--short"></span>
+                                      </span>
+                                    </div>
+                                    <div class="demo-mock__slack-msg">
+                                      <span class="demo-mock__slack-avatar demo-mock__slack-avatar--b"></span>
+                                      <span class="demo-mock__slack-lines">
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--name"></span>
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--mid"></span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <span class="capture-mini__badge">Saved to profile</span>
+                          </div>
+                          <div class="capture-mini capture-mini--vscode">
+                            <div class="capture-mini__bar">
+                              <span class="capture-mini__traffic" aria-hidden="true"></span>
+                              <span>VSCode</span>
+                            </div>
+                            <div class="capture-mini__body">
+                              <div class="demo-mock demo-mock--vscode" aria-hidden="true">
+                                <div class="demo-mock__vscode-tabrow">
+                                  <span class="demo-mock__vscode-tab demo-mock__vscode-tab--on">MainLayout.tsx</span>
+                                  <span class="demo-mock__vscode-tab">types.ts</span>
+                                </div>
+                                <div class="demo-mock__vscode-edit">
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">41</span>
+                                    <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">import</span> React from <span class="demo-mock__tok-s">"react"</span>;</span>
+                                  </div>
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">42</span>
+                                    <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">export</span> <span class="demo-mock__tok-k">function</span> <span class="demo-mock__tok-f">MainLayout</span>() {</span>
+                                  </div>
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">43</span>
+                                    <span class="demo-mock__vscode-code demo-mock__vscode-code--muted"> … </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                            <span class="capture-mini__badge">Saved to profile</span>
+                          </div>
+                        </div>
+                        <div class="capture-stage__notify" role="status">
+                          <div class="capture-stage__notify-main">
+                            <span class="capture-stage__to">Saving to</span>
+                            <span class="capture-stage__name">Development</span>
+                          </div>
+                          <span class="capture-stage__hint">Windows stay open — FlowSwitch remembers them.</span>
+                        </div>
+                      </div>
                     </div>
                   </article>
 
-                  <article class="demo-panel" data-step-panel="1">
-                    <p class="demo-panel__kicker">A2 · Layout Studio</p>
-                    <h3>Arrange across monitors</h3>
-                    <p>Drag profiles into exact positions on each screen.</p>
+                  <article class="demo-panel" data-step-panel="1" id="demo-panel-1" role="tabpanel" aria-labelledby="demo-tab-1">
+                    <h3 class="sr-only">Arrange — close Chrome, drag Notion from Apps into the layout snap</h3>
                     <div class="demo-window demo-window--arrange" aria-hidden="true">
-                      <div class="demo-monitor">
-                        <span class="demo-monitor__label">M1</span>
-                        <i class="pane pane--1"></i><i class="pane pane--2"></i><i class="pane pane--3"></i>
-                      </div>
-                      <div class="demo-monitor">
-                        <span class="demo-monitor__label">M2</span>
-                        <i class="pane pane--4"></i><i class="pane pane--5"></i>
+                      <div class="arrange-demo">
+                        <aside class="arrange-demo__rail">
+                          <div class="arrange-demo__rail-head">Apps</div>
+                          <div class="arrange-demo__rail-item">VS Code</div>
+                          <div class="arrange-demo__rail-item">Slack</div>
+                          <div class="arrange-demo__rail-item arrange-demo__rail-item--chrome">Chrome</div>
+                          <div class="arrange-demo__rail-item arrange-demo__rail-item--notion">Notion</div>
+                        </aside>
+                        <div class="arrange-demo__main">
+                          <div class="arrange-demo__main-head">Monitor layout</div>
+                          <div class="arrange-demo__viewport">
+                            <span class="arrange-demo__m-tag">M1</span>
+                            <div class="arrange-demo__board">
+                              <div class="arrange-demo__slot arrange-demo__slot--tl">
+                                <div class="arrange-demo__snap-zone"></div>
+                                <div class="arrange-demo__win arrange-demo__win--chrome">
+                                  <div class="arrange-demo__win-bar">
+                                    <span class="arrange-demo__traffic" aria-hidden="true"></span>
+                                    <span>Chrome</span>
+                                    <span class="arrange-demo__close" aria-hidden="true" title="Close"></span>
+                                  </div>
+                                  <div class="arrange-demo__win-body">
+                                    <div class="demo-mock demo-mock--chrome" aria-hidden="true">
+                                      <div class="demo-mock__chrome-tabs">
+                                        <span class="demo-mock__chrome-tab demo-mock__chrome-tab--on"></span>
+                                        <span class="demo-mock__chrome-tab"></span>
+                                      </div>
+                                      <div class="demo-mock__chrome-omni">
+                                        <span class="demo-mock__chrome-lock"></span>
+                                        <span class="demo-mock__chrome-url">docs.flowswitch.dev</span>
+                                      </div>
+                                      <div class="demo-mock__chrome-page">
+                                        <span class="demo-mock__chrome-hero"></span>
+                                        <span class="demo-mock__chrome-line"></span>
+                                        <span class="demo-mock__chrome-line demo-mock__chrome-line--mid"></span>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                                <div class="arrange-demo__win arrange-demo__win--notion-dock">
+                                  <div class="arrange-demo__win-bar">
+                                    <span class="arrange-demo__traffic" aria-hidden="true"></span>
+                                    <span>Notion</span>
+                                  </div>
+                                  <div class="arrange-demo__win-body">
+                                    <div class="demo-mock demo-mock--notion" aria-hidden="true">
+                                      <div class="demo-mock__notion-grid">
+                                        <aside class="demo-mock__notion-side">
+                                          <span class="demo-mock__notion-ico"></span>
+                                          <span class="demo-mock__notion-ico demo-mock__notion-ico--on"></span>
+                                          <span class="demo-mock__notion-ico"></span>
+                                        </aside>
+                                        <div class="demo-mock__notion-doc">
+                                          <span class="demo-mock__notion-cover"></span>
+                                          <span class="demo-mock__notion-h1">Product spec · v1</span>
+                                          <span class="demo-mock__notion-task"><span class="demo-mock__notion-check"></span><span class="demo-mock__notion-txt"></span></span>
+                                          <span class="demo-mock__notion-task"><span class="demo-mock__notion-check demo-mock__notion-check--on"></span><span class="demo-mock__notion-txt demo-mock__notion-txt--short"></span></span>
+                                          <span class="demo-mock__notion-callout"></span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div class="arrange-demo__slot arrange-demo__slot--bl">
+                                <div class="arrange-demo__snap-zone"></div>
+                                <div class="arrange-demo__win arrange-demo__win--slack">
+                                  <div class="arrange-demo__win-bar">
+                                    <span class="arrange-demo__traffic" aria-hidden="true"></span>
+                                    <span>Slack</span>
+                                  </div>
+                                  <div class="arrange-demo__win-body">
+                                    <div class="demo-mock demo-mock--slack" aria-hidden="true">
+                                      <div class="demo-mock__slack-shell">
+                                        <div class="demo-mock__slack-rail">
+                                          <span class="demo-mock__slack-dot"></span>
+                                          <span class="demo-mock__slack-dot demo-mock__slack-dot--hi"></span>
+                                          <span class="demo-mock__slack-dot"></span>
+                                        </div>
+                                        <div class="demo-mock__slack-feed">
+                                          <span class="demo-mock__slack-channel">#engineering</span>
+                                          <div class="demo-mock__slack-msg">
+                                            <span class="demo-mock__slack-avatar"></span>
+                                            <span class="demo-mock__slack-lines">
+                                              <span class="demo-mock__slack-line demo-mock__slack-line--name"></span>
+                                              <span class="demo-mock__slack-line"></span>
+                                            </span>
+                                          </div>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                              <div class="arrange-demo__slot arrange-demo__slot--right">
+                                <div class="arrange-demo__snap-zone arrange-demo__snap-zone--muted"></div>
+                                <div class="arrange-demo__win arrange-demo__win--vscode">
+                                  <div class="arrange-demo__win-bar">
+                                    <span class="arrange-demo__traffic" aria-hidden="true"></span>
+                                    <span>VSCode</span>
+                                  </div>
+                                  <div class="arrange-demo__win-body">
+                                    <div class="demo-mock demo-mock--vscode" aria-hidden="true">
+                                      <div class="demo-mock__vscode-tabrow">
+                                        <span class="demo-mock__vscode-tab demo-mock__vscode-tab--on">MainLayout.tsx</span>
+                                        <span class="demo-mock__vscode-tab">types.ts</span>
+                                      </div>
+                                      <div class="demo-mock__vscode-edit">
+                                        <div class="demo-mock__vscode-row">
+                                          <span class="demo-mock__vscode-ln">41</span>
+                                          <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">import</span> React from <span class="demo-mock__tok-s">"react"</span>;</span>
+                                        </div>
+                                        <div class="demo-mock__vscode-row">
+                                          <span class="demo-mock__vscode-ln">42</span>
+                                          <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">export</span> <span class="demo-mock__tok-k">function</span> <span class="demo-mock__tok-f">MainLayout</span>() {</span>
+                                        </div>
+                                        <div class="demo-mock__vscode-row">
+                                          <span class="demo-mock__vscode-ln">43</span>
+                                          <span class="demo-mock__vscode-code demo-mock__vscode-code--muted"> … </span>
+                                        </div>
+                                      </div>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        <div class="arrange-demo__fly-layer">
+                          <div class="arrange-demo__fly arrange-demo__fly--notion">
+                            <div class="arrange-demo__fly-bar">
+                              <span class="arrange-demo__traffic" aria-hidden="true"></span>
+                              <span>Notion</span>
+                            </div>
+                            <div class="arrange-demo__fly-body">
+                              <div class="demo-mock demo-mock--notion demo-mock--compact" aria-hidden="true">
+                                <div class="demo-mock__notion-grid demo-mock__notion-grid--compact">
+                                  <aside class="demo-mock__notion-side demo-mock__notion-side--compact">
+                                    <span class="demo-mock__notion-ico demo-mock__notion-ico--on"></span>
+                                  </aside>
+                                  <div class="demo-mock__notion-doc">
+                                    <span class="demo-mock__notion-h1 demo-mock__notion-h1--sm">Notion</span>
+                                    <span class="demo-mock__notion-task"><span class="demo-mock__notion-check"></span><span class="demo-mock__notion-txt demo-mock__notion-txt--short"></span></span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </article>
 
-                  <article class="demo-panel" data-step-panel="2">
-                    <p class="demo-panel__kicker">S3 · Quick Launch</p>
-                    <h3>Switch in one action</h3>
-                    <p>One keystroke launches the full stack — apps, layout, browser.</p>
-                    <div class="demo-window demo-window--launch" aria-hidden="true">
-                      <div class="launch-row">
-                        <span class="dot dot--a"></span><span>Open editor stack</span><kbd>done</kbd>
-                      </div>
-                      <div class="launch-row">
-                        <span class="dot dot--b"></span><span>Restore monitor layout</span><kbd>done</kbd>
-                      </div>
-                      <div class="launch-row">
-                        <span class="dot dot--c"></span><span>Recover browser context</span><kbd>done</kbd>
+                  <article class="demo-panel" data-step-panel="2" id="demo-panel-2" role="tabpanel" aria-labelledby="demo-tab-2">
+                    <h3 class="sr-only">Launch — run Launch, then windows snap into the saved layout</h3>
+                    <div class="demo-window demo-window--launch-monitor" aria-hidden="true">
+                      <div class="launch-monitor">
+                        <div class="launch-monitor__header">
+                          <span class="launch-monitor__label">Profile</span>
+                          <span class="launch-monitor__profile">Development</span>
+                          <span class="launch-monitor__cta">Launch</span>
+                        </div>
+                        <div class="launch-monitor__screen launch-monitor__screen--split">
+                          <div class="launch-app-window launch-app-window--notion">
+                            <div class="launch-app-window__titlebar">
+                              <span class="launch-app-window__traffic" aria-hidden="true"></span>
+                              <span class="launch-app-window__name">Notion</span>
+                            </div>
+                            <div class="launch-app-window__body">
+                              <span class="launch-app-window__hint">Product spec · v1</span>
+                              <div class="demo-mock demo-mock--notion" aria-hidden="true">
+                                <div class="demo-mock__notion-grid">
+                                  <aside class="demo-mock__notion-side">
+                                    <span class="demo-mock__notion-ico"></span>
+                                    <span class="demo-mock__notion-ico demo-mock__notion-ico--on"></span>
+                                    <span class="demo-mock__notion-ico"></span>
+                                  </aside>
+                                  <div class="demo-mock__notion-doc">
+                                    <span class="demo-mock__notion-cover"></span>
+                                    <span class="demo-mock__notion-h1">Product spec · v1</span>
+                                    <span class="demo-mock__notion-task"><span class="demo-mock__notion-check"></span><span class="demo-mock__notion-txt"></span></span>
+                                    <span class="demo-mock__notion-task"><span class="demo-mock__notion-check demo-mock__notion-check--on"></span><span class="demo-mock__notion-txt demo-mock__notion-txt--short"></span></span>
+                                    <span class="demo-mock__notion-callout"></span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="launch-app-window launch-app-window--slack">
+                            <div class="launch-app-window__titlebar">
+                              <span class="launch-app-window__traffic" aria-hidden="true"></span>
+                              <span class="launch-app-window__name">Slack</span>
+                            </div>
+                            <div class="launch-app-window__body">
+                              <span class="launch-app-window__hint">Workspace · #engineering</span>
+                              <div class="demo-mock demo-mock--slack" aria-hidden="true">
+                                <div class="demo-mock__slack-shell">
+                                  <div class="demo-mock__slack-rail">
+                                    <span class="demo-mock__slack-dot"></span>
+                                    <span class="demo-mock__slack-dot demo-mock__slack-dot--hi"></span>
+                                    <span class="demo-mock__slack-dot"></span>
+                                  </div>
+                                  <div class="demo-mock__slack-feed">
+                                    <span class="demo-mock__slack-channel">#engineering</span>
+                                    <div class="demo-mock__slack-msg">
+                                      <span class="demo-mock__slack-avatar"></span>
+                                      <span class="demo-mock__slack-lines">
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--name"></span>
+                                        <span class="demo-mock__slack-line"></span>
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--short"></span>
+                                      </span>
+                                    </div>
+                                    <div class="demo-mock__slack-msg">
+                                      <span class="demo-mock__slack-avatar demo-mock__slack-avatar--b"></span>
+                                      <span class="demo-mock__slack-lines">
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--name"></span>
+                                        <span class="demo-mock__slack-line demo-mock__slack-line--mid"></span>
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                          <div class="launch-app-window launch-app-window--vscode">
+                            <div class="launch-app-window__titlebar">
+                              <span class="launch-app-window__traffic" aria-hidden="true"></span>
+                              <span class="launch-app-window__name">VSCode</span>
+                            </div>
+                            <div class="launch-app-window__body">
+                              <span class="launch-app-window__hint">Editor · MainLayout.tsx</span>
+                              <div class="demo-mock demo-mock--vscode" aria-hidden="true">
+                                <div class="demo-mock__vscode-tabrow">
+                                  <span class="demo-mock__vscode-tab demo-mock__vscode-tab--on">MainLayout.tsx</span>
+                                  <span class="demo-mock__vscode-tab">types.ts</span>
+                                </div>
+                                <div class="demo-mock__vscode-edit">
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">41</span>
+                                    <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">import</span> React from <span class="demo-mock__tok-s">"react"</span>;</span>
+                                  </div>
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">42</span>
+                                    <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">export</span> <span class="demo-mock__tok-k">function</span> <span class="demo-mock__tok-f">MainLayout</span>() {</span>
+                                  </div>
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">43</span>
+                                    <span class="demo-mock__vscode-code demo-mock__vscode-code--muted"> … </span>
+                                  </div>
+                                  <div class="demo-mock__vscode-row">
+                                    <span class="demo-mock__vscode-ln">44</span>
+                                    <span class="demo-mock__vscode-code"><span class="demo-mock__tok-k">return</span> <span class="demo-mock__tok-p">(</span></span>
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
                       </div>
                     </div>
                   </article>
+                  </div>
 
-                  <article class="demo-panel demo-panel--reveal" data-step-panel="3">
-                    <p class="demo-panel__kicker">FlowSwitch.app</p>
-                    <h3>Your profile command center</h3>
-                    <p>Morning standup, deep work, and focus mode are ready in one switch.</p>
-                    <div class="demo-window demo-window--app" aria-hidden="true">
-                      <div class="profile-row"><span class="dot dot--a"></span><strong>Morning standup</strong><small>Browser + chat + calendar</small></div>
-                      <div class="profile-row"><span class="dot dot--b"></span><strong>Deep work</strong><small>Editor + docs + terminal</small></div>
-                      <div class="profile-row"><span class="dot dot--c"></span><strong>Focus mode</strong><small>Music + do-not-disturb</small></div>
-                    </div>
-                  </article>
-
-                  <div class="demo-tabs" role="tablist" aria-label="Demo stages">
-                    <button type="button" class="demo-tab is-active" data-step-target="0">● C1 Capture</button>
-                    <button type="button" class="demo-tab" data-step-target="1">○ A2 Arrange</button>
-                    <button type="button" class="demo-tab" data-step-target="2">○ S3 Launch</button>
-                    <button type="button" class="demo-tab" data-step-target="3">○ App</button>
+                  <div class="demo-tabs" role="tablist" aria-label="How it works — create, arrange, launch">
+                    <button type="button" class="demo-tab is-active" role="tab" aria-selected="true" aria-controls="demo-panel-0" id="demo-tab-0" data-step-target="0" data-step-label="Create">Create</button>
+                    <button type="button" class="demo-tab" role="tab" aria-selected="false" aria-controls="demo-panel-1" id="demo-tab-1" tabindex="-1" data-step-target="1" data-step-label="Arrange">Arrange</button>
+                    <button type="button" class="demo-tab" role="tab" aria-selected="false" aria-controls="demo-panel-2" id="demo-tab-2" tabindex="-1" data-step-target="2" data-step-label="Launch">Launch</button>
                   </div>
                 </div>
               </div>
             </div>
             <div class="demo__monitor-stand" aria-hidden="true"></div>
             <div class="demo__monitor-base" aria-hidden="true"></div>
+              </div>
           </div>
         </div>
 
@@ -244,138 +538,276 @@
       </section>
 
       <section class="features" id="features">
-        <div class="section-heading">
+        <div class="section-heading section-heading--features">
           <p class="section-heading__overline">FEATURES</p>
-          <h2>Built for real desktop complexity.</h2>
+          <h2 class="section-heading__title-gradient">Built for real desktop complexity.</h2>
         </div>
+
+        <div class="features__hub" aria-hidden="true">
+          <div class="features__hub-inner">
+            <div class="features__hub-pill">
+              <img
+                class="features__hub-logo"
+                src="./assets/flowswitch-logo.png"
+                alt=""
+                width="38"
+                height="38"
+                loading="lazy"
+                decoding="async"
+              />
+            </div>
+            <svg
+              class="features__hub-svg"
+              viewBox="0 0 1000 128"
+              preserveAspectRatio="none"
+              xmlns="http://www.w3.org/2000/svg"
+            >
+              <path
+                class="features__hub-path features__hub-path--left"
+                d="M 500 8 C 500 36 385 74 163 120"
+                fill="none"
+                stroke="rgba(111, 212, 191, 0.58)"
+                stroke-width="1.45"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                class="features__hub-path features__hub-path--mid"
+                d="M 500 8 L 500 120"
+                fill="none"
+                stroke="rgba(140, 178, 255, 0.62)"
+                stroke-width="1.45"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <path
+                class="features__hub-path features__hub-path--right"
+                d="M 500 8 C 500 36 615 74 837 120"
+                fill="none"
+                stroke="rgba(255, 214, 140, 0.55)"
+                stroke-width="1.45"
+                stroke-linecap="round"
+                stroke-linejoin="round"
+              />
+              <circle class="features__hub-cap features__hub-cap--left" cx="163" cy="120" r="2.6" fill="rgba(111, 212, 191, 0.75)" />
+              <circle class="features__hub-cap features__hub-cap--mid" cx="500" cy="120" r="2.6" fill="rgba(140, 178, 255, 0.78)" />
+              <circle class="features__hub-cap features__hub-cap--right" cx="837" cy="120" r="2.6" fill="rgba(255, 214, 140, 0.72)" />
+            </svg>
+          </div>
+        </div>
+
         <div class="feature-grid">
-          <article class="feature-card">
-            <span class="feature-card__icon">▣</span>
+          <article class="feature-card" style="--feature-accent: #6fd4bf">
+            <div class="feature-card__viz feature-card__viz--monitors" aria-hidden="true">
+              <div class="feature-card__viz-frame feature-card__viz-frame--sm">
+                <div class="feature-card__viz-win-caption">
+                  <span class="feature-card__viz-title-fake"></span>
+                  <div class="feature-card__viz-caption-group">
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--min"></span>
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--max"></span>
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--close"
+                      ><span class="feature-card__viz-caption-x"></span></span>
+                  </div>
+                </div>
+                <span class="feature-card__viz-pane"></span>
+              </div>
+              <div class="feature-card__viz-frame feature-card__viz-frame--lg">
+                <div class="feature-card__viz-win-caption">
+                  <span class="feature-card__viz-title-fake"></span>
+                  <div class="feature-card__viz-caption-group">
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--min"></span>
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--max"></span>
+                    <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--close"
+                      ><span class="feature-card__viz-caption-x"></span></span>
+                  </div>
+                </div>
+                <span class="feature-card__viz-pane feature-card__viz-pane--wide"></span>
+              </div>
+            </div>
             <h3>Monitor-aware placement</h3>
             <p>Profiles remember which window lives on which screen. Never approximate.</p>
           </article>
-          <article class="feature-card">
-            <span class="feature-card__icon">◉</span>
+          <article class="feature-card" style="--feature-accent: #6fa8ff">
+            <div class="feature-card__viz feature-card__viz--browser" aria-hidden="true">
+              <div class="feature-card__viz-chrome">
+                <span class="feature-card__viz-url"></span>
+                <div class="feature-card__viz-caption-group">
+                  <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--min"></span>
+                  <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--max"></span>
+                  <span class="feature-card__viz-caption-btn feature-card__viz-caption-btn--close"
+                    ><span class="feature-card__viz-caption-x"></span></span>
+                </div>
+              </div>
+              <div class="feature-card__viz-page">
+                <span class="feature-card__viz-tab"></span>
+                <span class="feature-card__viz-tab feature-card__viz-tab--ghost"></span>
+              </div>
+            </div>
             <h3>Browser context</h3>
             <p>Saves and restores tab groups, active URLs, and browser state per profile.</p>
           </article>
-          <article class="feature-card">
-            <span class="feature-card__icon">↻</span>
+          <article class="feature-card" style="--feature-accent: #ffd66f">
+            <div class="feature-card__viz feature-card__viz--sequence" aria-hidden="true">
+              <span class="feature-card__viz-step"><span class="feature-card__viz-num">1</span></span>
+              <span class="feature-card__viz-arrow"></span>
+              <span class="feature-card__viz-step"><span class="feature-card__viz-num">2</span></span>
+              <span class="feature-card__viz-arrow"></span>
+              <span class="feature-card__viz-step"><span class="feature-card__viz-num">3</span></span>
+            </div>
             <h3>Launch order control</h3>
             <p>Define exactly which apps open in what sequence. No race conditions.</p>
           </article>
-          <article class="feature-card">
-            <span class="feature-card__icon">⌘</span>
+          <article class="feature-card" style="--feature-accent: #9b8cff">
+            <div class="feature-card__viz feature-card__viz--hotkey" aria-hidden="true">
+              <span class="feature-card__viz-kbd feature-card__viz-kbd--win" title="Windows key">⊞</span>
+              <span class="feature-card__viz-kbd feature-card__viz-kbd--sm">K</span>
+            </div>
             <h3>Hotkey switching</h3>
             <p>Bind any profile to a global shortcut. Zero friction.</p>
           </article>
-          <article class="feature-card">
-            <span class="feature-card__icon">●</span>
+          <article class="feature-card" style="--feature-accent: #5ec4e0">
+            <div class="feature-card__viz feature-card__viz--layers" aria-hidden="true">
+              <span class="feature-card__viz-layer"></span>
+              <span class="feature-card__viz-layer"></span>
+              <span class="feature-card__viz-layer"></span>
+            </div>
             <h3>Minimized app memory</h3>
             <p>Remembers apps even when they were minimized or backgrounded.</p>
           </article>
-          <article class="feature-card">
-            <span class="feature-card__icon">⎘</span>
+          <article class="feature-card" style="--feature-accent: #8a9aa8">
+            <div class="feature-card__viz feature-card__viz--portable" aria-hidden="true">
+              <span class="feature-card__viz-folder"></span>
+              <span class="feature-card__viz-usb"></span>
+            </div>
             <h3>Portable build</h3>
             <p>No installer required. Drop it in a folder and run.</p>
           </article>
         </div>
       </section>
 
-      <section class="waitlist" id="waitlist">
-        <div class="waitlist__inner">
-          <h2>Stay in the loop on FlowSwitch.</h2>
-          <p>Get notified about new Windows releases, major updates, and early feature access.</p>
-
-          <form class="waitlist-form" data-waitlist-form>
-            <label class="sr-only" for="waitlist-email">Email address</label>
-            <input id="waitlist-email" name="email" type="email" placeholder="you@example.com" required />
-            <button type="submit" class="btn btn--primary">Notify me</button>
-          </form>
-          <p class="waitlist-form__state" data-waitlist-state aria-live="polite"></p>
-
-          <p class="waitlist__note">No spam. Unsubscribe anytime. Windows users can download now.</p>
-        </div>
-      </section>
-
       <section class="faq" id="faq">
         <div class="section-heading">
           <p class="section-heading__overline">FAQ</p>
-          <h2>Quick answers before you install.</h2>
+          <h2 class="section-heading__title-gradient">Quick answers before you install.</h2>
         </div>
         <div class="faq-list">
           <details class="faq-item">
             <summary>What is a workspace profile?</summary>
-            <p>
-              A workspace profile captures your active apps, monitor placement, launch order, and browser context.
-              Instead of rebuilding your setup manually, you apply one profile and FlowSwitch restores the state.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                A workspace profile captures your active apps, monitor placement, launch order, and browser context.
+                Instead of rebuilding your setup manually, you apply one profile and FlowSwitch restores the state.
+              </p>
+            </div>
           </details>
           <details class="faq-item">
             <summary>Does FlowSwitch work with ultrawide monitors?</summary>
-            <p>
-              Yes. FlowSwitch captures monitor geometry and window bounds, so ultrawide setups can be restored precisely
-              as long as the same display is available when you switch.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                Yes. FlowSwitch captures monitor geometry and window bounds, so ultrawide setups can be restored precisely
+                as long as the same display is available when you switch.
+              </p>
+            </div>
           </details>
           <details class="faq-item">
             <summary>Does it support multiple monitors with different resolutions?</summary>
-            <p>
-              Yes. Mixed-DPI and mixed-resolution monitor arrangements are a core use case, and placement is stored per
-              display so windows return to the intended screen.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                Yes. Mixed-DPI and mixed-resolution monitor arrangements are a core use case, and placement is stored per
+                display so windows return to the intended screen.
+              </p>
+            </div>
           </details>
           <details class="faq-item">
             <summary>Can I use it without admin rights?</summary>
-            <p>
-              Most profile capture and launch workflows run in standard user mode. Some enterprise environments may
-              apply restrictions on launching certain apps or reading window metadata.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                Most profile capture and launch workflows run in standard user mode. Some enterprise environments may
+                apply restrictions on launching certain apps or reading window metadata.
+              </p>
+            </div>
           </details>
           <details class="faq-item">
             <summary>How is this different from Windows virtual desktops?</summary>
-            <p>
-              Virtual desktops separate window groups, but they do not rebuild full workflows on demand. FlowSwitch
-              restores app launch order, monitor positions, and browser context in one action.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                Virtual desktops separate window groups, but they do not rebuild full workflows on demand. FlowSwitch
+                restores app launch order, monitor positions, and browser context in one action.
+              </p>
+            </div>
           </details>
           <details class="faq-item">
             <summary>Is my layout data stored in the cloud?</summary>
-            <p>
-              FlowSwitch is local-first. Profile data stays on your machine by default, and cloud storage is not
-              required for workspace switching.
-            </p>
+            <div class="faq-item__body">
+              <p>
+                FlowSwitch is local-first. Profile data stays on your machine by default, and cloud storage is not
+                required for workspace switching.
+              </p>
+            </div>
           </details>
         </div>
       </section>
 
       <footer class="site-footer">
-        <div>
-          <a class="brand brand--footer" href="./">
-            <img src="./assets/flowswitch-logo.png" alt="" width="28" height="28" />
-            <span class="brand__label">FlowSwitch</span>
-          </a>
-          <p>One profile. Your whole workspace.</p>
+        <div class="site-footer__upper">
+          <div class="site-footer__brand">
+            <a class="brand brand--footer" href="./">
+              <img src="./assets/flowswitch-logo.png" alt="" width="28" height="28" />
+              <span class="brand__label">FlowSwitch</span>
+            </a>
+            <p class="site-footer__tagline">One profile. Your whole workspace.</p>
+          </div>
+          <div class="site-footer__columns" aria-label="Footer">
+            <div class="site-footer__col">
+              <p class="site-footer__heading">Product</p>
+              <ul class="site-footer__list">
+                <li><a href="#how">How it works</a></li>
+                <li><a href="#features">Features</a></li>
+                <li><a href="#faq">FAQ</a></li>
+                <li>
+                  <a
+                    href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
+                    data-download-link="1"
+                    >Download for Windows</a>
+                </li>
+              </ul>
+            </div>
+            <div class="site-footer__col">
+              <p class="site-footer__heading">Updates</p>
+              <ul class="site-footer__list">
+                <li><a href="./changelog.html">Changelog</a></li>
+                <li><a href="#waitlist">Join waitlist</a></li>
+              </ul>
+            </div>
+            <div class="site-footer__col">
+              <p class="site-footer__heading">Contact</p>
+              <ul class="site-footer__list">
+                <li><a href="mailto:contact@flowswitch.app">contact@flowswitch.app</a></li>
+              </ul>
+            </div>
+          </div>
         </div>
-        <nav class="site-footer__links" aria-label="Footer">
-          <a href="#how">How it works</a>
-          <a href="#features">Features</a>
-          <a href="#faq">FAQ</a>
-          <a href="./changelog.html">Changelog</a>
-          <a href="./privacy.html">Privacy</a>
-          <a
-            href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
-            data-download-link="1"
-          >
-            Download
-          </a>
-        </nav>
-        <div class="site-footer__meta">
-          <p>© 2025 FlowSwitch · Built for the people who live in their terminals</p>
-          <div class="site-footer__social">
-            <a href="https://github.com/jmpanackal/FlowSwitch" aria-label="FlowSwitch on GitHub">GitHub</a>
-            <a href="https://x.com" aria-label="FlowSwitch on X">X</a>
-            <span class="version-pill">v0.1.0</span>
+
+        <div class="site-footer__newsletter" id="waitlist">
+          <div class="site-footer__newsletter-copy">
+            <h2 class="site-footer__newsletter-title section-heading__title-gradient">Get product updates in your inbox.</h2>
+            <p class="site-footer__newsletter-lead">New Windows releases and changelog highlights. No spam.</p>
+          </div>
+          <div class="site-footer__newsletter-aside">
+            <form class="site-footer__waitlist-form" data-waitlist-form>
+              <label class="sr-only" for="waitlist-email">Email address</label>
+              <input
+                id="waitlist-email"
+                name="email"
+                type="email"
+                placeholder="you@example.com"
+                autocomplete="email"
+                required
+              />
+              <button type="submit" class="btn btn--newsletter">Subscribe</button>
+            </form>
+            <p class="site-footer__waitlist-state" data-waitlist-state aria-live="polite"></p>
+            <p class="site-footer__newsletter-note">Occasional emails only. Unsubscribe anytime.</p>
           </div>
         </div>
       </footer>
