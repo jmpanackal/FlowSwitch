@@ -460,20 +460,18 @@
   let switching = false;
   const byKey = new Map(sections.map((section, index) => [section.key, index]));
 
-  const createTaskbar = () => {
+  const renderTaskbarApps = (section) => {
     taskbarSections.innerHTML = "";
 
-    sections.forEach((section) => {
-      const button = document.createElement("button");
-      button.type = "button";
-      button.className = "taskbar__section";
-      button.dataset.sectionSelect = section.key;
-      button.innerHTML = `
-        <span class="taskbar__section-icon">${section.icon}</span>
-        <span class="taskbar__section-label">${section.label}</span>
+    section.windows.forEach((windowSpec, index) => {
+      const app = document.createElement("span");
+      app.className = "taskbar__app";
+      if (index === 0) app.classList.add("is-active");
+      app.innerHTML = `
+        <span class="taskbar__app-icon">${windowSpec.icon}</span>
+        <span class="taskbar__app-label">${windowSpec.title}</span>
       `;
-      button.addEventListener("click", () => switchTo(section.key));
-      taskbarSections.appendChild(button);
+      taskbarSections.appendChild(app);
     });
   };
 
@@ -532,13 +530,10 @@
     title.textContent = section.title;
     subtitle.textContent = section.subtitle;
     taskbarStatus.textContent = section.status;
+    renderTaskbarApps(section);
 
     navLinks.forEach((link) => {
       link.classList.toggle("is-active", link.dataset.sectionLink === section.key);
-    });
-
-    [...taskbarSections.querySelectorAll(".taskbar__section")].forEach((button) => {
-      button.classList.toggle("is-active", button.dataset.sectionSelect === section.key);
     });
 
     const nextHash = `#${section.key}`;
@@ -610,8 +605,6 @@
     if (next < 0 || next >= sections.length) return;
     switchTo(sections[next].key);
   };
-
-  createTaskbar();
 
   const initialKey = byKey.has(window.location.hash.slice(1)) ? window.location.hash.slice(1) : sections[0].key;
   activeIndex = byKey.get(initialKey) || 0;
