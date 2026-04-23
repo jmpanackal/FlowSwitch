@@ -18,24 +18,93 @@
       icon: "HW",
       title: "How it works",
       subtitle: "Capture - arrange - switch",
-      status: "Profile ready",
+      status: "capture -> arrange -> launch",
       windows: [
+        {
+          title: "Capture Center",
+          icon: "C1",
+          x: 4,
+          y: 6,
+          w: 30,
+          h: 44,
+          enterX: -120,
+          enterY: 220,
+          status: "capture.exe",
+          html: `
+            <div class="window-side">
+              <p class="window-kicker">Step 1</p>
+              <h3>Capture your current setup</h3>
+              <p>FlowSwitch reads running windows, minimized apps, and per-monitor positions.</p>
+              <div class="window-side__row"><div class="window-side__icon">A</div><div><strong>Active apps</strong><span>Editor, browser, tools, media</span></div></div>
+              <div class="window-side__row"><div class="window-side__icon">M</div><div><strong>Monitor map</strong><span>Bounds, DPI, and offset geometry</span></div></div>
+            </div>
+          `,
+        },
+        {
+          title: "Layout Studio",
+          icon: "A2",
+          x: 36,
+          y: 6,
+          w: 38,
+          h: 44,
+          enterX: 0,
+          enterY: 220,
+          status: "layout.tsx",
+          html: `
+            <div class="window-generic">
+              <p class="window-kicker">Step 2</p>
+              <h3>Arrange across monitors</h3>
+              <p>Use monitor-aware placement to keep each profile intentional instead of approximate.</p>
+              <div class="monitor-preview">
+                <div class="monitor-preview__screen" data-label="M1" data-layout="a">
+                  <div class="monitor-preview__pane monitor-preview__pane--cyan"></div>
+                  <div class="monitor-preview__pane monitor-preview__pane--violet"></div>
+                  <div class="monitor-preview__pane monitor-preview__pane--soft"></div>
+                </div>
+                <div class="monitor-preview__screen" data-label="M2" data-layout="b">
+                  <div class="monitor-preview__pane monitor-preview__pane--soft"></div>
+                  <div class="monitor-preview__pane monitor-preview__pane--cyan"></div>
+                </div>
+              </div>
+            </div>
+          `,
+        },
+        {
+          title: "Quick Launch",
+          icon: "S3",
+          x: 76,
+          y: 6,
+          w: 20,
+          h: 44,
+          enterX: 130,
+          enterY: 220,
+          status: "launch",
+          html: `
+            <div class="window-side">
+              <p class="window-kicker">Step 3</p>
+              <h3>Switch in one action</h3>
+              <p>Apply the full workspace instantly, including launch order and placement.</p>
+              <div class="window-actions">
+                <a href="javascript:void(0)" class="btn-primary">Launch profile</a>
+              </div>
+            </div>
+          `,
+        },
         {
           title: "FlowSwitch.app",
           icon: "FS",
           x: 4,
-          y: 6,
-          w: 62,
+          y: 52,
+          w: 92,
           h: 42,
           enterX: 0,
-          enterY: 240,
-          status: "workspace loaded",
+          enterY: 260,
           html: `
             <div class="window-hero">
               <div>
-                <p class="window-kicker">Windows-first workspace switching</p>
-                <h3>Capture the desk once, then bring it back on demand.</h3>
-                <p>FlowSwitch saves your monitor layout, app windows, launch order, and browser context so your setup can switch states as cleanly as your schedule does.</p>
+                <p class="window-kicker">Windows-first - Electron + React</p>
+                <h3>One profile. Your whole workspace.</h3>
+                <p>Bundle apps, browser tabs, and per-monitor layouts. Apply all of it with a single launch.</p>
                 <div class="window-actions">
                   <a
                     href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
@@ -52,63 +121,9 @@
                 </div>
               </div>
               <div class="hero-profile-list">
-                <div class="hero-profile-list__item">
-                  <div><strong>Deep work</strong><span>Editor, docs, browser, notes</span></div>
-                  <span class="hero-profile-list__dot"></span>
-                </div>
-                <div class="hero-profile-list__item">
-                  <div><strong>Streaming</strong><span>OBS, chat, media, monitor routing</span></div>
-                  <span class="hero-profile-list__dot"></span>
-                </div>
-                <div class="hero-profile-list__item">
-                  <div><strong>Gaming</strong><span>Fullscreen, voice, side panels</span></div>
-                  <span class="hero-profile-list__dot"></span>
-                </div>
-                <div class="hero-profile-list__item">
-                  <div><strong>Admin</strong><span>Mail, calendar, browser tabs, utilities</span></div>
-                  <span class="hero-profile-list__dot"></span>
-                </div>
-              </div>
-            </div>
-          `,
-        },
-        {
-          title: "capture.exe",
-          icon: "CP",
-          x: 68,
-          y: 8,
-          w: 28,
-          h: 28,
-          enterX: 170,
-          enterY: 190,
-          html: `
-            <div class="window-side">
-              <h3>Capture the current state</h3>
-              <p>Read open windows, monitor bounds, and launch context directly from the setup you already built.</p>
-              <div class="window-side__row"><div class="window-side__icon">M</div><div><strong>Monitor geometry</strong><span>Mixed DPI, offset screens, stacked layouts</span></div></div>
-              <div class="window-side__row"><div class="window-side__icon">W</div><div><strong>Window state</strong><span>Placement, size, minimized apps, active windows</span></div></div>
-            </div>
-          `,
-        },
-        {
-          title: "layout-preview.tsx",
-          icon: "LY",
-          x: 12,
-          y: 52,
-          w: 84,
-          h: 38,
-          enterX: 0,
-          enterY: 280,
-          html: `
-            <div class="monitor-preview">
-              <div class="monitor-preview__screen" data-label="Monitor 1" data-layout="a">
-                <div class="monitor-preview__pane monitor-preview__pane--cyan"></div>
-                <div class="monitor-preview__pane monitor-preview__pane--violet"></div>
-                <div class="monitor-preview__pane monitor-preview__pane--soft"></div>
-              </div>
-              <div class="monitor-preview__screen" data-label="Monitor 2" data-layout="b">
-                <div class="monitor-preview__pane monitor-preview__pane--soft"></div>
-                <div class="monitor-preview__pane monitor-preview__pane--cyan"></div>
+                <div class="hero-profile-list__item"><div><strong>Morning standup</strong><span>Browser + chat + calendar</span></div><span class="hero-profile-list__dot"></span></div>
+                <div class="hero-profile-list__item"><div><strong>Deep work</strong><span>Editor + docs + terminal stack</span></div><span class="hero-profile-list__dot"></span></div>
+                <div class="hero-profile-list__item"><div><strong>Focus mode</strong><span>Music + do-not-disturb setup</span></div><span class="hero-profile-list__dot"></span></div>
               </div>
             </div>
           `,
@@ -120,66 +135,74 @@
       label: "Features",
       icon: "FT",
       title: "Features",
-      subtitle: "Everything in the workspace, profiled",
-      status: "6 modules active",
+      subtitle: "Everything in your workspace, profiled",
+      status: "6 feature cards",
       windows: [
         {
-          title: "features-grid.tsx",
-          icon: "FT",
+          title: "Profiles Hub",
+          icon: "PF",
           x: 4,
-          y: 8,
-          w: 58,
-          h: 82,
-          enterX: -160,
+          y: 6,
+          w: 30,
+          h: 42,
+          enterX: -140,
           enterY: 220,
-          html: `
-            <div class="window-generic">
-              <h3>Built for Windows power users who care where everything lands.</h3>
-              <p>Profiles group the setup, launches apply it, and monitor-aware placement keeps the result looking intentional instead of approximate.</p>
-              <div class="feature-grid">
-                <div class="feature-tile"><h4>Profiles</h4><p>Save distinct workspace states for coding, streaming, study, or gaming.</p></div>
-                <div class="feature-tile"><h4>Launch flows</h4><p>Attach app startup, browser context, and ordered restore behavior to each profile.</p></div>
-                <div class="feature-tile"><h4>Monitor topology</h4><p>Designed for uneven desk geometry, mixed DPI, and multi-monitor arrays.</p></div>
-                <div class="feature-tile"><h4>Local-first</h4><p>Your workspace data stays on the machine and can be exported when needed.</p></div>
-              </div>
-            </div>
-          `,
+          html: `<div class="window-generic"><h3>Profiles</h3><p>Bundle apps, files, browser tabs, audio routes, and layout state into one profile.</p></div>`,
         },
         {
-          title: "layout-engine.ts",
-          icon: "LE",
-          x: 64,
-          y: 8,
-          w: 32,
-          h: 50,
-          enterX: 190,
-          enterY: 210,
-          status: "layout engine",
-          html: `
-            <div class="window-side">
-              <h3>Monitors that behave like real monitors.</h3>
-              <p>Handle tall side displays, centered ultrawides, docked laptops, and layouts that drift over time.</p>
-              <div class="window-side__row"><div class="window-side__icon">1</div><div><strong>Mixed DPI</strong><span>Capture and restore across different scale factors</span></div></div>
-              <div class="window-side__row"><div class="window-side__icon">2</div><div><strong>Offset screens</strong><span>Not every desk is a perfect rectangle</span></div></div>
-              <div class="window-side__row"><div class="window-side__icon">3</div><div><strong>Fast switching</strong><span>Move from one profile state to the next in one action</span></div></div>
-            </div>
-          `,
+          title: "Secure Vault",
+          icon: "EN",
+          x: 35.5,
+          y: 6,
+          w: 30,
+          h: 42,
+          enterX: -40,
+          enterY: 220,
+          html: `<div class="window-generic"><h3>Encrypted persistence</h3><p>Stored in userData with safeStorage where the OS supports encryption.</p></div>`,
         },
         {
-          title: "window-map.json",
-          icon: "WM",
-          x: 64,
-          y: 60,
-          w: 32,
-          h: 30,
-          enterX: 160,
-          enterY: 250,
-          html: `
-            <div class="mini-grid">
-              <div class="feature-tile"><h4>Per-app rules</h4><p>Placement, order, and launch behavior stay attached to the profile.</p></div>
-              <div class="feature-tile"><h4>Browser tabs</h4><p>Restore web context alongside native apps so the desk comes back complete.</p></div>
-            </div>
-          `,
+          title: "Sync Bridge",
+          icon: "IE",
+          x: 67,
+          y: 6,
+          w: 29,
+          h: 42,
+          enterX: 140,
+          enterY: 220,
+          html: `<div class="window-generic"><h3>Import / export</h3><p>Move profiles as JSON between machines for backup or migration.</p></div>`,
+        },
+        {
+          title: "App Library",
+          icon: "AS",
+          x: 4,
+          y: 52,
+          w: 30,
+          h: 42,
+          enterX: -140,
+          enterY: 260,
+          html: `<div class="window-generic"><h3>Installed app scan</h3><p>Start menu shortcuts, registry entries, protocols, and icon extraction.</p></div>`,
+        },
+        {
+          title: "Layout Capture",
+          icon: "LC",
+          x: 35.5,
+          y: 52,
+          w: 30,
+          h: 42,
+          enterX: -20,
+          enterY: 260,
+          html: `<div class="window-generic"><h3>Layout capture</h3><p>Snapshot monitor topology and open windows, including minimized apps.</p></div>`,
+        },
+        {
+          title: "Schedule Engine",
+          icon: "SC",
+          x: 67,
+          y: 52,
+          w: 29,
+          h: 42,
+          enterX: 140,
+          enterY: 260,
+          html: `<div class="window-generic"><h3>Schedules + startup</h3><p>Auto-apply profiles by time, context, or OS startup trigger.</p></div>`,
         },
       ],
     },
@@ -189,58 +212,66 @@
       icon: "Q",
       title: "FAQ",
       subtitle: "Quick answers",
-      status: "4 questions loaded",
+      status: "5 questions",
       windows: [
         {
-          title: "faq.md",
+          title: "Help Center",
           icon: "Q",
           x: 4,
-          y: 8,
-          w: 62,
-          h: 82,
+          y: 6,
+          w: 60,
+          h: 88,
           enterX: -120,
-          enterY: 220,
+          enterY: 230,
+          status: "5 questions",
           html: `
             <div class="timeline-window">
-              <h3>Common questions.</h3>
+              <h3>Common questions</h3>
               <div class="faq-list">
-                <div class="faq-item"><h4>Where is data saved?</h4><p>Profiles, layout metadata, and related settings are stored locally in <code>%APPDATA%/FlowSwitch</code>.</p></div>
-                <div class="faq-item"><h4>What about elevated windows?</h4><p>Apps running as Administrator may require FlowSwitch to run elevated too if you want them captured and restored accurately.</p></div>
-                <div class="faq-item"><h4>Do I need global hotkeys?</h4><p>No. Hotkeys are optional. You can trigger flows directly through the application interface.</p></div>
-                <div class="faq-item"><h4>Is macOS supported?</h4><p>Not right now. FlowSwitch is deeply tied to the Win32 API and current effort is focused on the Windows experience.</p></div>
+                <div class="faq-item"><h4>Which platforms are supported?</h4><p>FlowSwitch is Windows-first today, with additional platform support planned later.</p></div>
+                <div class="faq-item"><h4>Where are profiles stored?</h4><p>Profiles are stored locally in your app data directory as workspace profile data.</p></div>
+                <div class="faq-item"><h4>Can I move profiles between PCs?</h4><p>Yes. Export profiles to JSON and import them on another machine.</p></div>
+                <div class="faq-item"><h4>Will it work with multiple monitors?</h4><p>Yes. Capture and restore are monitor-aware, including uneven layouts and offsets.</p></div>
+                <div class="faq-item"><h4>Can it auto-launch at startup?</h4><p>Profiles can be tied to startup and schedule-based triggers.</p></div>
               </div>
             </div>
           `,
         },
         {
-          title: "focus.txt",
-          icon: "FX",
-          x: 69,
-          y: 14,
-          w: 27,
-          h: 34,
-          enterX: 170,
-          enterY: 190,
+          title: "Support Desk",
+          icon: "SP",
+          x: 66,
+          y: 6,
+          w: 30,
+          h: 42,
+          enterX: 150,
+          enterY: 220,
           html: `
             <div class="window-side">
-              <h3>Current focus</h3>
-              <p>Shipping the Windows experience first and tightening the launch + layout loop.</p>
+              <h3>Still stuck?</h3>
+              <p>Open an issue and we triage quickly. Release notes and roadmap are public.</p>
+              <div class="window-actions">
+                <a href="https://github.com/jmpanackal/FlowSwitch/issues" class="btn-secondary">Open issue</a>
+              </div>
             </div>
           `,
         },
         {
-          title: "tip.txt",
+          title: "Power Tips",
           icon: "TP",
-          x: 69,
-          y: 54,
-          w: 27,
-          h: 24,
-          enterX: 170,
-          enterY: 240,
+          x: 66,
+          y: 50,
+          w: 30,
+          h: 44,
+          enterX: 150,
+          enterY: 250,
+          status: "pro tip",
           html: `
             <div class="window-side">
-              <h3>Pro tip</h3>
-              <p>Use distinct profiles for each mode instead of forcing one giant do-everything setup.</p>
+              <h3>Bind profiles to schedules</h3>
+              <p>Use a timed morning profile and an evening wind-down profile to reduce setup churn.</p>
+              <div class="window-side__row"><div class="window-side__icon">9</div><div><strong>09:00</strong><span>deep-work</span></div></div>
+              <div class="window-side__row"><div class="window-side__icon">6</div><div><strong>18:00</strong><span>wind-down</span></div></div>
             </div>
           `,
         },
@@ -252,43 +283,56 @@
       icon: "CL",
       title: "Changelog",
       subtitle: "Built in the open",
-      status: "release history",
+      status: "release notes",
       windows: [
         {
-          title: "CHANGELOG.md",
+          title: "Release Notes",
           icon: "CL",
           x: 4,
-          y: 8,
+          y: 6,
           w: 64,
-          h: 82,
+          h: 88,
           enterX: -120,
           enterY: 220,
+          status: "main",
           html: `
             <div class="timeline-window">
               <h3>Release history</h3>
               <div class="timeline">
                 <div class="timeline-entry">
                   <div class="timeline-entry__head">
-                    <span class="timeline-entry__version">v0.1.0</span>
-                    <span class="timeline-entry__tag">early access</span>
-                    <span class="timeline-entry__date">April 2026</span>
+                    <span class="timeline-entry__version">v1.0.0</span>
+                    <span class="timeline-entry__tag">stable</span>
+                    <span class="timeline-entry__date">Apr 2026</span>
                   </div>
                   <ul>
-                    <li>Initial public Windows release</li>
-                    <li>Monitor layout capture and restore baseline</li>
-                    <li>Website-driven release metadata wiring</li>
+                    <li>Public stable release</li>
+                    <li>Encrypted profile storage baseline</li>
+                    <li>Per-monitor capture and restore</li>
                   </ul>
                 </div>
                 <div class="timeline-entry">
                   <div class="timeline-entry__head">
-                    <span class="timeline-entry__version">Next</span>
-                    <span class="timeline-entry__tag">in progress</span>
-                    <span class="timeline-entry__date">Current</span>
+                    <span class="timeline-entry__version">v0.9.2</span>
+                    <span class="timeline-entry__tag">beta</span>
+                    <span class="timeline-entry__date">Mar 2026</span>
                   </div>
                   <ul>
-                    <li>Polish around launch reliability and layout orchestration</li>
-                    <li>Additional UX refinement for profile editing</li>
-                    <li>Ongoing stabilization for early adopters</li>
+                    <li>JSON import / export</li>
+                    <li>Audio routing and startup polish</li>
+                    <li>Improved browser context capture</li>
+                  </ul>
+                </div>
+                <div class="timeline-entry">
+                  <div class="timeline-entry__head">
+                    <span class="timeline-entry__version">v0.8.0</span>
+                    <span class="timeline-entry__tag">beta</span>
+                    <span class="timeline-entry__date">Feb 2026</span>
+                  </div>
+                  <ul>
+                    <li>Schedules and startup hooks</li>
+                    <li>Installed app scan improvements</li>
+                    <li>Major UI polish pass</li>
                   </ul>
                 </div>
               </div>
@@ -296,18 +340,24 @@
           `,
         },
         {
-          title: "release-links.json",
-          icon: "RL",
-          x: 71,
-          y: 16,
-          w: 25,
-          h: 58,
+          title: "Roadmap",
+          icon: "RM",
+          x: 70,
+          y: 6,
+          w: 26,
+          h: 88,
           enterX: 170,
           enterY: 220,
+          status: "next",
           html: `
             <div class="window-side">
-              <h3>Downloads stay current</h3>
-              <p>The website refreshes installer metadata from the current release payload so CTA links can stay in sync with shipped builds.</p>
+              <h3>Roadmap</h3>
+              <div class="faq-list">
+                <div class="faq-item"><h4>macOS preview</h4><p>Early support exploration.</p></div>
+                <div class="faq-item"><h4>Cloud sync</h4><p>Optional profile sync primitives.</p></div>
+                <div class="faq-item"><h4>Shortcut layers</h4><p>More keyboard-first profile actions.</p></div>
+                <div class="faq-item"><h4>Plugin API</h4><p>Extensible launch behavior.</p></div>
+              </div>
             </div>
           `,
         },
@@ -318,74 +368,87 @@
       label: "Privacy",
       icon: "PR",
       title: "Privacy",
-      subtitle: "Local-first by default",
+      subtitle: "Local-first, encrypted at rest",
       status: "local runtime",
       windows: [
         {
-          title: "privacy.md",
+          title: "Privacy Center",
           icon: "PR",
           x: 4,
-          y: 8,
-          w: 54,
-          h: 54,
-          enterX: -140,
+          y: 6,
+          w: 50,
+          h: 56,
+          enterX: -130,
           enterY: 220,
           html: `
             <div class="window-generic">
+              <p class="window-kicker">Local-first</p>
               <h3>Your workspace stays on your machine.</h3>
-              <p>FlowSwitch is a desktop app for Windows. Profiles live locally, no account is required, and the goal is to keep workspace state under your control rather than on a hosted service.</p>
+              <p>FlowSwitch stores profiles locally and does not require a hosted account.</p>
               <div class="privacy-list">
-                <div class="privacy-list__item"><h4>Local profile storage</h4><p>Workspace data is designed to live under <code>%APPDATA%/FlowSwitch</code>.</p></div>
-                <div class="privacy-list__item"><h4>No required cloud account</h4><p>You can use the app without signing into a hosted backend.</p></div>
+                <div class="privacy-list__item"><h4>No telemetry by default</h4><p>Runtime keeps data local unless you opt in to reports.</p></div>
+                <div class="privacy-list__item"><h4>Encrypted at rest</h4><p>safeStorage is used where OS capabilities allow.</p></div>
+                <div class="privacy-list__item"><h4>Open profile format</h4><p>Profile data can be exported and reviewed as JSON.</p></div>
               </div>
             </div>
           `,
         },
         {
-          title: "trust-panel.tsx",
-          icon: "TR",
-          x: 61,
-          y: 8,
-          w: 35,
+          title: "Vault",
+          icon: "VT",
+          x: 56,
+          y: 6,
+          w: 40,
+          h: 40,
+          enterX: 160,
+          enterY: 220,
+          status: "safeStorage",
+          html: `
+            <div class="window-side">
+              <h3>Profiles encrypted at rest</h3>
+              <p>When available, payloads are encrypted before they are persisted to disk.</p>
+              <div class="window-side__row"><div class="window-side__icon">K</div><div><strong>OS-backed crypto</strong><span>Automatic where supported</span></div></div>
+            </div>
+          `,
+        },
+        {
+          title: "Runtime Network",
+          icon: "NW",
+          x: 56,
+          y: 48,
+          w: 40,
+          h: 14,
+          enterX: 160,
+          enterY: 250,
+          html: `
+            <div class="window-actions">
+              <span class="window-kicker">0 outbound requests - local-first runtime</span>
+            </div>
+          `,
+        },
+        {
+          title: "FlowSwitch",
+          icon: "FT",
+          x: 4,
+          y: 64,
+          w: 92,
           h: 30,
-          enterX: 170,
-          enterY: 190,
-          html: `
-            <div class="window-side">
-              <h3>Windows native</h3>
-              <p>Built around monitor geometry, app placement, and launch orchestration rather than a generic browser shell.</p>
-            </div>
-          `,
-        },
-        {
-          title: "runtime.log",
-          icon: "RT",
-          x: 61,
-          y: 44,
-          w: 35,
-          h: 24,
-          enterX: 150,
-          enterY: 230,
-          html: `
-            <div class="window-side">
-              <h3>Early access status</h3>
-              <p>Still in active development, with defaults and features evolving as the Windows experience hardens.</p>
-            </div>
-          `,
-        },
-        {
-          title: "links.txt",
-          icon: "LN",
-          x: 10,
-          y: 68,
-          w: 86,
-          h: 20,
           enterX: 0,
           enterY: 260,
           html: `
-            <div class="window-actions">
-              <a href="./privacy.html" class="btn-secondary">Read full privacy page</a>
-              <a href="./changelog.html" class="btn-secondary">Open changelog page</a>
+            <div class="window-hero">
+              <div>
+                <h3>FlowSwitch</h3>
+                <p>Built for Windows power users who want reliable workspace restore.</p>
+              </div>
+              <div class="window-actions">
+                <a
+                  href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
+                  class="btn-primary"
+                  data-download-link="1"
+                >Download</a>
+                <a href="https://github.com/jmpanackal/FlowSwitch" class="btn-secondary">GitHub</a>
+              </div>
             </div>
           `,
         },
@@ -437,11 +500,32 @@
         </div>
         <div class="window-card__controls"><i></i><i></i><i></i></div>
       </div>
-      <div class="window-card__body">${windowSpec.html}</div>
+      <div class="window-card__body">
+        <div class="window-card__body-inner">${windowSpec.html}</div>
+      </div>
       ${statusBar}
     `;
 
     return node;
+  };
+
+  const fitWindowBodies = () => {
+    const bodies = stage.querySelectorAll(".window-card__body");
+    bodies.forEach((body) => {
+      const inner = body.querySelector(".window-card__body-inner");
+      if (!inner) return;
+
+      inner.style.transform = "scale(1)";
+      inner.style.width = "100%";
+
+      const availableHeight = body.clientHeight;
+      const contentHeight = inner.scrollHeight;
+      if (availableHeight <= 0 || contentHeight <= availableHeight) return;
+
+      const scale = Math.max(0.62, availableHeight / contentHeight);
+      inner.style.transform = `scale(${scale})`;
+      inner.style.width = `${100 / scale}%`;
+    });
   };
 
   const updateMeta = (section) => {
@@ -482,6 +566,10 @@
           node.classList.add("is-active");
         });
       });
+    });
+
+    requestAnimationFrame(() => {
+      fitWindowBodies();
     });
 
     window.__flowswitchApplyDownloads?.();
@@ -569,5 +657,11 @@
       event.preventDefault();
       moveBy(-1);
     }
+  });
+
+  window.addEventListener("resize", () => {
+    requestAnimationFrame(() => {
+      fitWindowBodies();
+    });
   });
 })();

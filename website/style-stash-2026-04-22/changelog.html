@@ -3,9 +3,9 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <meta name="description" content="FlowSwitch privacy overview." />
+    <meta name="description" content="FlowSwitch release notes." />
     <meta name="theme-color" content="#090c14" />
-    <title>FlowSwitch - Privacy</title>
+    <title>FlowSwitch - Changelog</title>
     <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
@@ -13,7 +13,7 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=31" />
+    <link rel="stylesheet" href="./styles.css?v=27" />
     <script defer src="./site-core.js"></script>
   </head>
   <body class="page-sub">
@@ -27,8 +27,8 @@
         </a>
         <nav class="nav" aria-label="Site">
           <a href="./">Home</a>
-          <a href="./changelog.html">Changelog</a>
-          <a href="./privacy.html" aria-current="page">Privacy</a>
+          <a href="./changelog.html" aria-current="page">Changelog</a>
+          <a href="./privacy.html">Privacy</a>
         </nav>
         <a
           href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
@@ -41,28 +41,22 @@
 
     <main id="main" class="subpage-shell wrap">
       <section class="subpage-window">
-        <p class="monitor-shell__eyebrow">FlowSwitch privacy summary</p>
-        <h1>Privacy</h1>
-        <p class="subpage-lead">
-          FlowSwitch is designed as a local-first desktop tool for Windows workspace switching.
-        </p>
+        <p class="monitor-shell__eyebrow">FlowSwitch release history</p>
+        <h1>Changelog</h1>
+        <p class="subpage-lead">High-level release notes for FlowSwitch.</p>
 
-        <div class="privacy-list">
-          <div class="privacy-list__item">
-            <h4>Local data</h4>
-            <p>Profiles, layout metadata, and related configuration are intended to live on your machine under <code>%APPDATA%/FlowSwitch</code>.</p>
-          </div>
-          <div class="privacy-list__item">
-            <h4>System integration</h4>
-            <p>To capture monitor layouts and launch apps, FlowSwitch reads OS-provided information and interacts with local processes.</p>
-          </div>
-          <div class="privacy-list__item">
-            <h4>No required account</h4>
-            <p>The app does not require a cloud account to perform its core workspace capture and switching functions.</p>
-          </div>
-          <div class="privacy-list__item">
-            <h4>Diagnostics</h4>
-            <p>Optional local logs may exist for troubleshooting, including the latest launch diagnostics path documented in the repository.</p>
+        <div class="timeline">
+          <div class="timeline-entry">
+            <div class="timeline-entry__head">
+              <span class="timeline-entry__version">v0.1.0</span>
+              <span class="timeline-entry__tag">early access</span>
+              <span class="timeline-entry__date">April 2026</span>
+            </div>
+            <ul>
+              <li>Initial public Windows packaging with installer and portable executable.</li>
+              <li>Launch, monitor layout, and profile switching baseline.</li>
+              <li>Marketing site download metadata wired to the release payload.</li>
+            </ul>
           </div>
         </div>
       </section>
