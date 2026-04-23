@@ -3,378 +3,133 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlowSwitch — Switch your setup. Maintain your flow.</title>
+    <title>FlowSwitch - One profile. Your whole workspace.</title>
     <meta
       name="description"
-      content="Take control of your desktop. Capture your current arrangement, design new ones, and switch between them in an instant. The simplest way to organize your space."
+      content="FlowSwitch is a Windows-first workspace switcher for monitors, app windows, and launch flows. Capture, arrange, and switch your whole setup in one move."
     />
-    <meta name="theme-color" content="#0b0c10" />
-    <meta property="og:title" content="FlowSwitch — Switch your setup. Maintain your flow." />
+    <meta name="theme-color" content="#090c14" />
+    <meta property="og:title" content="FlowSwitch - One profile. Your whole workspace." />
     <meta
       property="og:description"
-      content="Take control of your desktop. Capture your current arrangement, design new ones, and switch between them in an instant. The simplest way to organize your space."
+      content="Capture, arrange, and switch your whole workspace in one move. Built for Windows monitor layouts, app windows, and launch flows."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="./assets/app-hero.png" />
+    <meta property="og:image" content="./assets/flowswitch-logo.png" />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="FlowSwitch — Switch your setup. Maintain your flow." />
+    <meta name="twitter:title" content="FlowSwitch - One profile. Your whole workspace." />
     <meta
       name="twitter:description"
-      content="Take control of your desktop. Capture your current arrangement, design new ones, and switch between them in an instant. The simplest way to organize your space."
+      content="Capture, arrange, and switch your whole workspace in one move. Built for Windows monitor layouts, app windows, and launch flows."
     />
-    <meta name="twitter:image" content="./assets/app-hero.png" />
+    <meta name="twitter:image" content="./assets/flowswitch-logo.png" />
     <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
     <link rel="apple-touch-icon" href="./assets/flowswitch-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@500;600;700;800&family=Work+Sans:wght@400;500;600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.css" />
-    <link rel="stylesheet" href="./styles.css?v=11" />
-    <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/gsap.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/gsap@3.12.5/dist/ScrollTrigger.min.js"></script>
-    <script defer src="https://cdn.jsdelivr.net/npm/lenis@1.1.18/dist/lenis.min.js"></script>
+    <link rel="stylesheet" href="./styles.css?v=24" />
     <script defer src="./site-core.js"></script>
     <script defer src="./site-home.js"></script>
   </head>
   <body class="page-home">
     <a class="skip-link" href="#main">Skip to content</a>
 
+    <div class="page-glow" aria-hidden="true">
+      <div class="page-glow__a"></div>
+      <div class="page-glow__b"></div>
+      <div class="page-glow__c"></div>
+    </div>
+
     <header class="site-header">
-      <div class="wrap site-header__inner">
+      <div class="wrap site-header__shell">
         <a href="./" class="brand">
-          <img src="./assets/flowswitch-logo.png" alt="" width="34" height="34" />
+          <img src="./assets/flowswitch-logo.png" alt="" width="38" height="38" />
           <span>FlowSwitch</span>
         </a>
-        <nav class="nav" aria-label="Main Navigation">
-          <a href="#how-it-works">Product</a>
-          <a href="#features">Features</a>
-          <a href="#requirements">Requirements</a>
-          <a href="#faq">FAQ</a>
-          <a href="./changelog.html">Changelog</a>
-          <a href="./privacy.html">Privacy</a>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="#how" data-section-link="how">How it works</a>
+          <a href="#features" data-section-link="features">Features</a>
+          <a href="#faq" data-section-link="faq">FAQ</a>
+          <a href="#changelog" data-section-link="changelog">Changelog</a>
+          <a href="#privacy" data-section-link="privacy">Privacy</a>
         </nav>
+
         <a
           href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
           id="header-download"
           class="btn-header-cta"
           role="button"
           data-download-link="1"
-        >Download</a>
+        >
+          Download
+        </a>
       </div>
     </header>
 
-    <main id="main">
-      <section class="hero" id="whats-new">
-        <div class="hero-inner">
-          <a href="#whats-new" class="hero-badge">
-            <span class="badge-dot"></span> Early access · Built for Windows 11
-          </a>
-          <h1 class="hero-title">
-            Switch your setup. <br /><span class="headline-gradient">Maintain your flow.</span>
-          </h1>
-          <p class="hero-lead">
-            Take control of your desktop. Capture your current arrangement, design new ones, and switch between them in
-            an instant. The simplest way to organize your space.
+    <main id="main" class="workspace-page">
+      <section class="workspace-hero">
+        <div class="workspace-hero__copy">
+          <p class="workspace-badge">
+            <span class="workspace-badge__dot"></span>
+            Early access for Windows
           </p>
+          <h1>One profile. Your whole workspace.</h1>
+          <p class="workspace-hero__lead">
+            FlowSwitch captures monitor layouts, app windows, launch flows, and browser context so your desktop can
+            switch states as fast as you do.
+          </p>
+          <div class="workspace-hero__meta">
+            <span>Use mouse wheel or arrow keys to switch sections</span>
+            <span class="workspace-hero__meta-sep"></span>
+            <span id="download-version-meta">v0.1.0 - Early access build</span>
+          </div>
+        </div>
 
-          <div class="hero-download" id="download">
-            <div class="download-glow-ring">
-              <div class="download-glow-ring__inner">
-                <div class="btn-split">
-                  <a
-                    href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
-                    id="download-installer"
-                    class="btn-split-seg btn-split-seg--main"
-                    role="button"
-                    data-download-link="1"
-                  >
-                    <svg
-                      class="btn-icon"
-                      xmlns="http://www.w3.org/2000/svg"
-                      width="20"
-                      height="20"
-                      viewBox="0 0 24 24"
-                      fill="none"
-                      stroke="currentColor"
-                      stroke-width="2.5"
-                      stroke-linecap="round"
-                      stroke-linejoin="round"
-                    >
-                      <rect width="18" height="18" x="3" y="3" rx="2" ry="2"></rect>
-                      <line x1="3" x2="21" y1="9" y2="9"></line>
-                      <line x1="9" x2="9" y1="21" y2="9"></line>
-                    </svg>
-                    Download for Windows
-                  </a>
+        <div class="monitor-shell" aria-label="FlowSwitch site preview workspace">
+          <div class="monitor-shell__bezel">
+            <div class="monitor-shell__screen">
+              <div class="monitor-shell__topline">
+                <div>
+                  <p class="monitor-shell__eyebrow">FlowSwitch workspace.exe</p>
+                  <h2 id="section-title">How it works</h2>
+                  <p id="section-subtitle" class="monitor-shell__subtitle">Capture - arrange - switch</p>
+                </div>
+                <div class="monitor-shell__hint">
+                  <span>switch section</span>
+                  <kbd>scroll</kbd>
                 </div>
               </div>
-            </div>
-            <p class="hero-download-meta" id="download-version-meta">
-              v0.1.0 &middot; Supports Windows 10+
-              <br />
-              <a
-                href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-portable.exe"
-                id="download-portable"
-                class="link-portable"
-                data-download-link="1"
-                >Portable .exe &rarr;</a>
-            </p>
-            <p id="download-error" class="download-error" hidden>
-              Could not refresh release metadata. If the button opens a GitHub error page, the Windows build may not
-              be attached to
-              <a href="https://github.com/jmpanackal/FlowSwitch/releases/tag/v0.1.0">release v0.1.0</a>
-              yet—check
-              <a href="https://github.com/jmpanackal/FlowSwitch/actions">Actions</a>
-              for the Release workflow, then confirm both <code>.exe</code> files appear under that release.
-            </p>
-          </div>
-        </div>
 
-        <div class="hero-media-showcase">
-          <div class="showcase-3d-wrap">
-            <div class="showcase-3d">
-              <div class="showcase-frame">
-                <div class="showcase-controls">
-                  <span></span><span></span><span></span>
-                </div>
-                <img
-                  src="./assets/app-animation.webp"
-                  alt="FlowSwitch App UI Usage Animation"
-                  class="showcase-video"
-                  width="1200"
-                  height="675"
-                  loading="eager"
-                  decoding="async"
-                />
-              </div>
-            </div>
-          </div>
-        </div>
-      </section>
+              <div id="workspace-stage" class="workspace-stage" aria-live="polite"></div>
 
-      <div class="section-rule" aria-hidden="true"></div>
-
-      <section class="section story-section" id="how-it-works">
-        <div class="wrap">
-          <div class="section-head section-reveal">
-            <p class="section-kicker">How FlowSwitch helps</p>
-            <h2>Desk control that keeps pace with your day</h2>
-            <p class="section-intro">
-              Capture once. Restore in one gesture. Native speed, no cloud required.
-            </p>
-          </div>
-          <div class="story-grid">
-            <article class="story-step">
-              <div class="story-step-num" aria-hidden="true">01</div>
-              <h3>Capture your layout</h3>
-              <p>Record every window, monitor, and workspace edge so your setup is remembered exactly as you left it.</p>
-            </article>
-            <article class="story-step">
-              <div class="story-step-num" aria-hidden="true">02</div>
-              <h3>Switch profiles instantly</h3>
-              <p>Jump between deep work, meetings, and play with hotkeys or the tray—without rebuilding your desk by hand.</p>
-            </article>
-            <article class="story-step">
-              <div class="story-step-num" aria-hidden="true">03</div>
-              <h3>Restore with confidence</h3>
-              <p>Relaunch apps, reopen browser tabs where they belong, and snap everything back across mixed DPI screens.</p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <div class="section-rule" aria-hidden="true"></div>
-
-      <section class="section section--alt stats-strip" aria-label="Product highlights">
-        <div class="wrap stats-inner">
-          <div class="stat-pill">
-            <span class="stat-value">Native</span>
-            <span class="stat-label">Win32-first, no web shell</span>
-          </div>
-          <div class="stat-pill">
-            <span class="stat-value">Multi</span>
-            <span class="stat-label">Monitors &amp; mixed DPI</span>
-          </div>
-          <div class="stat-pill">
-            <span class="stat-value">Local</span>
-            <span class="stat-label">Profiles stay on your PC</span>
-          </div>
-        </div>
-      </section>
-
-      <div class="section-rule" aria-hidden="true"></div>
-
-      <section id="features" class="section section--alt bento-grid-section">
-        <div class="wrap">
-          <div class="section-head section-reveal">
-            <p class="section-kicker">Core superpowers</p>
-            <h2>Everything you need for perfect window orchestration</h2>
-            <p class="section-intro">Stop dragging windows back every morning. FlowSwitch remembers your exact layout.</p>
-          </div>
-
-          <div class="bento-grid">
-            <article class="bento-card bento-wide">
-              <div class="bento-content">
-                <h3>Multi-monitor mastery</h3>
-                <p>Mixed DPI, horizontal or vertical layouts, virtual desktops. FlowSwitch identifies every screen accurately.</p>
-              </div>
-              <div class="bento-media">
-                <img src="./assets/app-hero.png" alt="Full dashboard overview" loading="lazy" decoding="async" />
-              </div>
-            </article>
-
-            <article class="bento-card bento-tall">
-              <div class="bento-content">
-                <h3>Profile manager</h3>
-                <p>Create separate flows for coding, gaming, or writing. Switch instantly with hotkeys.</p>
-              </div>
-              <div class="bento-media">
-                <img src="./assets/app-feature-profile.png" alt="Profile UI details" loading="lazy" decoding="async" />
-              </div>
-            </article>
-
-            <article class="bento-card">
-              <div class="bento-content">
-                <h3>Layout blueprints</h3>
-                <p>Capture layouts intuitively across all displays.</p>
-              </div>
-              <div class="bento-media bottom-focus">
-                <img src="./assets/app-feature-monitors.png" alt="Monitor layouts UI" loading="lazy" decoding="async" />
-              </div>
-            </article>
-
-            <article class="bento-card">
-              <div class="bento-content">
-                <h3>Native speed</h3>
-                <p>Talks directly to the Windows registry and shell. No bulky polling overhead.</p>
-              </div>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section id="requirements" class="section">
-        <div class="wrap">
-          <div class="section-head section-reveal">
-            <p class="section-kicker">Requirements</p>
-            <h2>Built for Windows power users</h2>
-          </div>
-          <div class="grid two">
-            <article class="card">
-              <h3>Compatibility</h3>
-              <p>
-                Compatible with 64-bit Windows 10 and 11. Designed to adapt seamlessly to any setup—from single
-                laptops to complex multi-monitor arrays.
-              </p>
-            </article>
-            <article class="card">
-              <h3>Always up to date</h3>
-              <p>
-                Stay current with automatic, background updates. We&rsquo;re constantly improving FlowSwitch to ensure
-                your workspace stays perfect.
-              </p>
-            </article>
-          </div>
-        </div>
-      </section>
-
-      <section id="faq" class="section faq-section">
-        <div class="wrap">
-          <div class="section-head section-reveal">
-            <p class="section-kicker">FAQ</p>
-            <h2>Frequently asked questions</h2>
-          </div>
-          <div class="faq-list" role="list">
-            <div class="faq-item" role="listitem">
-              <button type="button" class="faq-trigger" aria-expanded="false" id="faq-btn-1" aria-controls="faq-panel-1">
-                <span>Where is data saved?</span>
-                <span class="faq-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="faq-panel" id="faq-panel-1" role="region" aria-labelledby="faq-btn-1" aria-hidden="true">
-                <div class="faq-panel-inner">
-                  <p>All profiles and rules are kept strictly local in <code>%APPDATA%/FlowSwitch</code>.</p>
-                </div>
-              </div>
-            </div>
-            <div class="faq-item" role="listitem">
-              <button type="button" class="faq-trigger" aria-expanded="false" id="faq-btn-2" aria-controls="faq-panel-2">
-                <span>What about elevated bounds?</span>
-                <span class="faq-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="faq-panel" id="faq-panel-2" role="region" aria-labelledby="faq-btn-2" aria-hidden="true">
-                <div class="faq-panel-inner">
-                  <p>
-                    Because FlowSwitch intercepts window positions via low-level hooks, capturing apps running as Admin
-                    will require FlowSwitch to also run elevated.
-                  </p>
-                </div>
-              </div>
-            </div>
-            <div class="faq-item" role="listitem">
-              <button type="button" class="faq-trigger" aria-expanded="false" id="faq-btn-3" aria-controls="faq-panel-3">
-                <span>Are global hotkeys required?</span>
-                <span class="faq-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="faq-panel" id="faq-panel-3" role="region" aria-labelledby="faq-btn-3" aria-hidden="true">
-                <div class="faq-panel-inner">
-                  <p>No, you can launch profiles through the interface. Global shortcuts are just there for speed.</p>
-                </div>
-              </div>
-            </div>
-            <div class="faq-item" role="listitem">
-              <button type="button" class="faq-trigger" aria-expanded="false" id="faq-btn-4" aria-controls="faq-panel-4">
-                <span>Is macOS supported?</span>
-                <span class="faq-chevron" aria-hidden="true"></span>
-              </button>
-              <div class="faq-panel" id="faq-panel-4" role="region" aria-labelledby="faq-btn-4" aria-hidden="true">
-                <div class="faq-panel-inner">
-                  <p>FlowSwitch heavily anchors on the Win32 API. A macOS version is not planned currently.</p>
+              <div class="taskbar" aria-label="Section taskbar">
+                <button type="button" class="taskbar__start" data-section-select="how">
+                  <img src="./assets/flowswitch-logo.png" alt="" width="18" height="18" />
+                  <span>FlowSwitch</span>
+                </button>
+                <div id="taskbar-sections" class="taskbar__sections"></div>
+                <div class="taskbar__status">
+                  <span class="taskbar__pulse"></span>
+                  <span id="taskbar-status">Windows native</span>
                 </div>
               </div>
             </div>
           </div>
+          <div class="monitor-shell__stand"></div>
+          <div class="monitor-shell__base"></div>
         </div>
       </section>
+
+      <p id="download-error" class="download-error" hidden>
+        Could not refresh release metadata. If the installer opens a GitHub error page, check
+        <a href="https://github.com/jmpanackal/FlowSwitch/releases/tag/v0.1.0">release v0.1.0</a>
+        and confirm both Windows <code>.exe</code> files are attached.
+      </p>
     </main>
-
-    <footer class="site-footer">
-      <div class="wrap site-footer__grid">
-        <div class="site-footer__brand">
-          <a href="./" class="brand brand--footer">
-            <img src="./assets/flowswitch-logo.png" alt="" width="32" height="32" />
-            <span>FlowSwitch</span>
-          </a>
-          <p class="site-footer__tagline">Native Windows workspace profiles &amp; layout restore.</p>
-          <p class="site-footer__status">Early access: features and defaults may evolve between releases.</p>
-        </div>
-        <div>
-          <h3 class="site-footer__heading">Product</h3>
-          <ul class="site-footer__links">
-            <li><a href="#how-it-works">How it works</a></li>
-            <li><a href="#features">Features</a></li>
-            <li><a href="#download">Download</a></li>
-          </ul>
-        </div>
-        <div>
-          <h3 class="site-footer__heading">Resources</h3>
-          <ul class="site-footer__links">
-            <li><a href="./changelog.html">Changelog</a></li>
-            <li><a href="./privacy.html">Privacy</a></li>
-          </ul>
-        </div>
-        <div>
-          <h3 class="site-footer__heading">Stack</h3>
-          <p class="site-footer__fine">
-            Built with <a href="https://vitejs.dev/">Vite</a> and <a href="https://www.electronjs.org/">Electron</a>.
-          </p>
-        </div>
-      </div>
-      <div class="wrap site-footer__bottom">
-        <p>Need help? Publish a support path for FlowSwitch on your site or readme.</p>
-      </div>
-    </footer>
   </body>
 </html>
