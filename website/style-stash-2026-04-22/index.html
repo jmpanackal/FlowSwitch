@@ -1,0 +1,135 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>FlowSwitch - One profile. Your whole workspace.</title>
+    <meta
+      name="description"
+      content="FlowSwitch is a Windows-first workspace switcher for monitors, app windows, and launch flows. Capture, arrange, and switch your whole setup in one move."
+    />
+    <meta name="theme-color" content="#090c14" />
+    <meta property="og:title" content="FlowSwitch - One profile. Your whole workspace." />
+    <meta
+      property="og:description"
+      content="Capture, arrange, and switch your whole workspace in one move. Built for Windows monitor layouts, app windows, and launch flows."
+    />
+    <meta property="og:type" content="website" />
+    <meta property="og:image" content="./assets/flowswitch-logo.png" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="FlowSwitch - One profile. Your whole workspace." />
+    <meta
+      name="twitter:description"
+      content="Capture, arrange, and switch your whole workspace in one move. Built for Windows monitor layouts, app windows, and launch flows."
+    />
+    <meta name="twitter:image" content="./assets/flowswitch-logo.png" />
+    <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
+    <link rel="apple-touch-icon" href="./assets/flowswitch-logo.png" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css?v=27" />
+    <script defer src="./site-core.js"></script>
+    <script defer src="./site-home.js?v=3"></script>
+  </head>
+  <body class="page-home">
+    <a class="skip-link" href="#main">Skip to content</a>
+
+    <div class="page-glow" aria-hidden="true">
+      <div class="page-glow__a"></div>
+      <div class="page-glow__b"></div>
+      <div class="page-glow__c"></div>
+    </div>
+
+    <header class="site-header">
+      <div class="wrap site-header__shell">
+        <a href="./" class="brand">
+          <img src="./assets/flowswitch-logo.png" alt="" width="38" height="38" />
+          <span>FlowSwitch</span>
+        </a>
+
+        <nav class="nav" aria-label="Primary">
+          <a href="#how" data-section-link="how">How it works</a>
+          <a href="#features" data-section-link="features">Features</a>
+          <a href="#faq" data-section-link="faq">FAQ</a>
+          <a href="#changelog" data-section-link="changelog">Changelog</a>
+          <a href="#privacy" data-section-link="privacy">Privacy</a>
+        </nav>
+
+        <a
+          href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
+          id="header-download"
+          class="btn-header-cta"
+          role="button"
+          data-download-link="1"
+        >
+          Download
+        </a>
+      </div>
+    </header>
+
+    <main id="main" class="workspace-page">
+      <section class="workspace-hero">
+        <div class="workspace-hero__copy">
+          <p class="workspace-badge">
+            <span class="workspace-badge__dot"></span>
+            Early access for Windows
+          </p>
+          <h1>One profile. Your whole workspace.</h1>
+          <p class="workspace-hero__lead">
+            FlowSwitch captures monitor layouts, app windows, launch flows, and browser context so your desktop can
+            switch states as fast as you do.
+          </p>
+          <div class="workspace-hero__meta">
+            <span>Use mouse wheel or arrow keys to switch sections</span>
+            <span class="workspace-hero__meta-sep"></span>
+            <span id="download-version-meta">v0.1.0 - Early access build</span>
+          </div>
+        </div>
+
+        <div class="monitor-shell" aria-label="FlowSwitch site preview workspace">
+          <div class="monitor-shell__bezel">
+            <div class="monitor-shell__screen">
+              <div class="monitor-shell__topline">
+                <div>
+                  <p class="monitor-shell__eyebrow">FlowSwitch workspace.exe</p>
+                  <h2 id="section-title">How it works</h2>
+                  <p id="section-subtitle" class="monitor-shell__subtitle">Capture - arrange - switch</p>
+                </div>
+                <div class="monitor-shell__hint">
+                  <span>switch section</span>
+                  <kbd>scroll</kbd>
+                </div>
+              </div>
+
+              <div id="workspace-stage" class="workspace-stage" aria-live="polite"></div>
+
+              <div class="taskbar" aria-label="Section taskbar">
+                <button type="button" class="taskbar__start" data-section-select="how">
+                  <img src="./assets/flowswitch-logo.png" alt="" width="18" height="18" />
+                  <span>FlowSwitch</span>
+                </button>
+                <div id="taskbar-sections" class="taskbar__sections"></div>
+                <div class="taskbar__status">
+                  <span class="taskbar__pulse"></span>
+                  <span id="taskbar-status">Windows native</span>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div class="monitor-shell__stand"></div>
+          <div class="monitor-shell__base"></div>
+        </div>
+      </section>
+
+      <p id="download-error" class="download-error" hidden>
+        Could not refresh release metadata. If the installer opens a GitHub error page, check
+        <a href="https://github.com/jmpanackal/FlowSwitch/releases/tag/v0.1.0">release v0.1.0</a>
+        and confirm both Windows <code>.exe</code> files are attached.
+      </p>
+    </main>
+  </body>
+</html>

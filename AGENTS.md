@@ -13,6 +13,52 @@ Repository-level source of truth for workflow, quality, and change hygiene.
 - Production build: `npm run build`
 - Package Windows (NSIS + portable): `npm run dist:win` (output in `release/`)
 - Sync marketing `latest.json`: `npm run website:sync-latest` (optional env `FLOWSWITCH_GITHUB_REPO=owner/repo`; defaults to `jmpanackal/FlowSwitch`)
+- Stage Windows `.exe` files into `website/downloads/` (optional static hosting): `npm run website:stage-downloads` (run after `dist:win`; pair with `FLOWSWITCH_DOWNLOAD_BASE_URL=./downloads/` when syncing—see `website/README.md`)
+
+## Marketing site and versioned releases
+
+Use this when shipping a **new app version** users download from the marketing site (`website/`) and **GitHub Releases** (CI-built installers).
+
+### Source of truth
+
+- Root **`package.json` → `version`** drives Electron-builder artifact names and `website/latest.json` (`releaseTag` = `v` + version, `files` = `FlowSwitch-<version>-win-x64-installer.exe` and `…-portable.exe`).
+- **`npm run website:sync-latest`** regenerates **`website/latest.json`** from `package.json` (and optional `FLOWSWITCH_GITHUB_REPO` / `FLOWSWITCH_DOWNLOAD_BASE_URL`).
+
+### Marketing HTML and `latest.json` stay in sync
+
+- **`website/index.html`** embeds **versioned** GitHub download `href`s and copy (e.g. `v0.1.0`, `FlowSwitch-0.1.0-…`) as a **fallback** when `latest.json` is slow or fails to load. This is an intentional exception to the usual “no volatile URLs in code” rule for that static page only—**keep those literals aligned** with each release. After bumping **`package.json` `version`**, run **`website:sync-latest`**, then **search/replace** those literals in **`index.html`** (and the **`#download-error`** release link text) to the new version. **`website/changelog.html`** should gain a section for the new version when you publish it.
+- Broader deploy/hosting notes: **`website/README.md`**.
+
+### Release sequence (recommended order)
+
+1. Bump **`package.json` `version`** (semver).
+2. Run **`npm run website:sync-latest`** from repo root.
+3. Update **`website/index.html`** (and changelog copy) for the new version strings / URLs as above.
+4. **Lint + typecheck**, then **PR / merge to `main`** (so the default branch matches what you will tag).
+5. **Tag** = **`v` + same version** as `package.json` (example: version `0.2.0` → tag `v0.2.0`):
+
+   ```bash
+   git pull --ff-only origin main
+   git tag -a v0.2.0 -m "FlowSwitch 0.2.0"
+   git push origin v0.2.0
+   ```
+
+6. **GitHub Actions**: workflow **`.github/workflows/release.yml`** runs on tag push (`v*`), verifies the tag matches `package.json`, runs lint/typecheck/tests, **`npm run dist:win`**, and uploads the two `.exe` assets to that release. Wait until it succeeds.
+7. **Verify** on GitHub **Releases** that asset **filenames** match **`website/latest.json` → `files`**, then smoke-test downloads on the live marketing site.
+
+**Do not** push the release tag until **`main`** (or whichever branch the workflow builds) already contains the bumped `package.json` and updated `website/` files—otherwise the workflow validates or packages the wrong version.
+
+### Website-only changes
+
+- If only copy, layout, or assets under **`website/`** change (no **`package.json`** version bump), merge to **`main`**; the static host (e.g. Vercel) redeploys. No new GitHub tag unless you are also shipping a new binary.
+
+### Optional local packaging check
+
+- **`npm run dist:win`** before tagging to confirm **`release/`** output locally. Not a substitute for CI; the official artifacts are the workflow uploads.
+
+### Same version, replace binaries (avoid)
+
+- Prefer a **new patch version + new tag**. Reusing a tag for different binaries is confusing; GitHub release assets are normally treated as immutable per tag.
 
 ## Latest Launch Diagnostics Log
 

@@ -35,29 +35,19 @@
     const installer = data?.files?.installer;
     const portable = data?.files?.portable;
     const versionMeta = byId("download-version-meta");
-    const headerVersionMeta = byId("header-version-pill");
     const primary = byId("download-installer");
     const secondary = byId("download-portable");
     const header = byId("header-download");
-    const dynamicDownloadLinks = [...document.querySelectorAll("[data-download-link='1']")];
 
     if (versionMeta) {
       versionMeta.textContent =
         data.version && data.releaseTag ? `${data.releaseTag} - Early access build` : "";
     }
 
-    if (headerVersionMeta) {
-      headerVersionMeta.textContent =
-        data.version && data.releaseTag ? `${data.releaseTag} · Early access` : "";
-    }
-
     if (installer) {
       const installerUrl = releaseFileUrl(data, installer);
       if (primary) primary.href = installerUrl;
       if (header) header.href = installerUrl;
-      dynamicDownloadLinks.forEach((link) => {
-        if (link instanceof HTMLAnchorElement) link.href = installerUrl;
-      });
     }
 
     if (portable && secondary) {
@@ -96,32 +86,4 @@
     syncHeader();
     window.addEventListener("scroll", syncHeader, { passive: true });
   }
-
-  /* Smooth same-page # navigation without `html { scroll-behavior: smooth }`, which can
-     conflict with wheel/trackpad scrolling on long sticky sections (marketing home). */
-  document.addEventListener("click", (event) => {
-    const target = event.target;
-    if (!(target instanceof Element)) return;
-    const anchor = target.closest("a[href^=\"#\"]");
-    if (!(anchor instanceof HTMLAnchorElement)) return;
-
-    const hash = anchor.getAttribute("href");
-    if (!hash || hash === "#" || hash.length < 2) return;
-
-    let url;
-    try {
-      url = new URL(anchor.href);
-    } catch {
-      return;
-    }
-
-    if (url.pathname !== window.location.pathname || url.search !== window.location.search) return;
-
-    const el = document.getElementById(hash.slice(1));
-    if (!el) return;
-
-    event.preventDefault();
-    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
-    el.scrollIntoView({ behavior: reduceMotion ? "auto" : "smooth", block: "start" });
-  });
 })();

@@ -13,32 +13,33 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=73" />
-    <script defer src="./site-core.js?v=3"></script>
+    <link rel="stylesheet" href="./styles.css?v=27" />
+    <script defer src="./site-core.js"></script>
   </head>
   <body class="page-sub">
     <a class="skip-link" href="#main">Skip to content</a>
 
     <header class="site-header">
-      <div class="site-header__pill">
+      <div class="wrap site-header__shell">
         <a class="brand" href="./">
           <img src="./assets/flowswitch-logo.png" width="38" height="38" alt="" />
-          <span class="brand__label">FlowSwitch</span>
+          <span>FlowSwitch</span>
         </a>
-        <nav class="site-nav" aria-label="Site">
+        <nav class="nav" aria-label="Site">
           <a href="./">Home</a>
           <a href="./changelog.html">Changelog</a>
+          <a href="./privacy.html" aria-current="page">Privacy</a>
         </nav>
         <a
           href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
           id="header-download"
-          class="btn btn--primary"
+          class="btn-header-cta"
           data-download-link="1"
         >Download</a>
       </div>
     </header>
 
-    <main id="main" class="subpage-shell">
+    <main id="main" class="subpage-shell wrap">
       <section class="subpage-window">
         <p class="monitor-shell__eyebrow">FlowSwitch privacy summary</p>
         <h1>Privacy</h1>
