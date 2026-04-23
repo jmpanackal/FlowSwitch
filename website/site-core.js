@@ -35,19 +35,29 @@
     const installer = data?.files?.installer;
     const portable = data?.files?.portable;
     const versionMeta = byId("download-version-meta");
+    const headerVersionMeta = byId("header-version-pill");
     const primary = byId("download-installer");
     const secondary = byId("download-portable");
     const header = byId("header-download");
+    const dynamicDownloadLinks = [...document.querySelectorAll("[data-download-link='1']")];
 
     if (versionMeta) {
       versionMeta.textContent =
         data.version && data.releaseTag ? `${data.releaseTag} - Early access build` : "";
     }
 
+    if (headerVersionMeta) {
+      headerVersionMeta.textContent =
+        data.version && data.releaseTag ? `${data.releaseTag} · Early access` : "";
+    }
+
     if (installer) {
       const installerUrl = releaseFileUrl(data, installer);
       if (primary) primary.href = installerUrl;
       if (header) header.href = installerUrl;
+      dynamicDownloadLinks.forEach((link) => {
+        if (link instanceof HTMLAnchorElement) link.href = installerUrl;
+      });
     }
 
     if (portable && secondary) {
