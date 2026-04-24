@@ -18,9 +18,6 @@
   const mobileLinks = mobileMenuNav ? [...mobileMenuNav.querySelectorAll("a[href]")] : [];
   const mobileMenuDismiss = mobileMenu ? [...mobileMenu.querySelectorAll("[data-mobile-menu-dismiss]")] : [];
 
-  const waitlistForm = document.querySelector("[data-waitlist-form]");
-  const waitlistState = document.querySelector("[data-waitlist-state]");
-  const waitlistButton = waitlistForm?.querySelector("button[type='submit']");
   const flowCanvas = document.querySelector("[data-flow-canvas]");
   const flowBackground = document.querySelector("[data-flow-background]");
 
@@ -370,37 +367,6 @@
 
     mobileLinks.forEach((link) => {
       link.addEventListener("click", () => setMenuOpen(false));
-    });
-  }
-
-  if (waitlistForm && waitlistState && waitlistButton) {
-    waitlistForm.addEventListener("submit", async (event) => {
-      event.preventDefault();
-      markInteracted();
-
-      const formData = new FormData(waitlistForm);
-      const email = String(formData.get("email") || "").trim();
-      if (!email) return;
-
-      waitlistButton.disabled = true;
-      waitlistButton.textContent = "Sending...";
-      waitlistState.textContent = "";
-
-      try {
-        await new Promise((resolve) => {
-          window.setTimeout(resolve, 700);
-        });
-        const aside = waitlistForm.closest(".site-footer__newsletter-aside");
-        const success = document.createElement("p");
-        success.className = "site-footer__waitlist-success";
-        success.textContent = "You're on the list.";
-        if (aside) aside.replaceChildren(success);
-        else waitlistForm.replaceWith(success);
-      } catch {
-        waitlistState.textContent = "Something went wrong — try again";
-        waitlistButton.disabled = false;
-        waitlistButton.textContent = "Subscribe";
-      }
     });
   }
 
