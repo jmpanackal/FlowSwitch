@@ -16,6 +16,7 @@ After review, move them to `Reviewed Raw Archive` and keep this section small.
 - add ability to save profile with app layout memory via hotkey (new profile or overwrite current profile) needs to have confirmation modal. Also ability to set hotkeys to launch profiles (both are important)
 - launch free and paid tiers, free has access to everythind but only three profiles, paid has access to everything and unlimited profiles.
 - App should be downloaded as free tier from website. if the users pays they get a product license they can use to convert their product to paid tier
+- WEBSITE IDEA; each section you scroll to it minimizes all the info you looking at into a taskbar like space, and maximizes the info you are scrolling to, cards and other info enter the screen like they are windows being placed and positioned into a desktop monitor layout. Cards and other info exit the screen like the are being app windows being closed/minimized. so scrolling throught the website section by section looks like you are switching monitor layouts like how you would with flowswitch
 
 ## Reviewed Raw Archive (Reference Only)
 
