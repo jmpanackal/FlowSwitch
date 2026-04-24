@@ -120,7 +120,7 @@ export function TitleBarAppMenu({
         aria-haspopup="menu"
       >
         <img
-          src="/flowswitch-logo.png"
+          src={`${import.meta.env.BASE_URL}flowswitch-logo.png`}
           alt=""
           className="h-7 w-7 shrink-0 rounded-md object-contain"
           width={28}

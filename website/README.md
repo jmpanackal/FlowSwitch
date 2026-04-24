@@ -2,7 +2,7 @@
 
 Static files in this folder power the public download and positioning page. Deploy the **`website/` directory** as the site root (not the monorepo root).
 
-The logo file `flowswitch-logo.png` is duplicated here from `public/` so the marketing site can deploy without pulling the whole app tree; refresh the copy if the brand asset changes.
+The logo file `flowswitch-logo.png` and the dedicated favicon assets are generated from `branding/flowswitch-logo-master.png` via `npm run icons:generate`, then duplicated here so the marketing site can deploy without pulling the whole app tree.
 
 ## Before you deploy
 

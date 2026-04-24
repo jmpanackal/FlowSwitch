@@ -21,7 +21,8 @@
     "dist:win": "npm run dist:prepare && electron-builder --win --x64 --publish never",
     "dist": "npm run dist:prepare && electron-builder --publish never",
     "website:sync-latest": "node scripts/sync-website-latest-json.mjs",
-    "website:stage-downloads": "node scripts/stage-website-downloads.mjs"
+    "website:stage-downloads": "node scripts/stage-website-downloads.mjs",
+    "icons:generate": "node scripts/generate-windows-icons.mjs"
   },
   "devDependencies": {
     "@eslint/js": "^9.0.0",
@@ -38,6 +39,7 @@
     "globals": "^15.0.0",
     "npm-run-all": "^4.1.5",
     "postcss": "^8.4.0",
+    "sharp": "^0.33.5",
     "tailwindcss": "^3.4.0",
     "typescript": "^5.0.0",
     "typescript-eslint": "^8.58.1",
@@ -103,7 +105,7 @@
           ]
         }
       ],
-      "icon": "public/flowswitch-logo.png"
+      "icon": "public/flowswitch.ico"
     },
     "nsis": {
       "oneClick": false,
