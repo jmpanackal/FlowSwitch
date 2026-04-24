@@ -1126,18 +1126,25 @@ main {
 .demo-mock__vscode-tabrow {
   display: flex;
   gap: 0.12rem;
+  min-width: 0;
   padding: 0.15rem 0.25rem 0;
   background: rgba(30, 34, 38, 0.95);
   border-bottom: 1px solid rgba(101, 241, 207, 0.12);
+  overflow: hidden;
 }
 
 .demo-mock__vscode-tab {
+  flex: 1 1 0;
+  min-width: 0;
   padding: 0.12rem 0.32rem 0.15rem;
   border-radius: 4px 4px 0 0;
   font-family: var(--font-mono);
   font-size: 0.44rem;
   color: rgba(200, 210, 208, 0.45);
   background: rgba(0, 0, 0, 0.2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .demo-mock__vscode-tab--on {
@@ -1447,6 +1454,7 @@ main {
   display: flex;
   flex-direction: column;
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   padding: 0.55rem 0.6rem;
 }
@@ -1454,9 +1462,10 @@ main {
 .arrange-demo {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(5rem, 17%) 1fr;
+  grid-template-columns: minmax(5rem, 17%) minmax(0, 1fr);
   gap: 0.55rem;
   flex: 1 1 0;
+  min-width: 0;
   min-height: 0;
   z-index: 0;
 }
@@ -1494,7 +1503,7 @@ main {
 .arrange-demo__main {
   display: flex;
   flex-direction: column;
-  min-width: 0;
+  min-width: 0; /* allow grid track to shrink on narrow viewports */
   min-height: 0;
 }
 
@@ -1512,10 +1521,11 @@ main {
   position: relative;
   flex: 1;
   min-height: 0;
+  min-width: 0;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(0, 0, 0, 0.38);
-  overflow: visible;
+  overflow: hidden; /* clip board vs. monitor frame (was visible; VSCode mock could spill) */
 }
 
 .arrange-demo__m-tag {
@@ -1535,16 +1545,19 @@ main {
   position: absolute;
   inset: 1.55rem 0.42rem 0.42rem 0.42rem;
   display: grid;
-  grid-template-columns: 1fr 1fr;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
   grid-template-rows: 1fr 1fr;
   gap: 0.45rem;
   align-content: stretch;
+  min-width: 0;
+  min-height: 0;
 }
 
 .arrange-demo__slot {
   position: relative;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   border-radius: 10px;
 }
@@ -1596,7 +1609,9 @@ main {
   display: flex;
   flex-direction: column;
   flex: 1;
+  min-width: 0;
   min-height: 0;
+  max-width: 100%;
   border-radius: 10px;
   border: 1px solid rgba(255, 255, 255, 0.1);
   background: rgba(14, 16, 20, 0.92);
@@ -1684,6 +1699,7 @@ main {
   flex: 1;
   display: flex;
   flex-direction: column;
+  min-width: 0;
   min-height: 0;
   padding: 0.32rem 0.38rem 0.38rem;
   color: var(--text-muted);
@@ -3781,31 +3797,23 @@ main {
     padding: 0.65rem;
   }
 
+  /* Arrange demo: keep Apps as a left rail (same story as desktop); only tighten track sizing. */
   .arrange-demo {
-    grid-template-columns: 1fr;
-    gap: 0.45rem;
+    grid-template-columns: minmax(4.1rem, 24%) minmax(0, 1fr);
+    gap: 0.4rem;
   }
 
   .arrange-demo__rail {
-    flex-direction: row;
-    flex-wrap: wrap;
-    align-content: flex-start;
-    align-items: stretch;
-    gap: 0.28rem;
-    padding: 0.35rem 0.4rem;
+    padding: 0.34rem 0.26rem;
   }
 
   .arrange-demo__rail-head {
-    flex: 1 0 100%;
-    margin: 0;
-    padding-bottom: 0.15rem;
+    font-size: 0.52rem;
+    padding: 0.08rem 0.12rem 0.2rem;
   }
 
   .arrange-demo__rail-item {
-    flex: 1 1 calc(50% - 0.2rem);
-    min-width: 0;
-    text-align: center;
-    font-size: 0.56rem;
+    font-size: 0.54rem;
     padding: 0.28rem 0.28rem;
   }
 
