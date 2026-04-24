@@ -13,7 +13,10 @@
 
   const menuToggle = document.querySelector("[data-menu-toggle]");
   const mobileMenu = document.querySelector("[data-mobile-menu]");
-  const mobileLinks = mobileMenu ? [...mobileMenu.querySelectorAll("a")] : [];
+  const mobileMenuSheet = mobileMenu?.querySelector(".mobile-menu__sheet");
+  const mobileMenuNav = mobileMenu?.querySelector(".mobile-menu__nav");
+  const mobileLinks = mobileMenuNav ? [...mobileMenuNav.querySelectorAll("a[href]")] : [];
+  const mobileMenuDismiss = mobileMenu ? [...mobileMenu.querySelectorAll("[data-mobile-menu-dismiss]")] : [];
 
   const waitlistForm = document.querySelector("[data-waitlist-form]");
   const waitlistState = document.querySelector("[data-waitlist-state]");
@@ -284,17 +287,86 @@
     });
   });
 
-  if (menuToggle && mobileMenu) {
+  if (menuToggle && mobileMenu && mobileMenuSheet instanceof HTMLElement) {
+    let closeSafetyTimer = 0;
+
+    const finishClose = () => {
+      mobileMenu.hidden = true;
+      menuToggle.focus({ preventScroll: true });
+    };
+
     const setMenuOpen = (open) => {
       menuToggle.setAttribute("aria-expanded", String(open));
-      mobileMenu.hidden = !open;
-      document.body.style.overflow = open ? "hidden" : "";
+
+      if (open) {
+        window.clearTimeout(closeSafetyTimer);
+        document.body.style.overflow = "hidden";
+        mobileMenu.hidden = false;
+        mobileMenu.classList.remove("is-open");
+        void mobileMenu.offsetWidth;
+        if (reduceMotion) {
+          mobileMenu.classList.add("is-open");
+        } else {
+          window.requestAnimationFrame(() => {
+            mobileMenu.classList.add("is-open");
+          });
+        }
+        window.setTimeout(() => {
+          const first = mobileLinks[0];
+          if (first instanceof HTMLElement) first.focus({ preventScroll: true });
+        }, 0);
+        return;
+      }
+
+      document.body.style.overflow = "";
+      mobileMenu.classList.remove("is-open");
+
+      if (reduceMotion) {
+        finishClose();
+        return;
+      }
+
+      const sheet = mobileMenuSheet;
+      let finished = false;
+      const done = () => {
+        if (finished) return;
+        finished = true;
+        window.clearTimeout(closeSafetyTimer);
+        sheet.removeEventListener("transitionend", onTransitionEnd);
+        finishClose();
+      };
+
+      const onTransitionEnd = (event) => {
+        if (event.target !== sheet) return;
+        if (event.propertyName !== "transform" && event.propertyName !== "opacity") return;
+        done();
+      };
+
+      sheet.addEventListener("transitionend", onTransitionEnd);
+      closeSafetyTimer = window.setTimeout(done, 400);
     };
 
     menuToggle.addEventListener("click", () => {
       const isOpen = menuToggle.getAttribute("aria-expanded") === "true";
       setMenuOpen(!isOpen);
     });
+
+    mobileMenuDismiss.forEach((node) => {
+      node.addEventListener("click", () => setMenuOpen(false));
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      if (menuToggle.getAttribute("aria-expanded") !== "true") return;
+      event.preventDefault();
+      setMenuOpen(false);
+    });
+
+    const desktopMq = window.matchMedia("(min-width: 768px)");
+    const closeIfDesktop = () => {
+      if (desktopMq.matches) setMenuOpen(false);
+    };
+    desktopMq.addEventListener("change", closeIfDesktop);
 
     mobileLinks.forEach((link) => {
       link.addEventListener("click", () => setMenuOpen(false));

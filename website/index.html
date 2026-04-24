@@ -3,26 +3,35 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>FlowSwitch - One profile. Your whole workspace.</title>
+    <title>FlowSwitch — Switch your setup. Maintain your flow.</title>
     <meta
       name="description"
-      content="Create a profile from what's running or from scratch, arrange it per monitor, then launch to restore the full layout on Windows with FlowSwitch."
+      content="Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click."
     />
     <meta name="theme-color" content="#080808" />
-    <meta property="og:title" content="FlowSwitch - One profile. Your whole workspace." />
+    <link rel="canonical" href="https://www.flowswitch.app/" />
+    <meta property="og:title" content="FlowSwitch — Switch your setup. Maintain your flow." />
     <meta
       property="og:description"
-      content="Create a profile from what's running or from scratch, arrange it per monitor, launch to restore the full layout."
+      content="Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click."
     />
     <meta property="og:type" content="website" />
-    <meta property="og:image" content="./assets/flowswitch-logo.png" />
+    <meta property="og:url" content="https://www.flowswitch.app/" />
+    <meta property="og:site_name" content="FlowSwitch" />
+    <meta property="og:image" content="https://www.flowswitch.app/assets/og-share.jpg" />
+    <meta property="og:image:width" content="1024" />
+    <meta property="og:image:height" content="571" />
+    <meta
+      property="og:image:alt"
+      content="FlowSwitch — Switch your setup. Maintain your flow. Save per-monitor app layouts on Windows."
+    />
     <meta name="twitter:card" content="summary_large_image" />
-    <meta name="twitter:title" content="FlowSwitch - One profile. Your whole workspace." />
+    <meta name="twitter:title" content="FlowSwitch — Switch your setup. Maintain your flow." />
     <meta
       name="twitter:description"
-      content="Create a profile from what's running or from scratch, arrange it per monitor, launch to restore the full layout."
+      content="Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click."
     />
-    <meta name="twitter:image" content="./assets/flowswitch-logo.png" />
+    <meta name="twitter:image" content="https://www.flowswitch.app/assets/og-share.jpg" />
     <link rel="icon" type="image/png" href="./assets/flowswitch-logo.png" />
     <link rel="apple-touch-icon" href="./assets/flowswitch-logo.png" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
@@ -31,9 +40,9 @@
       href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=73" />
+    <link rel="stylesheet" href="./styles.css?v=77" />
     <script defer src="./site-core.js?v=3"></script>
-    <script defer src="./site-home.js?v=5"></script>
+    <script defer src="./site-home.js?v=7"></script>
   </head>
   <body class="page-home">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -70,22 +79,20 @@
             Download
           </a>
         </div>
-      </div>
 
-      <div class="mobile-menu" id="mobile-menu" data-mobile-menu hidden>
-        <nav class="mobile-menu__links" aria-label="Mobile">
-          <a href="#how">How it works</a>
-          <a href="#features">Features</a>
-          <a href="#faq">FAQ</a>
-          <a href="./changelog.html">Changelog</a>
-          <a href="#waitlist">Join waitlist</a>
-          <a
-            href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.0/FlowSwitch-0.1.0-win-x64-installer.exe"
-            data-download-link="1"
-          >
-            Download for Windows
-          </a>
-        </nav>
+        <div class="mobile-menu" id="mobile-menu" data-mobile-menu hidden>
+          <div class="mobile-menu__backdrop" data-mobile-menu-dismiss tabindex="-1" aria-hidden="true"></div>
+          <div class="mobile-menu__sheet" role="dialog" aria-modal="true" aria-label="Site navigation">
+            <nav class="mobile-menu__nav" aria-label="Mobile">
+              <ul class="mobile-menu__list">
+                <li><a class="mobile-menu__link" href="#how">How it works</a></li>
+                <li><a class="mobile-menu__link" href="#features">Features</a></li>
+                <li><a class="mobile-menu__link" href="#faq">FAQ</a></li>
+                <li><a class="mobile-menu__link" href="./changelog.html">Changelog</a></li>
+              </ul>
+            </nav>
+          </div>
+        </div>
       </div>
     </header>
 
@@ -106,8 +113,8 @@
           <a class="hero__badge" href="./changelog.html" id="download-version-meta">`v0.1.0 · Early access`</a>
           <h1>Switch your setup. Maintain your flow.</h1>
           <p class="hero__subhead">
-            Take control of your desktop. Create profiles from what's running or from scratch, arrange them per monitor,
-            and switch in an instant. The simplest way to organize your space.
+            Save per-monitor app layouts on Windows—from what's running or from scratch—then switch the whole workspace in
+            one click.
           </p>
 
           <div class="hero__actions">
@@ -529,11 +536,6 @@
             <div class="demo__monitor-base" aria-hidden="true"></div>
               </div>
           </div>
-        </div>
-
-        <div class="mobile-demo-fallback">
-          <img src="./assets/app-hero.png" alt="FlowSwitch profile switcher preview" loading="lazy" />
-          <p>See it in action on desktop</p>
         </div>
       </section>
 
