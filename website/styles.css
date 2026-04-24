@@ -15,7 +15,11 @@
   --accent-soft: rgba(111, 212, 191, 0.2);
   --radius: 16px;
   --radius-pill: 999px;
+  --radius-card: 14px;
+  --radius-monitor: clamp(18px, 3.2vw, 26px);
   --wrap: min(1120px, calc(100% - 2.25rem));
+  --max-read: 38rem;
+  --font-lede: clamp(0.95rem, 2.1vw, 1.06rem);
   --font-body: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
 }
@@ -189,6 +193,24 @@ input {
   display: inline-flex;
   gap: 0.5rem;
   white-space: nowrap;
+}
+
+/* Secondary header action: quieter than Download so the primary CTA reads first */
+.site-header__actions .btn--header-quiet {
+  min-height: 34px;
+  padding: 0 0.65rem;
+  font-size: 0.74rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  border-color: rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.site-header__actions .btn--header-quiet:hover,
+.site-header__actions .btn--header-quiet:focus-visible {
+  color: var(--text-soft);
+  border-color: rgba(255, 255, 255, 0.16);
+  background: rgba(255, 255, 255, 0.05);
 }
 
 .btn {
@@ -553,17 +575,52 @@ main {
 
 .hero__subhead {
   margin: 1rem auto 0;
-  max-width: 32rem;
+  max-width: var(--max-read);
   color: rgba(255, 255, 255, 0.55);
-  font-size: clamp(1rem, 2.4vw, 1.1rem);
+  font-size: var(--font-lede);
+  line-height: 1.55;
 }
 
 .hero__actions {
   margin-top: 1.55rem;
   display: flex;
+  flex-direction: column;
+  align-items: center;
   justify-content: center;
-  gap: 0.7rem;
-  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.hero__see-how {
+  font-size: 0.88rem;
+  font-weight: 500;
+  color: var(--text-muted);
+  text-decoration: none;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.22);
+  padding: 0.15rem 0.1rem 0.2rem;
+  transition:
+    color 0.18s ease,
+    border-color 0.18s ease;
+}
+
+.hero__see-how:hover,
+.hero__see-how:focus-visible {
+  color: var(--text-soft);
+  border-bottom-color: rgba(111, 212, 191, 0.45);
+}
+
+.hero__see-how:focus-visible {
+  outline: 2px solid rgba(111, 212, 191, 0.45);
+  outline-offset: 4px;
+  border-radius: 2px;
+}
+
+@media (min-width: 520px) {
+  .hero__actions {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.85rem 1.1rem;
+  }
 }
 
 .hero__proof {
@@ -621,9 +678,10 @@ main {
 }
 
 .section-heading h2 {
-  margin: 0.7rem 0 0.5rem;
-  font-size: clamp(1.8rem, 4vw, 2rem);
+  margin: 0.65rem 0 0.45rem;
+  font-size: clamp(1.75rem, 3.8vw, 2rem);
   letter-spacing: -0.03em;
+  line-height: 1.18;
 }
 
 .section-heading__title-gradient {
@@ -639,6 +697,14 @@ main {
 .section-heading p {
   margin: 0;
   color: var(--text-muted);
+}
+
+.section-heading__lede {
+  max-width: var(--max-read);
+  margin: 0.35rem auto 0;
+  font-size: var(--font-lede);
+  line-height: 1.55;
+  color: rgba(255, 255, 255, 0.52);
 }
 
 .demo__scroll-shell {
@@ -677,7 +743,7 @@ main {
   flex-direction: column;
   min-height: min(66vh, 640px);
   padding: 12px;
-  border-radius: 28px;
+  border-radius: var(--radius-monitor);
   background: linear-gradient(180deg, #1a1a1a, #090909);
   border: 1px solid rgba(255, 255, 255, 0.08);
   box-shadow:
@@ -705,7 +771,7 @@ main {
   width: 100%;
   margin: 0;
   padding: 1rem;
-  border-radius: 16px;
+  border-radius: var(--radius);
   border: 1px solid rgba(255, 255, 255, 0.07);
   background: #0d0d0d;
   box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
@@ -812,7 +878,7 @@ main {
 
 .demo-window {
   margin-top: 1rem;
-  border-radius: 12px;
+  border-radius: var(--radius-card);
   border: 1px solid rgba(255, 255, 255, 0.06);
   background: rgba(255, 255, 255, 0.03);
   padding: 0.85rem;
@@ -3152,6 +3218,15 @@ main {
   max-width: 70ch;
 }
 
+.faq-item__body code {
+  font-family: var(--font-mono);
+  font-size: 0.88em;
+  padding: 0.06rem 0.32rem;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.06);
+  color: rgba(255, 255, 255, 0.82);
+}
+
 @supports selector(::details-content) {
   .faq-item::details-content {
     overflow: clip;
@@ -3777,9 +3852,14 @@ main {
     align-items: stretch;
   }
 
-  .btn--hero-primary,
-  .btn--hero-ghost {
+  .btn--hero-primary {
     width: 100%;
+    max-width: 22rem;
+    margin-inline: auto;
+  }
+
+  .hero__see-how {
+    align-self: center;
   }
 
   .demo {
@@ -3790,7 +3870,6 @@ main {
   .demo__monitor-shell {
     min-height: min(52vh, 460px);
     padding: 8px;
-    border-radius: 20px;
   }
 
   .demo__sticky-card {
