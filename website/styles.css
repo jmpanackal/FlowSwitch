@@ -694,7 +694,7 @@ main {
   animation: section-title-shimmer 11s ease-in-out infinite;
 }
 
-.section-heading p {
+.section-heading p:not(.section-heading__lede) {
   margin: 0;
   color: var(--text-muted);
 }
@@ -705,6 +705,7 @@ main {
   font-size: var(--font-lede);
   line-height: 1.55;
   color: rgba(255, 255, 255, 0.52);
+  text-align: center;
 }
 
 .demo__scroll-shell {
