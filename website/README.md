@@ -94,3 +94,7 @@ Optional: `_headers` in this folder sets baseline security headers on Pages.
 ## DNS (any host)
 
 Point your apex or `www` record to the provider’s target (CNAME for `www`, or A/ALIAS for apex per provider docs).
+
+## SEO (static)
+
+`robots.txt` and `sitemap.xml` live in this folder and assume the public origin is `https://www.flowswitch.app/`. After changing the canonical domain, update those files, `index.html` / subpage `link rel="canonical"` and Open Graph URLs, and the JSON-LD block in `index.html` to match. When you bump the shipped app version for marketing, update `softwareVersion` inside that JSON-LD block to stay aligned with `package.json`. Submit `sitemap.xml` in Google Search Console once the domain is live.

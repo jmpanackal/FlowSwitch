@@ -1,0 +1,5 @@
+# https://www.flowswitch.app
+User-agent: *
+Allow: /
+
+Sitemap: https://www.flowswitch.app/sitemap.xml

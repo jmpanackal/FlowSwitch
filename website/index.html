@@ -8,6 +8,7 @@
       name="description"
       content="Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click."
     />
+    <meta name="robots" content="index,follow,max-image-preview:large" />
     <meta name="theme-color" content="#080808" />
     <link rel="canonical" href="https://www.flowswitch.app/" />
     <meta property="og:title" content="FlowSwitch — Switch your setup. Maintain your flow." />
@@ -17,6 +18,7 @@
     />
     <meta property="og:type" content="website" />
     <meta property="og:url" content="https://www.flowswitch.app/" />
+    <meta property="og:locale" content="en_US" />
     <meta property="og:site_name" content="FlowSwitch" />
     <meta property="og:image" content="https://www.flowswitch.app/assets/og-share.jpg" />
     <meta property="og:image:width" content="1024" />
@@ -44,6 +46,50 @@
     <link rel="stylesheet" href="./styles.css?v=77" />
     <script defer src="./site-core.js?v=3"></script>
     <script defer src="./site-home.js?v=7"></script>
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://www.flowswitch.app/#website",
+            "url": "https://www.flowswitch.app/",
+            "name": "FlowSwitch",
+            "description": "Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click.",
+            "publisher": { "@id": "https://www.flowswitch.app/#organization" },
+            "inLanguage": "en"
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://www.flowswitch.app/#organization",
+            "name": "FlowSwitch",
+            "url": "https://www.flowswitch.app/",
+            "logo": "https://www.flowswitch.app/assets/flowswitch-logo.png",
+            "sameAs": ["https://github.com/jmpanackal/FlowSwitch"]
+          },
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://www.flowswitch.app/#software",
+            "name": "FlowSwitch",
+            "applicationCategory": "DesktopApplication",
+            "operatingSystem": "Windows 10, Windows 11",
+            "description": "Save per-monitor app layouts on Windows. Build profiles from what's running or from scratch, then restore the full setup in one click.",
+            "softwareVersion": "0.1.0",
+            "url": "https://www.flowswitch.app/",
+            "image": "https://www.flowswitch.app/assets/og-share.jpg",
+            "screenshot": "https://www.flowswitch.app/assets/og-share.jpg",
+            "downloadUrl": "https://github.com/jmpanackal/FlowSwitch/releases",
+            "publisher": { "@id": "https://www.flowswitch.app/#organization" },
+            "offers": {
+              "@type": "Offer",
+              "price": "0",
+              "priceCurrency": "USD",
+              "availability": "https://schema.org/InStock"
+            }
+          }
+        ]
+      }
+    </script>
   </head>
   <body class="page-home">
     <a class="skip-link" href="#main">Skip to content</a>
@@ -51,7 +97,7 @@
     <header class="site-header" data-header>
       <div class="site-header__pill">
         <a href="./" class="brand">
-          <img src="./assets/flowswitch-logo.png" alt="" width="30" height="30" />
+          <img src="./assets/flowswitch-logo.png" alt="FlowSwitch" width="30" height="30" />
           <span class="brand__label">FlowSwitch</span>
         </a>
 
@@ -552,7 +598,7 @@
               <img
                 class="features__hub-logo"
                 src="./assets/flowswitch-logo.png"
-                alt=""
+                alt="FlowSwitch app icon"
                 width="38"
                 height="38"
                 loading="lazy"
@@ -755,7 +801,7 @@
         <div class="site-footer__upper">
           <div class="site-footer__brand">
             <a class="brand brand--footer" href="./">
-              <img src="./assets/flowswitch-logo.png" alt="" width="28" height="28" />
+              <img src="./assets/flowswitch-logo.png" alt="FlowSwitch" width="28" height="28" />
               <span class="brand__label">FlowSwitch</span>
             </a>
             <p class="site-footer__tagline">One profile. Your whole workspace.</p>
@@ -786,6 +832,7 @@
               <p class="site-footer__heading">Contact</p>
               <ul class="site-footer__list">
                 <li><a href="mailto:contact@flowswitch.app">contact@flowswitch.app</a></li>
+                <li><a href="./privacy.html">Privacy</a></li>
               </ul>
             </div>
           </div>
