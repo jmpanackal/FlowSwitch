@@ -1,9 +1,9 @@
 {
-  "version": "0.1.0",
+  "version": "0.1.1",
   "githubRepository": "jmpanackal/FlowSwitch",
-  "releaseTag": "v0.1.0",
+  "releaseTag": "v0.1.1",
   "files": {
-    "installer": "FlowSwitch-0.1.0-win-x64-installer.exe",
-    "portable": "FlowSwitch-0.1.0-win-x64-portable.exe"
+    "installer": "FlowSwitch-0.1.1-win-x64-installer.exe",
+    "portable": "FlowSwitch-0.1.1-win-x64-portable.exe"
   }
 }
