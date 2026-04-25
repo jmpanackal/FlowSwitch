@@ -688,15 +688,27 @@ const createIconPathAndAppHelpers = ({
   };
 
   const getWindowIconPath = () => {
-    // Windows scales the whole bitmap into a fixed taskbar slot; a trimmed asset
-    // makes the mark read larger than the full-canvas logo used in the renderer.
+    // Prefer the 1024px taskbar PNG for the HWND icon (same art as flowswitch-logo.png):
+    // Chromium often picks a tiny layer from multi-size .ico. Packaged .exe uses flowswitch.ico.
     if (process.platform === 'win32') {
       const taskbarPath = path.join(publicDir, 'flowswitch-taskbar.png');
       if (fs.existsSync(taskbarPath)) return taskbarPath;
+      const icoPath = path.join(publicDir, 'flowswitch.ico');
+      if (fs.existsSync(icoPath)) return icoPath;
     }
     const logoPath = path.join(publicDir, 'flowswitch-logo.png');
     if (fs.existsSync(logoPath)) return logoPath;
     return undefined;
+  };
+
+  /** Absolute path for Jump List / User Tasks icons (must not be electron.exe). */
+  const getJumpListIconPath = () => {
+    if (process.platform !== 'win32') return null;
+    const icoPath = path.join(publicDir, 'flowswitch.ico');
+    if (fs.existsSync(icoPath)) return path.resolve(icoPath);
+    const pngPath = path.join(publicDir, 'flowswitch-logo.png');
+    if (fs.existsSync(pngPath)) return path.resolve(pngPath);
+    return null;
   };
 
   const getSafeIconDataUrl = async (iconSourcePath) => {
@@ -1322,6 +1334,7 @@ const createIconPathAndAppHelpers = ({
     probeInstallFolderForWindowsExe,
     inferMsixUserWindowsAppsShimFromPackageDir,
     getWindowIconPath,
+    getJumpListIconPath,
     getSafeIconDataUrl,
     parseInternetShortcut,
     isAppProtocolUrl,
