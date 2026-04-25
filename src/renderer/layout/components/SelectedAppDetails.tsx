@@ -45,7 +45,14 @@ import {
   inspectorPanelDangerButtonClass,
   inspectorPanelGridButtonDisabledClass,
   inspectorPanelListButtonClass,
-  inspectorSectionPrimaryEmphasisClass,
+  inspectorPanelNativeMonoInputClass,
+  inspectorPanelNativeSelectClass,
+  inspectorPanelNativeTextInputClass,
+  inspectorPanelNativeTextInputFlexClass,
+  inspectorPanelSwitchLabelClass,
+  inspectorPanelSwitchRowClass,
+  inspectorPanelSwitchTitleClass,
+  inspectorPanelSwitchTrackClass,
   inspectorSectionPrimaryTitleClass,
 } from "./inspectorStyles";
 
@@ -246,8 +253,8 @@ export function SelectedAppDetails({
 
   if (!selectedApp) {
     return (
-      <div className="h-full flex items-center justify-center p-8">
-        <div className="text-center max-w-[17rem] rounded-2xl border border-flow-border/50 bg-flow-surface/40 px-6 py-8">
+      <div className="flex h-full min-w-0 items-center justify-center p-6 sm:p-8">
+        <div className="max-w-full rounded-2xl border border-flow-border/50 bg-flow-surface/40 px-4 py-8 text-center sm:px-6">
           <div className="w-14 h-14 bg-flow-bg-tertiary/80 rounded-xl flex items-center justify-center mx-auto mb-4 ring-1 ring-flow-border/40">
             <Monitor className="w-7 h-7 text-flow-text-muted" />
           </div>
@@ -389,11 +396,13 @@ export function SelectedAppDetails({
     const layoutHasPlacementActions = showMoveToSection || showAddToLayout;
 
     return (
-    <div className="space-y-6">
-      <div className="space-y-4">
-        <div>
-          <div className={`${inspectorSectionPrimaryTitleClass} mb-1`}>Layout</div>
-          <p className={`${inspectorHelperTextClass} mt-0.5`}>
+    <div className="min-w-0 space-y-6">
+      <div className="min-w-0 space-y-3">
+        <div className="min-w-0">
+          <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
+            Layout
+          </label>
+          <p className={inspectorHelperTextClass}>
             Move, add, or remove this app on the active profile.
             {showAddToLayout ? (
               <>
@@ -413,8 +422,8 @@ export function SelectedAppDetails({
           </p>
         </div>
 
-        <div className="space-y-2">
-          <div className="grid grid-cols-2 gap-2">
+        <div className="min-w-0 space-y-2">
+          <div className="flex min-w-0 flex-col gap-2">
             <FlowTooltip label="Coming soon: swap this slot for another app from search.">
               <span className="inline-flex w-full">
                 <button
@@ -514,15 +523,17 @@ export function SelectedAppDetails({
         ) : null}
       </div>
 
-      <p className={inspectorHelperTextClass}>
+      <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-xs leading-relaxed text-flow-text-muted">
         Single-app placement preview is not available yet — use{" "}
         <span className="font-medium text-flow-text-secondary">Launch profile</span>{" "}
         in the header to run the full workflow.
-      </p>
+      </div>
 
       {/* Basic Info */}
-      <div className="space-y-4">
-        <label className={inspectorSectionPrimaryTitleClass}>Basic Information</label>
+      <div className="min-w-0 space-y-4">
+        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
+          Basic Information
+        </label>
 
         {!isProfileSlot ? (
           <p className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-2 text-[11px] leading-snug text-flow-text-muted">
@@ -543,7 +554,7 @@ export function SelectedAppDetails({
               type="text"
               value={typeof currentData.executablePath === "string" ? currentData.executablePath : ""}
               onChange={(e) => handleFieldUpdate("executablePath", e.target.value)}
-              className="w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 font-mono text-xs text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+              className={inspectorPanelNativeMonoInputClass}
               placeholder="C:\\Program Files\\App\\app.exe"
             />
           ) : (
@@ -592,22 +603,22 @@ export function SelectedAppDetails({
   const renderLaunchTab = () => {
     if (!isProfileSlot) {
       return (
-        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-sm text-flow-text-muted leading-relaxed">
+        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-xs leading-relaxed text-flow-text-muted">
           Launch settings apply after this app is placed on this profile (use + next to the app in the Apps sidebar).
         </div>
       );
     }
     return (
-    <div className="space-y-6">
+    <div className="min-w-0 space-y-6">
       {/* Monitor Assignment */}
       <div>
         <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Monitor Assignment</label>
         <div>
           <label className={inspectorFieldLabelClass}>Target Monitor</label>
-          <select 
+            <select 
             value={currentData.monitorId || monitorId || 'monitor-1'}
             onChange={(e) => handleFieldUpdate('monitorId', e.target.value)}
-            className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+            className={inspectorPanelNativeSelectClass}
           >
             {monitors.map((monitor) => (
               <option key={monitor.id} value={monitor.id}>
@@ -628,7 +639,7 @@ export function SelectedAppDetails({
             <select 
               value={currentData.windowState || 'maximized'}
               onChange={(e) => handleFieldUpdate('windowState', e.target.value)}
-              className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+              className={inspectorPanelNativeSelectClass}
             >
               <option value="fullscreen">Fullscreen</option>
               <option value="maximized">Maximized</option>
@@ -645,7 +656,7 @@ export function SelectedAppDetails({
               step="0.5"
               value={currentData.launchDelay || 0}
               onChange={(e) => handleFieldUpdate('launchDelay', parseFloat(e.target.value) || 0)}
-              className="w-full px-3 py-2 text-sm bg-flow-bg-primary border border-flow-border rounded-lg text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+              className={inspectorPanelNativeTextInputClass}
               placeholder="0"
             />
           </div>
@@ -655,52 +666,58 @@ export function SelectedAppDetails({
       {/* Launch Options */}
       <div>
         <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Launch Options</label>
-        <div className="space-y-3">
-          <div className="flex items-center justify-between p-3 bg-flow-surface rounded-lg border border-flow-border">
-            <div>
-              <div className="text-sm font-medium text-flow-text-primary">Run as Administrator</div>
-              <div className="text-xs text-flow-text-muted">Launch with elevated privileges</div>
+        <div className="space-y-2">
+          <div className={inspectorPanelSwitchRowClass}>
+            <div className="min-w-0 flex-1">
+              <div className={inspectorPanelSwitchTitleClass}>Run as Administrator</div>
+              <div className={`${inspectorHelperTextClass} mt-0.5`}>
+                Launch with elevated privileges
+              </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className={inspectorPanelSwitchLabelClass}>
               <input
                 type="checkbox"
                 checked={currentData.runAsAdmin || false}
                 onChange={(e) => handleFieldUpdate('runAsAdmin', e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-flow-bg-primary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-flow-accent-blue"></div>
+              <div className={inspectorPanelSwitchTrackClass} />
             </label>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-flow-surface rounded-lg border border-flow-border">
-            <div>
-              <div className="text-sm font-medium text-flow-text-primary">Force Close on Exit</div>
-              <div className="text-xs text-flow-text-muted">Kill app when switching profiles</div>
+          <div className={inspectorPanelSwitchRowClass}>
+            <div className="min-w-0 flex-1">
+              <div className={inspectorPanelSwitchTitleClass}>Force Close on Exit</div>
+              <div className={`${inspectorHelperTextClass} mt-0.5`}>
+                Kill app when switching profiles
+              </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className={inspectorPanelSwitchLabelClass}>
               <input
                 type="checkbox"
                 checked={currentData.forceCloseOnExit || false}
                 onChange={(e) => handleFieldUpdate('forceCloseOnExit', e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-flow-bg-primary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-flow-accent-blue"></div>
+              <div className={inspectorPanelSwitchTrackClass} />
             </label>
           </div>
 
-          <div className="flex items-center justify-between p-3 bg-flow-surface rounded-lg border border-flow-border">
-            <div>
-              <div className="text-sm font-medium text-flow-text-primary">Smart Save (Ctrl+S)</div>
-              <div className="text-xs text-flow-text-muted">Send save command before closing</div>
+          <div className={inspectorPanelSwitchRowClass}>
+            <div className="min-w-0 flex-1">
+              <div className={inspectorPanelSwitchTitleClass}>Smart Save (Ctrl+S)</div>
+              <div className={`${inspectorHelperTextClass} mt-0.5`}>
+                Send save command before closing
+              </div>
             </div>
-            <label className="relative inline-flex items-center cursor-pointer">
+            <label className={inspectorPanelSwitchLabelClass}>
               <input
                 type="checkbox"
                 checked={currentData.smartSave || false}
                 onChange={(e) => handleFieldUpdate('smartSave', e.target.checked)}
                 className="sr-only peer"
               />
-              <div className="w-11 h-6 bg-flow-bg-primary peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:left-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-flow-accent-blue"></div>
+              <div className={inspectorPanelSwitchTrackClass} />
             </label>
           </div>
         </div>
@@ -716,7 +733,7 @@ export function SelectedAppDetails({
           value={currentData.customArgs || ""}
           onChange={(e) => handleFieldUpdate("customArgs", e.target.value)}
           placeholder="--profile dev --disable-extensions"
-          className="w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 font-mono text-sm text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+          className={inspectorPanelNativeMonoInputClass}
         />
       </div>
     </div>
@@ -1004,7 +1021,7 @@ export function SelectedAppDetails({
   const renderContentTab = () => {
     if (!isProfileSlot) {
       return (
-        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-sm text-flow-text-muted leading-relaxed">
+        <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-xs leading-relaxed text-flow-text-muted">
           Files and URLs apply after this app is placed on this profile. Custom launch arguments are on the Launch tab.
         </div>
       );
@@ -1013,31 +1030,31 @@ export function SelectedAppDetails({
     const appBrowserTabs = getAppBrowserTabs();
 
     return (
-      <div className="flex min-h-0 flex-1 flex-col gap-6">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
         {/* Quick Add Section */}
-        <div className="shrink-0">
+        <div className="min-w-0 shrink-0">
           <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
             Quick Add Content
           </label>
-          <div className="space-y-2 rounded-lg border border-flow-border bg-flow-surface p-4">
-            <div>
+          <div className="min-w-0 space-y-2 rounded-lg border border-flow-border bg-flow-surface p-3 sm:p-4">
+            <div className="min-w-0">
               <label className={inspectorFieldLabelClass}>
                 Paste file path or URL (auto-detected)
               </label>
-              <div className="flex gap-2">
+              <div className="flex min-w-0 gap-2">
                 <input
                   type="text"
                   value={pasteInput}
                   onChange={(e) => setPasteInput(e.target.value)}
                   placeholder="C:\\path\\to\\file.txt or https://example.com"
-                  className="flex-1 rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-sm text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
+                  className={inspectorPanelNativeTextInputFlexClass}
                   onKeyDown={(e) => e.key === "Enter" && handlePasteContent()}
                 />
                 <button
                   type="button"
                   onClick={handlePasteContent}
                   disabled={!pasteInput.trim()}
-                  className="rounded-lg bg-flow-accent-blue px-3 py-2 text-sm text-white transition-colors hover:bg-flow-accent-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
+                  className="shrink-0 rounded-lg bg-flow-accent-blue px-2.5 py-1.5 text-xs font-medium text-white transition-colors hover:bg-flow-accent-blue-hover disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Plus className="h-4 w-4" />
                 </button>
@@ -1049,9 +1066,11 @@ export function SelectedAppDetails({
         {/* Browser Tabs (for browser apps) */}
         {isBrowser && (
           <div className="max-h-48 shrink-0 overflow-hidden">
-            <div className="mb-3 flex items-center justify-between">
-              <label className={inspectorSectionPrimaryEmphasisClass}>Browser Tabs</label>
-              <span className="text-xs text-flow-text-muted">
+            <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
+              <label className={`${inspectorSectionPrimaryTitleClass} mb-0`}>
+                Browser Tabs
+              </label>
+              <span className="shrink-0 text-xs text-flow-text-muted">
                 {appBrowserTabs.length} tab{appBrowserTabs.length !== 1 ? "s" : ""}
               </span>
             </div>
@@ -1071,7 +1090,7 @@ export function SelectedAppDetails({
                       if (Number.isNaN(from)) return;
                       reorderBrowserTabs(from, index);
                     }}
-                    className="group flex items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
+                    className="group flex min-w-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                   >
                     <FlowTooltip label="Drag to reorder">
                       <span
@@ -1087,26 +1106,26 @@ export function SelectedAppDetails({
                         <GripVertical className="h-4 w-4" />
                       </span>
                     </FlowTooltip>
-                    <Globe className="w-4 h-4 flex-shrink-0 text-flow-text-muted" />
-                    <div className="flex-1 min-w-0">
+                    <Globe className="h-4 w-4 shrink-0 text-flow-text-muted" />
+                    <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-flow-text-primary truncate">{tab.name}</div>
                       <div className="text-xs text-flow-text-muted truncate">{tab.url}</div>
                     </div>
-                    <div className="flex items-center gap-2">
-                      {tab.isActive && <div className="w-2 h-2 bg-flow-accent-blue rounded-full" />}
+                    <div className="flex shrink-0 items-center gap-1">
+                      {tab.isActive && <div className="h-2 w-2 shrink-0 rounded-full bg-flow-accent-blue" />}
                       <button
                         type="button"
                         onClick={() => window.open(tab.url, "_blank", "noopener,noreferrer")}
-                        className="p-1.5 text-flow-text-muted hover:text-flow-accent-blue rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-blue opacity-0 group-hover:opacity-100"
                       >
-                        <ExternalLink className="w-3 h-3" />
+                        <ExternalLink className="h-3 w-3" />
                       </button>
                       <button
                         type="button"
                         onClick={() => removeBrowserTab(index)}
-                        className="p-1.5 text-flow-text-muted hover:text-flow-accent-red rounded-lg transition-colors opacity-0 group-hover:opacity-100"
+                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-red opacity-0 group-hover:opacity-100"
                       >
-                        <Trash2 className="w-3 h-3" />
+                        <Trash2 className="h-3 w-3" />
                       </button>
                     </div>
                   </div>
@@ -1123,9 +1142,9 @@ export function SelectedAppDetails({
         )}
 
         {/* Associated Content (fills remaining tab height) */}
-        <div className="flex min-h-0 flex-1 flex-col gap-2">
-          <div className="flex shrink-0 flex-wrap items-center justify-between gap-2">
-            <label className={inspectorSectionPrimaryEmphasisClass}>
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
+          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2">
+            <label className={`${inspectorSectionPrimaryTitleClass} mb-0 min-w-0`}>
               Associated Content
             </label>
             {onUpdateAssociatedFiles && hasDesktopPicker ? (
@@ -1180,7 +1199,7 @@ export function SelectedAppDetails({
                     if (Number.isNaN(from)) return;
                     reorderAssociatedFiles(from, index);
                   }}
-                  className="group flex shrink-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
+                  className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                 >
                   <FlowTooltip label="Drag to reorder">
                     <span
@@ -1197,20 +1216,20 @@ export function SelectedAppDetails({
                     </span>
                   </FlowTooltip>
                   {file.type === "url" || file.url ? (
-                    <Link2 className="h-4 w-4 flex-shrink-0 text-flow-accent-blue" />
+                    <Link2 className="h-4 w-4 shrink-0 text-flow-accent-blue" />
                   ) : (
-                    <FileIcon type={file.type} className="h-4 w-4 flex-shrink-0" />
+                    <FileIcon type={file.type} className="h-4 w-4 shrink-0" />
                   )}
                   <div className="min-w-0 flex-1">
                     <div className="truncate text-sm font-medium text-flow-text-primary">{file.name}</div>
                     <div className="truncate text-xs text-flow-text-muted">{file.path || file.url}</div>
                   </div>
-                  <div className="flex items-center gap-2">
+                  <div className="flex shrink-0 items-center gap-1">
                     {(file.url || file.type === "url") && (
                       <button
                         type="button"
                         onClick={() => window.open(file.url || file.path, "_blank", "noopener,noreferrer")}
-                        className="rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-blue group-hover:opacity-100"
+                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-blue group-hover:opacity-100"
                       >
                         <ExternalLink className="h-3 w-3" />
                       </button>
@@ -1218,7 +1237,7 @@ export function SelectedAppDetails({
                     <button
                       type="button"
                       onClick={() => removeAssociatedFile(index)}
-                      className="rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-red group-hover:opacity-100"
+                      className="shrink-0 rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-red group-hover:opacity-100"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -1254,10 +1273,10 @@ export function SelectedAppDetails({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col bg-flow-bg-secondary/95 pt-12">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-flow-bg-secondary/95 pt-12">
       {/* App Header - Always visible */}
-      <div className="border-b border-flow-border/50 bg-flow-surface/30 px-4 py-3 backdrop-blur-sm">
-        <div className="flex items-start gap-4">
+      <div className="border-b border-flow-border/50 bg-flow-surface/30 px-3 py-3 backdrop-blur-sm sm:px-4">
+        <div className="flex min-w-0 items-start gap-3 sm:gap-4">
           {renderAppIcon(currentData)}
           <div className="flex-1 min-w-0">
             <h2 className="text-base font-semibold tracking-tight text-flow-text-primary break-words">
@@ -1278,7 +1297,7 @@ export function SelectedAppDetails({
 
       {/* Tab Navigation */}
       <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
-        <div className="flex">
+        <div className="flex min-w-0">
           {tabs.map((tab) => {
             const IconComponent = tab.icon;
             return (
@@ -1286,14 +1305,14 @@ export function SelectedAppDetails({
                 type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex-1 flex items-center justify-center gap-1.5 px-3 py-2.5 text-[11px] font-medium transition-all duration-150 ease-out border-b-2 ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[10px] font-medium leading-tight transition-all duration-150 ease-out border-b-2 ${
                   activeTab === tab.id
                     ? 'border-flow-accent-blue text-flow-accent-blue bg-flow-bg-primary/40'
                     : 'border-transparent text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface/50'
                 }`}
               >
-                <IconComponent className="w-3 h-3" />
-                <span className="hidden sm:block">{tab.label}</span>
+                <IconComponent className="h-3 w-3 shrink-0" />
+                <span className="max-w-full truncate text-center">{tab.label}</span>
               </button>
             );
           })}
@@ -1302,19 +1321,19 @@ export function SelectedAppDetails({
 
       {/* Tab Content — Content tab uses flex column so Associated Content can fill height.
           pr-0 on outer keeps the scrollbar flush with the shell edge; inner pr pads content from the gutter. */}
-      <div className="flex min-h-0 flex-1 flex-col overflow-hidden pl-4 pr-0 py-4">
+      <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pl-3 pr-0 py-4 sm:pl-4">
         <div
-          className={`min-h-0 flex-1 ${
+          className={`min-h-0 min-w-0 flex-1 ${
             activeTab === "content" && isProfileSlot
               ? "flex flex-col overflow-hidden"
-              : "overflow-y-auto scrollbar-elegant"
+              : "scrollbar-elegant overflow-y-auto overflow-x-hidden"
           }`}
         >
           <div
             className={
               activeTab === "content" && isProfileSlot
-                ? "flex min-h-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
-                : "pr-3 sm:pr-4"
+                ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
+                : "min-w-0 pr-3 sm:pr-4"
             }
           >
             {renderTabContent()}

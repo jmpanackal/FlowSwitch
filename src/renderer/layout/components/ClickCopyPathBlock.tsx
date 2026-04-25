@@ -3,12 +3,13 @@ import { FlowTooltip } from "./ui/tooltip";
 
 /** Primary surface: monospace path/URL, full width, click to copy. */
 export const clickCopyPathBlockButtonClassName =
-  "w-full break-all rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/40 px-3 py-2 text-left font-mono text-xs leading-relaxed text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface/40 hover:text-flow-text-primary";
+  "min-w-0 w-full max-w-full break-all rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/40 px-3 py-2 text-left font-mono text-xs leading-relaxed text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface/40 hover:text-flow-text-primary";
 
 /** Row under the block: hint left, “Copied” (or other notice) bottom-right. */
-export const clickCopyPathFooterClassName = "flex items-end justify-between gap-2";
+export const clickCopyPathFooterClassName =
+  "flex min-w-0 items-end justify-between gap-2";
 
-export const clickCopyPathHintClassName = "text-[10px] text-flow-text-muted";
+export const clickCopyPathHintClassName = "min-w-0 flex-1 text-[10px] text-flow-text-muted";
 
 export const clickCopyPathNoticeClassName = "text-[10px] font-medium text-flow-accent-green";
 
@@ -93,7 +94,7 @@ export function ClickCopyPathBlock({
       <div className={clickCopyPathFooterClassName}>
         <p className={clickCopyPathHintClassName}>{hint}</p>
         {notice ? (
-          <span className={clickCopyPathNoticeClassName}>{notice}</span>
+          <span className={`${clickCopyPathNoticeClassName} shrink-0`}>{notice}</span>
         ) : null}
       </div>
     </div>

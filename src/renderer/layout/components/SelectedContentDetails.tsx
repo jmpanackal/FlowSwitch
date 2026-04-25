@@ -315,7 +315,7 @@ export function SelectedContentDetails({
   };
 
   const renderBrowseTab = () => (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {copyNotice ? (
         <p className="text-[11px] font-medium text-flow-accent-green">{copyNotice}</p>
       ) : null}
@@ -393,7 +393,7 @@ export function SelectedContentDetails({
             {resolvedFolderChildren.map((row) => (
               <li
                 key={row.id}
-                className="flex items-start gap-2 rounded-md px-2 py-1.5 text-xs text-flow-text-secondary"
+                className="flex min-w-0 items-start gap-2 rounded-md px-2 py-1.5 text-xs text-flow-text-secondary"
               >
                 <span className="mt-0.5 shrink-0 text-flow-text-muted">
                   {row.entryKind === "link" ? (
@@ -480,18 +480,18 @@ export function SelectedContentDetails({
   );
 
   const renderOrganizeTab = () => (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       {onToggleExcludeFromActiveProfile ? (
         <div>
           <div className={inspectorEyebrowBlock}>This profile</div>
-          <label className="flex cursor-pointer items-start gap-2 rounded-lg border border-flow-border/50 bg-flow-surface/40 px-3 py-2.5">
+          <label className="flex min-w-0 cursor-pointer items-start gap-2 rounded-lg border border-flow-border/50 bg-flow-surface/40 px-3 py-2.5">
             <input
               type="checkbox"
               className="mt-0.5 h-3.5 w-3.5 rounded border-flow-border"
               checked={Boolean(excludedFromActiveProfile)}
               onChange={() => onToggleExcludeFromActiveProfile()}
             />
-            <span className="text-xs leading-snug text-flow-text-secondary">
+            <span className="min-w-0 text-xs leading-snug text-flow-text-secondary">
               <span className="font-medium text-flow-text-primary">
                 Hide from this profile
               </span>
@@ -513,7 +513,7 @@ export function SelectedContentDetails({
           onChange={(e) =>
             onChangeDefaultApp(id, e.target.value, isFolder ? "folder" : "item")
           }
-          className="flow-sidebar-search w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-3 pr-3 text-sm text-flow-text-primary"
+          className="flow-sidebar-search min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-3 pr-3 text-sm text-flow-text-primary"
         >
           {appOptions.map((app) => (
             <option key={app} value={app}>
@@ -557,7 +557,7 @@ export function SelectedContentDetails({
   );
 
   const renderAddTab = () => (
-    <div className="space-y-4">
+    <div className="min-w-0 space-y-4">
       <p className={inspectorHelperTextClass}>
         Place on the monitor layout or minimized row. The library entry stays; this adds a
         slot reference for the active profile. Paths and disk contents are on the Browse tab.
@@ -605,9 +605,9 @@ export function SelectedContentDetails({
   };
 
   return (
-    <div className="flex h-full min-h-0 flex-col pt-12">
-      <div className="border-b border-flow-border/50 px-4 pb-3">
-        <div className="flex items-start gap-3">
+    <div className="flex h-full min-h-0 min-w-0 flex-col pt-12">
+      <div className="border-b border-flow-border/50 px-3 pb-3 sm:px-4">
+        <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 shrink-0 text-flow-text-muted">
             {isFolder ? (
               <Folder className="h-6 w-6 text-amber-400" aria-hidden />
@@ -626,7 +626,7 @@ export function SelectedContentDetails({
       </div>
 
       <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
-        <div className="flex">
+        <div className="flex min-w-0">
           {tabs.map((tab) => {
             const IconComponent = tab.icon;
             return (
@@ -634,22 +634,22 @@ export function SelectedContentDetails({
                 type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex flex-1 items-center justify-center gap-1.5 px-2 py-2.5 text-[11px] font-medium transition-all duration-150 ease-out border-b-2 ${
+                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[10px] font-medium leading-tight transition-all duration-150 ease-out border-b-2 ${
                   activeTab === tab.id
                     ? "border-flow-accent-blue bg-flow-bg-primary/40 text-flow-accent-blue"
                     : "border-transparent text-flow-text-muted hover:bg-flow-surface/50 hover:text-flow-text-primary"
                 }`}
               >
                 <IconComponent className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="hidden min-[340px]:inline">{tab.label}</span>
+                <span className="max-w-full truncate text-center">{tab.label}</span>
               </button>
             );
           })}
         </div>
       </div>
 
-      <div className="scrollbar-elegant min-h-0 flex-1 overflow-y-auto pl-4 pr-0 py-4">
-        <div className="space-y-4 pr-3 sm:pr-4">{renderTabContent()}</div>
+      <div className="scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto pl-3 pr-0 py-4 sm:pl-4">
+        <div className="min-w-0 space-y-4 pr-3 sm:pr-4">{renderTabContent()}</div>
       </div>
     </div>
   );
