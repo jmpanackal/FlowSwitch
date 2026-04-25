@@ -1259,18 +1259,8 @@ export function SelectedAppDetails({
     );
   };
 
-  const renderTabContent = () => {
-    switch (activeTab) {
-      case "overview":
-        return renderOverviewTab();
-      case "launch":
-        return renderLaunchTab();
-      case "content":
-        return renderContentTab();
-      default:
-        return renderOverviewTab();
-    }
-  };
+  const appInspectorTabSlideIndex =
+    activeTab === "overview" ? 0 : activeTab === "launch" ? 1 : 2;
 
   return (
     <div className="flex h-full min-h-0 min-w-0 flex-col bg-flow-bg-secondary/95 pt-12">
@@ -1297,7 +1287,14 @@ export function SelectedAppDetails({
 
       {/* Tab Navigation */}
       <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
-        <div className="flex min-w-0">
+        <div className="relative flex min-w-0">
+          <div
+            className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 bg-flow-accent-blue flow-tab-slide-track"
+            style={{
+              transform: `translate3d(calc(${appInspectorTabSlideIndex} * 100%), 0, 0)`,
+            }}
+            aria-hidden
+          />
           {tabs.map((tab) => {
             const IconComponent = tab.icon;
             return (
@@ -1305,10 +1302,10 @@ export function SelectedAppDetails({
                 type="button"
                 key={tab.id}
                 onClick={() => setActiveTab(tab.id)}
-                className={`flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 px-1 py-2 text-[10px] font-medium leading-tight transition-all duration-150 ease-out border-b-2 ${
+                className={`relative z-0 flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-b-2 border-transparent px-1 py-2 text-[10px] font-medium leading-tight transition-colors duration-150 ease-out ${
                   activeTab === tab.id
-                    ? 'border-flow-accent-blue text-flow-accent-blue bg-flow-bg-primary/40'
-                    : 'border-transparent text-flow-text-muted hover:text-flow-text-primary hover:bg-flow-surface/50'
+                    ? "bg-flow-bg-primary/40 text-flow-accent-blue"
+                    : "text-flow-text-muted hover:bg-flow-surface/50 hover:text-flow-text-primary"
                 }`}
               >
                 <IconComponent className="h-3 w-3 shrink-0" />
@@ -1319,24 +1316,49 @@ export function SelectedAppDetails({
         </div>
       </div>
 
-      {/* Tab Content — Content tab uses flex column so Associated Content can fill height.
-          pr-0 on outer keeps the scrollbar flush with the shell edge; inner pr pads content from the gutter. */}
+      {/* Tab panels: horizontal slide (transform); inactive columns are inert to pointer. */}
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pl-3 pr-0 py-4 sm:pl-4">
         <div
-          className={`min-h-0 min-w-0 flex-1 ${
-            activeTab === "content" && isProfileSlot
-              ? "flex flex-col overflow-hidden"
-              : "scrollbar-elegant overflow-y-auto overflow-x-hidden"
-          }`}
+          className="flow-tab-slide-track flex h-full min-h-0 w-[300%] min-w-0 flex-shrink-0"
+          style={{
+            transform: `translate3d(calc(-100% / 3 * ${appInspectorTabSlideIndex}), 0, 0)`,
+          }}
         >
           <div
-            className={
-              activeTab === "content" && isProfileSlot
-                ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
-                : "min-w-0 pr-3 sm:pr-4"
-            }
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "overview" ? "" : "pointer-events-none select-none"
+            }`}
+            aria-hidden={activeTab !== "overview"}
           >
-            {renderTabContent()}
+            <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4">
+              {renderOverviewTab()}
+            </div>
+          </div>
+          <div
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "launch" ? "" : "pointer-events-none select-none"
+            }`}
+            aria-hidden={activeTab !== "launch"}
+          >
+            <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4">
+              {renderLaunchTab()}
+            </div>
+          </div>
+          <div
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "content" ? "" : "pointer-events-none select-none"
+            }`}
+            aria-hidden={activeTab !== "content"}
+          >
+            <div
+              className={
+                isProfileSlot
+                  ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
+                  : "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+              }
+            >
+              {renderContentTab()}
+            </div>
           </div>
         </div>
       </div>

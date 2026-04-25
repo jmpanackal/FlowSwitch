@@ -463,7 +463,8 @@ export function MonitorLayout({
 
     if (w <= 10 || h <= 10) return false;
     setPreviewBounds((prev) => {
-      if (Math.abs(prev.width - w) < 2 && Math.abs(prev.height - h) < 2) {
+      /* Wider threshold avoids ResizeObserver micro-jitter + repeated scale/layout sync. */
+      if (Math.abs(prev.width - w) < 6 && Math.abs(prev.height - h) < 6) {
         return prev;
       }
       return { width: w, height: h };
@@ -741,12 +742,21 @@ export function MonitorLayout({
     if (!inner) return;
 
     let raf = 0;
-    const schedule = () => {
+    let debounceTimer = 0;
+    const debounceMs = 72;
+
+    const flush = () => {
+      debounceTimer = 0;
       if (raf) cancelAnimationFrame(raf);
       raf = requestAnimationFrame(() => {
         raf = 0;
         scheduleRemeasurePreviewInnerWithRetries();
       });
+    };
+
+    const schedule = () => {
+      if (debounceTimer) window.clearTimeout(debounceTimer);
+      debounceTimer = window.setTimeout(flush, debounceMs);
     };
 
     scheduleRemeasurePreviewInnerWithRetries();
@@ -758,6 +768,7 @@ export function MonitorLayout({
     }
 
     return () => {
+      if (debounceTimer) window.clearTimeout(debounceTimer);
       if (raf) cancelAnimationFrame(raf);
       innerObserver.disconnect();
       outerObserver?.disconnect();
@@ -909,8 +920,28 @@ export function MonitorLayout({
         next[monitor.id] = clampPreviewPosition(monitor, next[monitor.id], scale);
       }
       previewPositionsRef.current = next;
-      setPreviewPositions(next);
-      setLayoutPreviewScale(scale);
+      setPreviewPositions((prev) => {
+        const keys = Object.keys(next);
+        if (
+          keys.length === Object.keys(prev).length
+          && keys.every((id) => {
+            const a = prev[id];
+            const b = next[id];
+            return (
+              a
+              && b
+              && Math.abs(a.x - b.x) < 0.02
+              && Math.abs(a.y - b.y) < 0.02
+            );
+          })
+        ) {
+          return prev;
+        }
+        return next;
+      });
+      setLayoutPreviewScale((prev) =>
+        Math.abs(prev - scale) < 0.001 ? prev : scale,
+      );
       return;
     }
 
@@ -988,11 +1019,11 @@ export function MonitorLayout({
     setLayoutPreviewScale(scale);
     lastSyncedMonitorLayoutSignatureRef.current = signatureFromProps;
     prevMonitorsIdentityKeyRef.current = monitorsIdentityKey;
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- omit layoutPreviewScale (computed here); listing it re-ran this sync on every scale tick during shell resize (jank).
   }, [
     monitorLayoutSignature,
     previewBounds.width,
     previewBounds.height,
-    layoutPreviewScale,
     large,
     draggingMonitor,
     monitors,
@@ -1000,16 +1031,6 @@ export function MonitorLayout({
     monitorsIdentityKey,
     recalculateLayoutPreviewScale,
     computeMultiMonitorPreviewScale,
-  ]);
-
-  useLayoutEffect(() => {
-    recalculateLayoutPreviewScale();
-  }, [
-    previewBounds.width,
-    previewBounds.height,
-    large,
-    isEditMode,
-    recalculateLayoutPreviewScale,
   ]);
 
   useEffect(() => {
@@ -2284,7 +2305,7 @@ export function MonitorLayout({
                                       onClick={() => setMonitorEditActionsOpenId(null)}
                                     />
                                     <div
-                                      className="absolute right-0 top-full z-[50] mt-1 flex min-w-[12rem] flex-col gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary p-2 shadow-lg"
+                                      className="absolute right-0 top-full z-[50] mt-1 flex min-w-[12rem] flex-col gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary p-2 shadow-lg flow-modal-nested-panel-enter"
                                       onMouseDown={(e) => e.stopPropagation()}
                                     >
                                       {onUpdateMonitorLayout ? (

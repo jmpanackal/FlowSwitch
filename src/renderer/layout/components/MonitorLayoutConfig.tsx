@@ -296,7 +296,7 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
           />
           
           {/* Layout Selection Menu */}
-          <div className="absolute top-full left-0 mt-2 w-80 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg z-50 p-4">
+          <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-lg border border-flow-border bg-flow-surface-elevated p-4 shadow-lg flow-modal-panel-enter">
             <div className="flex items-center justify-between mb-4">
               <div className="flex items-center gap-2">
                 <Monitor className="w-4 h-4 text-flow-text-secondary" />

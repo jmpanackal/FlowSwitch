@@ -127,7 +127,7 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
 
       {/* Dropdown Panel */}
       {isOpen && !disabled && (
-        <div className="absolute top-full left-0 mt-2 w-full bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg z-50 overflow-hidden">
+        <div className="absolute left-0 top-full z-50 mt-2 w-full overflow-hidden rounded-lg border border-flow-border bg-flow-surface-elevated shadow-lg flow-modal-panel-enter">
           {/* Quick Presets */}
           <div className="p-3 border-b border-flow-border">
             <h4 className="text-xs font-medium text-flow-text-secondary mb-2">Quick Select</h4>

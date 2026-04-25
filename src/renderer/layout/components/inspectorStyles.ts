@@ -29,7 +29,7 @@ export const inspectorHelperTextClass =
 
 /** Native `<select>` / text inputs — same density as {@link inspectorPanelListButtonClass} (text-xs, py-2). */
 export const inspectorPanelNativeSelectClass =
-  "min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-xs text-flow-text-primary focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50";
+  "min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-xs text-flow-text-primary transition-[border-color,box-shadow] duration-200 ease-out focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50";
 
 /** Same surface as {@link inspectorPanelNativeSelectClass} for `<input type="text" | "number" | ...>`. */
 export const inspectorPanelNativeTextInputClass = inspectorPanelNativeSelectClass;
@@ -51,7 +51,7 @@ export const inspectorPanelSwitchTitleClass =
 
 /** Compact switch track; sibling must be `sr-only peer` checkbox immediately before this `div`. */
 export const inspectorPanelSwitchTrackClass =
-  "relative h-5 w-10 shrink-0 rounded-full bg-flow-bg-primary peer-focus:outline-none after:pointer-events-none after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-transform after:content-[''] peer-checked:bg-flow-accent-blue peer-checked:after:translate-x-5 peer-checked:after:border-white";
+  "relative h-5 w-10 shrink-0 rounded-full bg-flow-bg-primary transition-[background-color] duration-200 ease-out peer-focus:outline-none after:pointer-events-none after:absolute after:left-[2px] after:top-[2px] after:h-4 after:w-4 after:rounded-full after:border after:border-gray-300 after:bg-white after:transition-[transform] after:duration-200 after:ease-[cubic-bezier(0.16,1,0.3,1)] after:content-[''] peer-checked:bg-flow-accent-blue peer-checked:after:translate-x-5 peer-checked:after:border-white";
 
 /** Label wrapping the hidden checkbox + {@link inspectorPanelSwitchTrackClass}. */
 export const inspectorPanelSwitchLabelClass =
@@ -59,25 +59,25 @@ export const inspectorPanelSwitchLabelClass =
 
 /** Full-width placement / list row button. */
 export const inspectorPanelListButtonClass =
-  "min-w-0 w-full rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-left text-xs font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary [overflow-wrap:anywhere]";
+  "min-w-0 w-full rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-left text-xs font-medium text-flow-text-secondary transition-[color,background-color,border-color] duration-200 ease-out hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary active:brightness-95 motion-reduce:active:brightness-100 [overflow-wrap:anywhere]";
 
 /** Full-width centered row (Open in Explorer, open link). */
 export const inspectorPanelCtaButtonClass =
-  "inline-flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-xs font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary [overflow-wrap:anywhere]";
+  "inline-flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-xs font-medium text-flow-text-secondary transition-[color,background-color,border-color] duration-200 ease-out hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary active:brightness-95 motion-reduce:active:brightness-100 [overflow-wrap:anywhere]";
 
 /** Full-width centered action in a grid cell (e.g. Replace). */
 export const inspectorPanelGridButtonClass =
-  "flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-xs font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary [overflow-wrap:anywhere]";
+  "flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-xs font-medium text-flow-text-secondary transition-[color,background-color,border-color] duration-200 ease-out hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary active:brightness-95 motion-reduce:active:brightness-100 [overflow-wrap:anywhere]";
 
 export const inspectorPanelGridButtonDisabledClass =
   "flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-border/50 bg-flow-surface/60 px-3 py-2 text-xs font-medium text-flow-text-muted opacity-70 cursor-not-allowed [overflow-wrap:anywhere]";
 
 export const inspectorPanelDangerButtonClass =
-  "flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-accent-red/35 bg-flow-accent-red/10 px-3 py-2 text-xs font-medium text-flow-accent-red transition-colors hover:bg-flow-accent-red/20 disabled:cursor-not-allowed disabled:opacity-50 [overflow-wrap:anywhere]";
+  "flex min-w-0 w-full items-center justify-center gap-2 rounded-lg border border-flow-accent-red/35 bg-flow-accent-red/10 px-3 py-2 text-xs font-medium text-flow-accent-red transition-[color,background-color,border-color] duration-200 ease-out hover:bg-flow-accent-red/20 disabled:cursor-not-allowed disabled:opacity-50 active:brightness-95 motion-reduce:active:brightness-100 [overflow-wrap:anywhere]";
 
 /** Secondary compact control (Open in Explorer). */
 export const inspectorPanelCompactButtonClass =
-  "inline-flex items-center gap-1.5 rounded-lg border border-flow-border/50 bg-flow-surface px-2.5 py-1.5 text-[11px] font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary";
+  "inline-flex items-center gap-1.5 rounded-lg border border-flow-border/50 bg-flow-surface px-2.5 py-1.5 text-[11px] font-medium text-flow-text-secondary transition-[color,background-color,border-color] duration-200 ease-out hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary active:brightness-95 motion-reduce:active:brightness-100";
 
 export const inspectorPanelCompactButtonDisabledClass =
   "inline-flex items-center gap-1.5 rounded-lg border border-flow-border/40 bg-transparent px-2.5 py-1.5 text-[11px] font-medium text-flow-text-muted opacity-60 cursor-not-allowed";

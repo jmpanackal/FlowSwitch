@@ -52,6 +52,12 @@
   --flow-shadow-sm: 0 2px 8px oklch(0.05 0.02 240 / 0.4);
   --flow-shadow-md: 0 4px 16px oklch(0.05 0.02 240 / 0.5);
   --flow-shadow-lg: 0 8px 32px oklch(0.05 0.02 240 / 0.6);
+
+  /* Motion (GPU-friendly defaults; respect prefers-reduced-motion below). */
+  --flow-ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+  --flow-motion-xs: 140ms;
+  --flow-motion-sm: 220ms;
+  --flow-motion-md: 280ms;
 }
 
 .dark {
@@ -281,7 +287,7 @@
   }
 
   .flow-menu-item {
-    @apply flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-flow-text-primary;
+    @apply flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-flow-text-primary transition-colors duration-150 ease-out;
   }
 
   .flow-menu-item:hover:not(:disabled) {
@@ -298,7 +304,7 @@
   }
 
   .flow-sidebar-search {
-    @apply w-full rounded-lg border border-white/[0.1] bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary shadow-inner placeholder:text-flow-text-muted;
+    @apply w-full rounded-lg border border-white/[0.1] bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary shadow-inner placeholder:text-flow-text-muted transition-[border-color,box-shadow] duration-200 ease-out;
   }
 
   .flow-sidebar-search:focus {
@@ -309,34 +315,53 @@
       0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 30%, transparent);
   }
 
-  /** Sidebar view switcher: dense, icon + label */
-  .flow-nav-tab-strip {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 0.125rem;
-    border-radius: 0.75rem;
-    padding: 0.1875rem;
-    border: 1px solid color-mix(in oklch, var(--flow-border) 65%, transparent);
-    background-color: color-mix(in oklch, var(--flow-bg-primary) 88%, transparent);
+  /**
+   * Library sidebar (Profiles / Apps / Content): flat rail + sliding accent line.
+   * Transform is applied inline in MainLayout (same pattern as inspector tabs).
+   */
+  .flow-library-tablist {
+    position: relative;
+    border-radius: 0.625rem;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 48%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 42%, transparent);
+    box-shadow: inset 0 1px 0 color-mix(in oklch, white 5%, transparent);
+    padding: 0.25rem 0.25rem 0;
   }
 
-  .flow-nav-tab {
-    @apply flex min-h-[2.75rem] flex-col items-center justify-center gap-0.5 rounded-md px-1 py-1.5 text-[11px] font-semibold leading-tight text-flow-text-muted transition-colors duration-150 ease-out sm:min-h-[2.5rem] sm:flex-row sm:gap-1.5 sm:px-2 sm:text-xs;
+  .flow-library-tablist-rail {
+    position: relative;
+    display: flex;
+    min-width: 0;
+    padding-bottom: 0.3125rem;
   }
 
-  .flow-nav-tab:hover {
-    @apply bg-flow-surface text-flow-text-secondary;
+  .flow-library-tab {
+    @apply relative z-0 flex min-h-[2.375rem] min-w-0 flex-1 flex-col items-center justify-center gap-0.5 rounded-md py-1.5 text-[11px] font-semibold leading-tight transition-colors duration-200 ease-out sm:min-h-[2.25rem] sm:flex-row sm:gap-1 sm:px-1.5 sm:text-xs;
   }
 
-  .flow-nav-tab-active {
-    @apply bg-flow-surface-elevated text-flow-text-primary shadow-sm;
-    box-shadow:
-      0 1px 2px rgb(0 0 0 / 0.12),
-      inset 0 1px 0 color-mix(in oklch, white 8%, transparent);
-  }
-
-  .flow-nav-tab-idle {
+  .flow-library-tab-idle {
     @apply text-flow-text-muted;
+  }
+
+  .flow-library-tab-idle:hover {
+    @apply bg-white/[0.06] text-flow-text-secondary;
+  }
+
+  .flow-library-tab-active {
+    @apply text-flow-accent-blue;
+  }
+
+  .flow-library-tab-active:hover {
+    @apply text-flow-accent-blue;
+  }
+
+  .flow-library-tab:active {
+    transform: scale(0.98);
+  }
+
+  .flow-library-tab:focus-visible {
+    outline: none;
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 45%, transparent);
   }
 
   /** Installed-apps sidebar: loading hero + row placeholders (Apps tab) */
@@ -1367,6 +1392,22 @@
   animation: flow-tooltip-inner-pop-kf 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Inspector drawer (fixed right): subtle slide-in on mount. */
+@keyframes flow-inspector-panel-enter-kf {
+  from {
+    opacity: 0;
+    transform: translateX(14px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.flow-inspector-panel-enter {
+  animation: flow-inspector-panel-enter-kf 0.26s var(--flow-ease-out-expo) both;
+}
+
 /* Modals: lightweight enter (transform + opacity; GPU-friendly). */
 @keyframes flow-modal-backdrop-in-kf {
   from {
@@ -1418,14 +1459,30 @@
     opacity 0.15s ease;
 }
 
+/* Horizontal tab panels (library sidebar + inspectors): GPU translate only. */
+.flow-tab-slide-track {
+  transition: transform 0.22s cubic-bezier(0.16, 1, 0.3, 1);
+  backface-visibility: hidden;
+}
+
 @media (prefers-reduced-motion: reduce) {
   .flow-modal-backdrop-enter,
   .flow-modal-panel-enter,
-  .flow-modal-nested-panel-enter {
+  .flow-modal-nested-panel-enter,
+  .flow-inspector-panel-enter,
+  .flow-tooltip-inner-pop {
     animation: none !important;
   }
 
   .flow-settings-tab-pill {
     transition: none !important;
+  }
+
+  .flow-tab-slide-track {
+    transition: none !important;
+  }
+
+  .flow-library-tab:active {
+    transform: none;
   }
 }

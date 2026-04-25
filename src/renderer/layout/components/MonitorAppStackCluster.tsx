@@ -88,7 +88,7 @@ export function MonitorAppStackCluster({
                 >
                   <button
                     type="button"
-                    className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.06] ring-1 ring-inset ring-white/[0.06] transition hover:bg-white/[0.11] hover:ring-white/15"
+                    className="flex h-10 w-10 items-center justify-center rounded-lg bg-white/[0.06] ring-1 ring-inset ring-white/[0.06] transition-[background-color,box-shadow,color,transform] duration-200 ease-out hover:bg-white/[0.11] hover:ring-white/15 active:scale-[0.97] motion-reduce:active:scale-100"
                     aria-label={`${app.name}, in stack`}
                     onClick={() => onSelectMember?.(appIndex)}
                     onPointerDown={(e) => {
@@ -117,7 +117,7 @@ export function MonitorAppStackCluster({
                   </button>
                   <button
                     type="button"
-                    className="pointer-events-auto absolute bottom-0.5 right-0.5 z-20 flex h-5 w-5 items-center justify-center rounded-md border border-white/15 bg-black/85 text-white/90 shadow-md backdrop-blur-sm transition hover:border-flow-accent-blue/50 hover:text-flow-accent-blue"
+                    className="pointer-events-auto absolute bottom-0.5 right-0.5 z-20 flex h-5 w-5 items-center justify-center rounded-md border border-white/15 bg-black/85 text-white/90 shadow-md backdrop-blur-sm transition-[color,background-color,border-color,transform] duration-200 ease-out hover:border-flow-accent-blue/50 hover:text-flow-accent-blue active:scale-95 motion-reduce:active:scale-100"
                     aria-label={`Bring ${app.name} to front`}
                     onClick={(e) => {
                       e.stopPropagation();
