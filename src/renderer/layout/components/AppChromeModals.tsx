@@ -1,4 +1,6 @@
+import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { Switch } from "./ui/switch";
 
 const APP_VERSION = "0.1.0";
 
@@ -15,6 +17,37 @@ export function AppChromeModals({
   onClosePreferences,
   onCloseAbout,
 }: AppChromeModalsProps) {
+  const [pinDuringLaunch, setPinDuringLaunch] = useState(true);
+  const [prefsLoaded, setPrefsLoaded] = useState(false);
+
+  const loadPrefs = useCallback(async () => {
+    if (!window.electron?.getAppPreferences) {
+      setPrefsLoaded(true);
+      return;
+    }
+    const r = await window.electron.getAppPreferences();
+    if (r?.ok && r.preferences) {
+      setPinDuringLaunch(Boolean(r.preferences.pinMainWindowDuringProfileLaunch));
+    }
+    setPrefsLoaded(true);
+  }, []);
+
+  useEffect(() => {
+    if (!preferencesOpen) return;
+    void loadPrefs();
+  }, [preferencesOpen, loadPrefs]);
+
+  const persistPinDuringLaunch = async (next: boolean) => {
+    setPinDuringLaunch(next);
+    if (!window.electron?.setAppPreferences) return;
+    const r = await window.electron.setAppPreferences({
+      pinMainWindowDuringProfileLaunch: next,
+    });
+    if (r?.ok && r.preferences) {
+      setPinDuringLaunch(Boolean(r.preferences.pinMainWindowDuringProfileLaunch));
+    }
+  };
+
   return (
     <>
       {preferencesOpen ? (
@@ -44,10 +77,28 @@ export function AppChromeModals({
                 <X className="h-5 w-5" strokeWidth={1.75} />
               </button>
             </div>
-            <div className="px-4 py-4 text-sm leading-relaxed text-flow-text-secondary">
-              Global options (startup behavior, defaults, and updates) will live
-              here as the app grows. Profile-specific options stay under the
-              profile menu (⋯) → Profile preferences.
+            <div className="space-y-4 px-4 py-4 text-sm leading-relaxed text-flow-text-secondary">
+              <p>
+                Global options (startup behavior, defaults, and updates) will
+                expand here as the app grows. Profile-specific options stay under
+                the profile menu (⋯) → Profile preferences.
+              </p>
+              <div className="flex items-center justify-between gap-3 rounded-lg border border-white/[0.08] bg-flow-bg-primary/40 px-3 py-3">
+                <div>
+                  <div className="text-sm font-medium text-flow-text-primary">
+                    Keep FlowSwitch visible while launching
+                  </div>
+                  <p className="mt-1 text-xs text-flow-text-muted">
+                    Raises the window and pins it above normal windows during a
+                    profile launch so progress and cancel stay reachable.
+                  </p>
+                </div>
+                <Switch
+                  checked={pinDuringLaunch}
+                  disabled={!prefsLoaded}
+                  onCheckedChange={(v) => void persistPinDuringLaunch(v)}
+                />
+              </div>
             </div>
             <div className="flex justify-end border-t border-white/[0.06] px-4 py-3">
               <button
