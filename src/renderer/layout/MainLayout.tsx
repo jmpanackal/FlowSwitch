@@ -53,7 +53,8 @@ import {
   Search,
   ArrowRight,
   ChevronRight,
-  ChevronLeft,
+  PanelLeft,
+  PanelRight,
   X,
   Check,
   AlertTriangle,
@@ -138,6 +139,7 @@ export default function App() {
   const [selectedApp, setSelectedApp] =
     useState<MainLayoutSelectedApp | null>(null);
 
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
   const [librarySelection, setLibrarySelection] =
@@ -1199,6 +1201,53 @@ export default function App() {
           onAppPreferences={() => setAppChromeModal("preferences")}
           onAbout={() => setAppChromeModal("about")}
         />
+        {/*
+          Sidebar toggles sit after the app menu, not at the trailing edge: on Windows,
+          titleBarOverlay paints system caption buttons over the top-right of this strip,
+          which hid the controls when they were flex-end aligned.
+        */}
+        <div className="app-no-drag ml-1 flex shrink-0 items-center gap-0.5 border-l border-white/[0.08] pl-1.5 md:ml-2 md:gap-1 md:pl-2">
+          <FlowTooltip
+            label={leftSidebarOpen ? "Hide library sidebar" : "Show library sidebar"}
+            side="bottom"
+          >
+            <button
+              type="button"
+              onClick={() => setLeftSidebarOpen((o) => !o)}
+              aria-pressed={leftSidebarOpen}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors md:h-7 md:w-7 ${
+                leftSidebarOpen
+                  ? "bg-white/[0.12] text-flow-text-primary"
+                  : "text-flow-text-secondary hover:bg-white/[0.1] hover:text-flow-text-primary"
+              }`}
+              aria-label={
+                leftSidebarOpen ? "Hide library sidebar" : "Show library sidebar"
+              }
+            >
+              <PanelLeft className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+            </button>
+          </FlowTooltip>
+          <FlowTooltip
+            label={rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar"}
+            side="bottom"
+          >
+            <button
+              type="button"
+              onClick={() => setRightSidebarOpen((o) => !o)}
+              aria-pressed={rightSidebarOpen}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md transition-colors md:h-7 md:w-7 ${
+                rightSidebarOpen
+                  ? "bg-white/[0.12] text-flow-text-primary"
+                  : "text-flow-text-secondary hover:bg-white/[0.1] hover:text-flow-text-primary"
+              }`}
+              aria-label={
+                rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar"
+              }
+            >
+              <PanelRight className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+            </button>
+          </FlowTooltip>
+        </div>
         <div className="min-h-0 min-w-0 flex-1" aria-hidden />
       </div>
       <input
@@ -1210,8 +1259,15 @@ export default function App() {
         aria-hidden
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left Sidebar - FIXED: Better height management */}
-        <div className="flow-shell-nav flex h-full max-h-full min-h-0 w-[clamp(16rem,24vw,24rem)] min-w-[16rem] shrink-0 flex-col overflow-hidden">
+        {/* Left sidebar: width animates; inner keeps fixed width so lists don’t reflow while collapsing */}
+        <div
+          className={`shrink-0 overflow-hidden transition-[width,min-width] duration-200 ease-out ${
+            leftSidebarOpen
+              ? "w-[clamp(16rem,24vw,24rem)] min-w-[16rem]"
+              : "w-0 min-w-0"
+          }`}
+        >
+        <div className="flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden">
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-nav-tab-strip" role="tablist" aria-label="Sidebar view">
               <button
@@ -1431,10 +1487,11 @@ export default function App() {
             )}
           </div>
         </div>
+        </div>
 
         {/* Main Content Area with Header and Right Sidebar */}
         <div
-          className={`flex min-h-0 min-w-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-flow-bg-primary transition-[margin] duration-200 ease-out ${
             rightSidebarOpen ? FLOW_SHELL_INSPECTOR_MARGIN_CLASS : "mr-0"
           }`}
         >
@@ -1812,7 +1869,7 @@ export default function App() {
                           )
                       : undefined
                   }
-                  large={!rightSidebarOpen}
+                  large
                 />
               </div>
             </main>
@@ -1822,7 +1879,7 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flex flex-col z-30 transform transition-transform duration-200 ease-out ${
+            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flex min-w-0 max-w-full flex-col overflow-x-hidden z-30 transform transition-transform duration-200 ease-out ${
               rightSidebarOpen
                 ? "translate-x-0"
                 : "translate-x-full"
@@ -1840,7 +1897,7 @@ export default function App() {
             </div>
 
             {/* Sidebar Content - Now contains app header */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               {librarySelection
               && contentInspectorSelection
               && currentProfile ? (
@@ -1912,30 +1969,6 @@ export default function App() {
             </div>
           </div>
         )}
-
-        {/* Right Sidebar Toggle Button (when closed) */}
-        {!rightSidebarOpen && (selectedApp || librarySelection) ? (
-          <FlowTooltip
-            label={
-              librarySelection
-                ? "Open library item details"
-                : "Open app details"
-            }
-            side="left"
-          >
-            <button
-              type="button"
-              onClick={() => setRightSidebarOpen(true)}
-              className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
-              style={{
-                top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
-                transform: "translateY(-50%)",
-              }}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          </FlowTooltip>
-        ) : null}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
         {dragState.isDragging && dragState.dragData && (

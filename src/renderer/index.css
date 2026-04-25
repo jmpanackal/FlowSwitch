@@ -598,8 +598,8 @@
     /* Ensure proper sizing constraints */
     min-width: 16px;
     min-height: 16px;
-    max-width: 40px;
-    max-height: 40px;
+    max-width: 48px;
+    max-height: 48px;
   }
   
   .app-icon-fallback {
@@ -614,8 +614,8 @@
     /* Ensure proper sizing constraints */
     min-width: 16px;
     min-height: 16px;
-    max-width: 40px;
-    max-height: 40px;
+    max-width: 48px;
+    max-height: 48px;
   }
   
   /* FIXED: App window content container - responsive padding with better centering */
@@ -736,7 +736,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-10 h-10;
+      @apply w-11 h-11;
     }
     
     .app-text {
@@ -757,7 +757,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-9 h-9;
+      @apply w-10 h-10;
     }
     
     .app-text {
@@ -824,7 +824,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-10 h-10;
+      @apply w-11 h-11;
     }
   }
   
@@ -836,7 +836,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-8 h-8;
+      @apply w-9 h-9;
     }
   }
   
@@ -848,7 +848,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-7 h-7;
+      @apply w-8 h-8;
     }
   }
   
@@ -860,7 +860,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-6 h-6;
+      @apply w-7 h-7;
     }
   }
   
@@ -872,7 +872,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-5 h-5;
+      @apply w-6 h-6;
     }
   }
   
@@ -884,7 +884,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-4 h-4;
+      @apply w-5 h-5;
       min-width: 16px;
       min-height: 16px;
     }
@@ -898,7 +898,7 @@
     
     .app-icon,
     .app-icon-fallback {
-      @apply w-4 h-4;
+      @apply w-5 h-5;
       min-width: 12px;
       min-height: 12px;
     }
