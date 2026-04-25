@@ -99,6 +99,27 @@ const createProfileLaunchGatherers = ({
       );
     }
 
+    const preferredOrder = Array.isArray(profile?.appLaunchOrder) ? profile.appLaunchOrder : [];
+    if (preferredOrder.length > 0) {
+      const indexById = new Map(
+        preferredOrder
+          .map((id) => String(id || '').trim())
+          .filter(Boolean)
+          .map((id, idx) => [id, idx]),
+      );
+      launches.sort((a, b) => {
+        const aId = String(a?.app?.instanceId || a?.app?.name || '').trim();
+        const bId = String(b?.app?.instanceId || b?.app?.name || '').trim();
+        const ai = indexById.has(aId) ? indexById.get(aId) : Number.POSITIVE_INFINITY;
+        const bi = indexById.has(bId) ? indexById.get(bId) : Number.POSITIVE_INFINITY;
+        if (ai !== bi) return ai - bi;
+        return Number(a?.launchSequence ?? 0) - Number(b?.launchSequence ?? 0);
+      });
+      launches.forEach((launch, idx) => {
+        launch.launchSequence = idx;
+      });
+    }
+
     return { launches, skippedApps };
   };
 

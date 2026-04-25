@@ -125,6 +125,7 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -
         $items += [pscustomobject]@{
           ProcessName = $_.ProcessName
           Id = $_.Id
+          MainWindowHandle = [int64]$_.MainWindowHandle
           MainWindowTitle = $_.MainWindowTitle
           Path = $_.Path
           IsMinimized = $isMinimized
@@ -195,6 +196,7 @@ try {
         $items += [pscustomobject]@{
           ProcessName = $proc.ProcessName
           Id = $proc.Id
+          MainWindowHandle = [int64]$hWnd
           MainWindowTitle = $title
           Path = $processPath
           IsMinimized = $isMinimized
@@ -241,6 +243,12 @@ $items | ConvertTo-Json -Depth 3`;
             .map((row) => ({
               name: String(row.ProcessName),
               id: Number(row.Id || 0),
+              mainWindowHandle: (() => {
+                const h = row.MainWindowHandle;
+                if (h === undefined || h === null || h === '') return null;
+                const n = Number(h);
+                return Number.isFinite(n) && n !== 0 ? String(Math.trunc(n)) : null;
+              })(),
               title: row.MainWindowTitle ? String(row.MainWindowTitle) : '',
               executablePath: typeof row.Path === 'string' ? row.Path : null,
               isMinimized: Boolean(row.IsMinimized),
