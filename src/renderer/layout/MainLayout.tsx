@@ -1135,9 +1135,10 @@ export default function App() {
     }
   }, [selectedApp, currentProfile]);
 
+  /** Collapse inspector only; keep selection so reopen shows the same app/library entry. */
   const handleCloseSidebar = useCallback(() => {
-    clearInspectorSelection();
-  }, [clearInspectorSelection]);
+    setRightSidebarOpen(false);
+  }, []);
 
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
