@@ -17,7 +17,10 @@ import {
   FLOW_SHELL_INSPECTOR_MARGIN_CLASS,
   FLOW_SHELL_INSPECTOR_WIDTH_CLASS,
 } from "./constants/flowShellInspector";
-import { ProfileSettings } from "./components/ProfileSettings";
+import {
+  ProfileSettings,
+  type ProfileSettingsInitialSection,
+} from "./components/ProfileSettings";
 import { AppManager } from "./components/AppManager";
 import {
   ContentManager,
@@ -116,10 +119,10 @@ export default function App() {
     useLaunchFeedback();
   const [isEditMode, setIsEditMode] = useState(false);
   const isEditModeRef = useRef(false);
-  const [
-    selectedProfileForSettings,
-    setSelectedProfileForSettings,
-  ] = useState<string | null>(null);
+  const [profileSettingsIntent, setProfileSettingsIntent] = useState<{
+    profileId: string;
+    initialTab?: ProfileSettingsInitialSection;
+  } | null>(null);
   const [isProfileCreationBusy, setIsProfileCreationBusy] = useState(false);
   const [headerNameEditOpen, setHeaderNameEditOpen] = useState(false);
   const [headerNameDraft, setHeaderNameDraft] = useState("");
@@ -244,9 +247,8 @@ export default function App() {
     }
     return parts;
   }, [currentProfile]);
-  const profileForSettings = profiles.find(
-    (p) => p.id === selectedProfileForSettings,
-  ) || null;
+  const profileForSettings =
+    profiles.find((p) => p.id === profileSettingsIntent?.profileId) || null;
 
   const showLaunchFeedbackStrip =
     launchFeedback.status !== "idle"
@@ -1344,31 +1346,11 @@ export default function App() {
                           onSettings={
                             isEditMode
                               ? undefined
-                              : () =>
-                                  setSelectedProfileForSettings(
-                                    profile.id,
-                                  )
-                          }
-                          onDuplicate={
-                            isEditMode
-                              ? undefined
-                              : () => duplicateProfile(profile.id)
-                          }
-                          onDelete={
-                            isEditMode
-                              ? undefined
-                              : () => deleteProfile(profile.id)
-                          }
-                          onExport={
-                            isEditMode
-                              ? undefined
-                              : () => exportProfile(profile.id)
-                          }
-                          onSetOnStartup={
-                            isEditMode
-                              ? undefined
-                              : () =>
-                                  setOnStartupProfile(profile.id)
+                              : (opts) =>
+                                  setProfileSettingsIntent({
+                                    profileId: profile.id,
+                                    initialTab: opts?.initialTab,
+                                  })
                           }
                           disabled={isEditMode}
                         />
@@ -1563,7 +1545,9 @@ export default function App() {
                         exportProfile(currentProfile.id)
                       }
                       onSettings={() =>
-                        setSelectedProfileForSettings(currentProfile.id)
+                        setProfileSettingsIntent({
+                          profileId: currentProfile.id,
+                        })
                       }
                       onDuplicate={() => duplicateProfile(currentProfile.id)}
                       onDelete={() => deleteProfile(currentProfile.id)}
@@ -2005,41 +1989,35 @@ export default function App() {
         )}
 
         {/* Modals */}
-        <ProfileSettings
-          profile={profileForSettings}
-          isOpen={!!selectedProfileForSettings}
-          onClose={() => setSelectedProfileForSettings(null)}
-          onSave={(settings) => {
-            if (selectedProfileForSettings) {
-              updateProfile(
-                selectedProfileForSettings,
-                settings,
-              );
-            }
-          }}
-          onDuplicate={() => {
-            if (selectedProfileForSettings) {
-              duplicateProfile(selectedProfileForSettings);
-              setSelectedProfileForSettings(null);
-            }
-          }}
-          onRename={(newName, newDescription) => {
-            if (selectedProfileForSettings) {
+        {profileSettingsIntent && profileForSettings ? (
+          <ProfileSettings
+            key={profileSettingsIntent.profileId}
+            profile={profileForSettings}
+            isOpen
+            initialSection={profileSettingsIntent.initialTab}
+            onClose={() => setProfileSettingsIntent(null)}
+            onSave={(settings) => {
+              updateProfile(profileSettingsIntent.profileId, settings);
+            }}
+            onDuplicate={() => {
+              duplicateProfile(profileSettingsIntent.profileId);
+              setProfileSettingsIntent(null);
+            }}
+            onExport={() => exportProfile(profileSettingsIntent.profileId)}
+            onRename={(newName, newDescription) => {
               renameProfile(
-                selectedProfileForSettings,
+                profileSettingsIntent.profileId,
                 newName,
                 newDescription,
               );
-            }
-          }}
-          onDelete={() => {
-            if (selectedProfileForSettings) {
-              deleteProfile(selectedProfileForSettings);
-              setSelectedProfileForSettings(null);
-            }
-          }}
-          allProfiles={profiles}
-        />
+            }}
+            onDelete={() => {
+              deleteProfile(profileSettingsIntent.profileId);
+              setProfileSettingsIntent(null);
+            }}
+            allProfiles={profiles}
+          />
+        ) : null}
 
         <AppChromeModals
           preferencesOpen={appChromeModal === "preferences"}

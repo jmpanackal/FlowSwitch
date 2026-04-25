@@ -1366,3 +1366,66 @@
 .flow-tooltip-inner-pop {
   animation: flow-tooltip-inner-pop-kf 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
+
+/* Modals: lightweight enter (transform + opacity; GPU-friendly). */
+@keyframes flow-modal-backdrop-in-kf {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@keyframes flow-modal-panel-in-kf {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes flow-modal-nested-panel-in-kf {
+  from {
+    opacity: 0;
+    transform: scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+.flow-modal-backdrop-enter {
+  animation: flow-modal-backdrop-in-kf 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.flow-modal-panel-enter {
+  animation: flow-modal-panel-in-kf 0.22s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.flow-modal-nested-panel-enter {
+  animation: flow-modal-nested-panel-in-kf 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.flow-settings-tab-pill {
+  transition:
+    top 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.22s cubic-bezier(0.16, 1, 0.3, 1),
+    opacity 0.15s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .flow-modal-backdrop-enter,
+  .flow-modal-panel-enter,
+  .flow-modal-nested-panel-enter {
+    animation: none !important;
+  }
+
+  .flow-settings-tab-pill {
+    transition: none !important;
+  }
+}

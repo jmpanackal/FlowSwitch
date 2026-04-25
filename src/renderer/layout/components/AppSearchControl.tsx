@@ -2,22 +2,42 @@ import { useState, useEffect, useMemo } from 'react';
 import { Search, Plus, X, Shield, AlertCircle } from 'lucide-react';
 import { useInstalledApps } from '../../hooks/useInstalledApps';
 import { FlowTooltip } from './ui/tooltip';
+import { safeIconSrc } from '../../utils/safeIconSrc';
 
 interface AppSearchControlProps {
   restrictedApps: string[];
   onUpdateRestrictedApps: (apps: string[]) => void;
   placeholder?: string;
+  /** Hide these app names from suggestions (e.g. apps already in the profile). */
+  excludeFromSuggestions?: string[];
 }
 
 export function AppSearchControl({ 
   restrictedApps, 
   onUpdateRestrictedApps, 
-  placeholder = "Search for apps to restrict..." 
+  placeholder = "Search for apps to block...",
+  excludeFromSuggestions = [],
 }: AppSearchControlProps) {
   const [searchQuery, setSearchQuery] = useState('');
   const [showResults, setShowResults] = useState(false);
   const { apps: installedAppsForSearch } = useInstalledApps();
   const availableApps = installedAppsForSearch.map((app) => app.name);
+  const appIconByName = useMemo(() => {
+    const map = new Map<string, string | null>();
+    installedAppsForSearch.forEach((app) => {
+      map.set(app.name, app.iconPath ?? null);
+    });
+    return map;
+  }, [installedAppsForSearch]);
+
+  const suggestionBlocklist = useMemo(() => {
+    const s = new Set<string>();
+    excludeFromSuggestions.forEach((n) => {
+      const t = String(n || "").trim();
+      if (t) s.add(t.toLowerCase());
+    });
+    return s;
+  }, [excludeFromSuggestions]);
 
   // Filter apps based on search query
   const filteredApps = useMemo(() => {
@@ -26,10 +46,11 @@ export function AppSearchControl({
     return availableApps
       .filter(app => 
         app.toLowerCase().includes(query) && 
-        !restrictedApps.includes(app)
+        !restrictedApps.includes(app) &&
+        !suggestionBlocklist.has(app.toLowerCase())
       )
       .slice(0, 8); // Limit results to prevent overwhelming UI
-  }, [searchQuery, restrictedApps, availableApps]);
+  }, [searchQuery, restrictedApps, availableApps, suggestionBlocklist]);
 
   // Handle adding app to restricted list
   const handleAddApp = (appName: string) => {
@@ -98,9 +119,21 @@ export function AppSearchControl({
                     onClick={() => handleAddApp(app)}
                     className="w-full flex items-center gap-3 px-3 py-2 text-left hover:bg-flow-surface rounded-lg transition-colors group"
                   >
-                    <div className="flex items-center justify-center w-6 h-6 bg-flow-accent-blue/20 rounded text-flow-accent-blue">
-                      <Shield className="w-3 h-3" />
-                    </div>
+                    {(() => {
+                      const iconSrc = safeIconSrc(appIconByName.get(app) ?? undefined);
+                      return iconSrc ? (
+                        <img
+                          src={iconSrc}
+                          alt={app}
+                          className="h-6 w-6 rounded object-contain shrink-0 bg-flow-bg-secondary border border-flow-border"
+                          draggable={false}
+                        />
+                      ) : (
+                        <div className="flex items-center justify-center w-6 h-6 bg-flow-accent-blue/20 rounded text-flow-accent-blue shrink-0">
+                          <Shield className="w-3 h-3" />
+                        </div>
+                      );
+                    })()}
                     <span className="text-sm text-flow-text-primary flex-1">{app}</span>
                     <Plus className="w-4 h-4 text-flow-text-muted group-hover:text-flow-accent-blue transition-colors" />
                   </button>
@@ -151,7 +184,7 @@ export function AppSearchControl({
         <div className="space-y-3">
           <div className="flex items-center justify-between">
             <h4 className="text-sm font-medium text-flow-text-primary">
-              Restricted Applications
+              Blocked apps
             </h4>
             <span className="text-xs text-flow-text-muted bg-flow-bg-secondary px-2 py-1 rounded border border-flow-border">
               {restrictedApps.length} app{restrictedApps.length !== 1 ? 's' : ''}
@@ -164,15 +197,27 @@ export function AppSearchControl({
                 key={app}
                 className="flex items-center gap-3 p-3 bg-flow-bg-secondary border border-flow-border rounded-lg group hover:bg-flow-surface transition-colors"
               >
-                <div className="flex items-center justify-center w-6 h-6 bg-flow-accent-red/20 rounded text-flow-accent-red">
-                  <Shield className="w-3 h-3" />
-                </div>
+                {(() => {
+                  const iconSrc = safeIconSrc(appIconByName.get(app) ?? undefined);
+                  return iconSrc ? (
+                    <img
+                      src={iconSrc}
+                      alt={app}
+                      className="h-6 w-6 rounded object-contain shrink-0 bg-flow-bg-secondary border border-flow-border"
+                      draggable={false}
+                    />
+                  ) : (
+                    <div className="flex items-center justify-center w-6 h-6 bg-flow-accent-red/20 rounded text-flow-accent-red shrink-0">
+                      <Shield className="w-3 h-3" />
+                    </div>
+                  );
+                })()}
                 
                 <span className="text-sm text-flow-text-primary flex-1 line-through">
                   {app}
                 </span>
                 
-                <FlowTooltip label={`Remove ${app} from restricted apps`}>
+                <FlowTooltip label={`Remove ${app} from blocked apps`}>
                   <button
                     type="button"
                     onClick={() => handleRemoveApp(app)}
@@ -192,10 +237,10 @@ export function AppSearchControl({
         <div className="text-center py-8 px-4 bg-flow-bg-secondary border border-flow-border rounded-lg">
           <Shield className="w-12 h-12 text-flow-text-muted mx-auto mb-3" />
           <div className="text-sm font-medium text-flow-text-secondary mb-1">
-            No Restricted Apps
+            No blocked apps
           </div>
           <div className="text-xs text-flow-text-muted">
-            Search and add apps you want to restrict for this profile
+            Add apps you want FlowSwitch to close when this profile launches
           </div>
         </div>
       )}

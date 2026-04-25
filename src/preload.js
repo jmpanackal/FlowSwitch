@@ -5,6 +5,15 @@ const { contextBridge, ipcRenderer } = require('electron');
 contextBridge.exposeInMainWorld('electron', {
   // Launch profile actions in main process (apps + tabs)
   launchProfile: (profileId, options) => ipcRenderer.invoke('launch-profile', profileId, options || {}),
+
+  /** Main → renderer when a profile launch starts outside the Launch button (hotkey, task list, dock). */
+  subscribeProfileLaunchExternal: (callback) => {
+    const channel = 'profile-launch-external';
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
   cancelProfileLaunch: (profileId, runId) => (
     ipcRenderer.invoke('cancel-profile-launch', { profileId, runId })
   ),
@@ -33,4 +42,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Zone placement history (main-process stats)
   getZoneHistoryStats: () => ipcRenderer.invoke('zone-history:stats'),
+
+  getAppPreferences: () => ipcRenderer.invoke('app-preferences:get'),
+  setAppPreferences: (patch) => ipcRenderer.invoke('app-preferences:set', patch ?? {}),
 });

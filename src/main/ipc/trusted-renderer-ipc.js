@@ -9,6 +9,7 @@ const {
 } = require('../services/windows-appx-user-package-index');
 const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
+const { readAppPreferences, writeAppPreferences } = require('../services/app-preferences-store');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
@@ -36,6 +37,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     safeLimitedString,
     MAX_PROFILE_ID_LENGTH,
     launchProfileById,
+    onProfilesAfterSave = () => {},
     launchStatusStore,
     isLikelyUserApp,
     getCanonicalAppKey,
@@ -116,12 +118,46 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
   try {
     const safe = sanitizeProfileStorePayload(payload);
     const savedProfiles = writeProfilesToDisk(safe);
+    try {
+      onProfilesAfterSave();
+    } catch (hookErr) {
+      console.error('[profiles:save-all] onProfilesAfterSave failed:', hookErr);
+    }
     return { ok: true, count: savedProfiles.length };
   } catch (error) {
     console.error('[profiles:save-all] Failed to save profiles:', error);
     return { ok: false, error: 'Failed to save profiles' };
   }
 });
+
+  handleTrustedIpc('app-preferences:get', async () => {
+    try {
+      return { ok: true, preferences: readAppPreferences() };
+    } catch (error) {
+      console.error('[app-preferences:get]', error);
+      return { ok: false, error: 'Could not read preferences' };
+    }
+  });
+
+  handleTrustedIpc('app-preferences:set', async (_event, patch) => {
+    try {
+      if (!patch || typeof patch !== 'object' || Array.isArray(patch)) {
+        return { ok: false, error: 'Invalid patch' };
+      }
+      const allowed = {};
+      if (Object.prototype.hasOwnProperty.call(patch, 'pinMainWindowDuringProfileLaunch')) {
+        allowed.pinMainWindowDuringProfileLaunch = Boolean(patch.pinMainWindowDuringProfileLaunch);
+      }
+      if (Object.keys(allowed).length === 0) {
+        return { ok: false, error: 'No supported fields' };
+      }
+      const next = writeAppPreferences(allowed);
+      return { ok: true, preferences: next };
+    } catch (error) {
+      console.error('[app-preferences:set]', error);
+      return { ok: false, error: 'Could not save preferences' };
+    }
+  });
 
   handleTrustedIpc('content-library:pick-paths', async (event, opts = {}) => {
     const win = BrowserWindow.fromWebContents(event.sender);
@@ -244,8 +280,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     const safeProfileId = safeLimitedString(profileId, MAX_PROFILE_ID_LENGTH);
     if (!safeProfileId) return { ok: false, error: 'Invalid profile id' };
     const fireAndForget = Boolean(request?.fireAndForget);
+    const rawOrigin = request?.launchOrigin;
+    const launchOrigin = typeof rawOrigin === 'string' && String(rawOrigin).trim()
+      ? String(rawOrigin).trim()
+      : 'renderer';
     let startedPayload = null;
     const job = launchProfileById(safeProfileId, {
+      launchOrigin,
       onStarted: fireAndForget
         ? (payload) => {
           startedPayload = payload;

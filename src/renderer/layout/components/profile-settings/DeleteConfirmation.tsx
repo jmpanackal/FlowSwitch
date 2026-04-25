@@ -1,3 +1,5 @@
+import { Trash2 } from "lucide-react";
+
 interface DeleteConfirmationProps {
   isOpen: boolean;
   profileName: string;
@@ -9,24 +11,49 @@ export function DeleteConfirmation({ isOpen, profileName, onCancel, onConfirm }:
   if (!isOpen) return null;
 
   return (
-    <div className="absolute inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center rounded-2xl">
-      <div className="bg-white/10 backdrop-blur-xl border border-white/20 rounded-xl p-6 max-w-md">
-        <h3 className="text-white text-lg mb-2">Delete Profile</h3>
-        <p className="text-white/70 mb-4">
-          Are you sure you want to delete "{profileName}"? This action cannot be undone.
-        </p>
-        <div className="flex gap-3">
-          <button 
+    <div
+      className="flow-modal-backdrop-enter absolute inset-0 z-[60] flex items-center justify-center rounded-2xl bg-black/60 p-4 backdrop-blur-sm"
+      role="presentation"
+      onClick={onCancel}
+    >
+      <div
+        role="alertdialog"
+        aria-modal="true"
+        aria-labelledby="delete-profile-title"
+        aria-describedby="delete-profile-desc"
+        className="flow-modal-nested-panel-enter w-full max-w-md rounded-xl border border-flow-border bg-flow-surface-elevated p-5 shadow-flow-shadow-lg"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-flow-accent-red/30 bg-flow-accent-red/15">
+            <Trash2 className="h-5 w-5 text-flow-accent-red" aria-hidden />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h3 id="delete-profile-title" className="text-lg font-semibold text-flow-text-primary">
+              Delete profile?
+            </h3>
+            <p id="delete-profile-desc" className="mt-2 text-sm leading-relaxed text-flow-text-secondary">
+              This permanently removes{" "}
+              <span className="font-medium text-flow-text-primary">{profileName}</span>
+              {" "}
+              and everything saved for it (layout, automation, filters). This cannot be undone.
+            </p>
+          </div>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <button
+            type="button"
             onClick={onCancel}
-            className="flex-1 px-3 py-2 bg-white/10 hover:bg-white/15 text-white border border-white/20 rounded-lg transition-colors"
+            className="px-3 py-2 text-sm font-medium text-flow-text-secondary transition-colors rounded-lg border border-flow-border bg-flow-surface hover:bg-flow-surface-elevated hover:text-flow-text-primary"
           >
             Cancel
           </button>
-          <button 
+          <button
+            type="button"
             onClick={onConfirm}
-            className="flex-1 px-3 py-2 bg-red-500/20 hover:bg-red-500/30 text-red-200 border border-red-400/30 rounded-lg transition-colors"
+            className="px-3 py-2 text-sm font-medium text-flow-accent-red transition-colors rounded-lg border border-flow-accent-red/35 bg-flow-accent-red/10 hover:bg-flow-accent-red/20"
           >
-            Delete
+            Delete profile
           </button>
         </div>
       </div>

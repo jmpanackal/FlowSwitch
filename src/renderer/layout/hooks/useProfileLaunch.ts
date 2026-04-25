@@ -69,9 +69,174 @@ export function useProfileLaunch({
     [],
   );
 
+  const scheduleIdleReset = useCallback(() => {
+    if (launchFeedbackTimeoutRef.current) {
+      window.clearTimeout(launchFeedbackTimeoutRef.current);
+    }
+    launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+      setLaunchFeedback({
+        status: "idle",
+        message: "",
+      });
+      launchFeedbackTimeoutRef.current = null;
+    }, 7000);
+  }, [launchFeedbackTimeoutRef, setLaunchFeedback]);
+
+  const beginLaunchStatusPolling = useCallback(
+    (launchProfileId: string, launchRunId: string) => {
+      activeLaunchRunRef.current = {
+        profileId: launchProfileId,
+        runId: launchRunId,
+      };
+      const pollToken = launchStatusPollTokenRef.current;
+      launchStatusPollRef.current = window.setInterval(async () => {
+        if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
+        try {
+          const statusResult = await window.electron.getLaunchProfileStatus(launchProfileId);
+          if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
+          const status = statusResult?.status;
+          if (!statusResult?.ok || !status) return;
+          if (String(status.runId || "").trim() !== launchRunId) return;
+
+          const st = String(status.state || "").toLowerCase();
+          const launchedApps = Number(status.launchedAppCount || 0);
+          const launchedTabs = Number(status.launchedTabCount || 0);
+          const failedCount = Number(status.failedAppCount || 0);
+          const skippedCount = Number(status.skippedAppCount || 0);
+          const summaryParts = [
+            `${launchedApps} app${launchedApps === 1 ? "" : "s"}`,
+            `${launchedTabs} tab${launchedTabs === 1 ? "" : "s"}`,
+          ];
+          if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
+          if (skippedCount > 0) summaryParts.push(`${skippedCount} skipped`);
+          const summaryText = summaryParts.join(", ");
+
+          if (st === "cancelled") {
+            stopLaunchStatusPolling();
+            launchWallClockStartMsRef.current = null;
+            activeLaunchRunRef.current = null;
+            setIsLaunching(false);
+            setLaunchFeedback({
+              status: "warning",
+              message: "Launch cancelled.",
+            });
+            scheduleIdleReset();
+            return;
+          }
+
+          if (st === "failed") {
+            stopLaunchStatusPolling();
+            launchWallClockStartMsRef.current = null;
+            activeLaunchRunRef.current = null;
+            setIsLaunching(false);
+            setLaunchFeedback({
+              status: "error",
+              message: `Launch finished with failures (${summaryText}).`,
+            });
+            scheduleIdleReset();
+            return;
+          }
+
+          if (st === "complete") {
+            stopLaunchStatusPolling();
+            activeLaunchRunRef.current = null;
+            setIsLaunching(false);
+            emitLaunchDurationIfSuccess(launchProfileId);
+            setLaunchFeedback({
+              status: "success",
+              message: `Launch complete: ${summaryText}.`,
+            });
+            scheduleIdleReset();
+            return;
+          }
+
+          if (st === "awaiting-confirmations") {
+            const unresolvedCount = Number(status.unresolvedPendingConfirmationCount || 0);
+            const pollingPendingNames = Array.isArray(status.pendingConfirmations)
+              ? status.pendingConfirmations
+                .filter(
+                  (item) => String(item?.status || "waiting").toLowerCase() !== "resolved",
+                )
+                .map((item) => String(item?.name || "").trim())
+                .filter(Boolean)
+                .slice(0, 3)
+              : [];
+            if (unresolvedCount > 0) {
+              const namesList = pollingPendingNames.length > 0
+                ? ` (${pollingPendingNames.join(", ")}${unresolvedCount > pollingPendingNames.length ? ", ..." : ""})`
+                : "";
+              setLaunchFeedback({
+                status: "warning",
+                message: `Launch in progress: ${summaryText}. Waiting for ${unresolvedCount} confirmation${unresolvedCount === 1 ? "" : "s"}${namesList}.`,
+              });
+              return;
+            }
+            stopLaunchStatusPolling();
+            activeLaunchRunRef.current = null;
+            setIsLaunching(false);
+            emitLaunchDurationIfSuccess(launchProfileId);
+            setLaunchFeedback({
+              status: "success",
+              message: `Launch complete: ${summaryText}.`,
+            });
+            scheduleIdleReset();
+            return;
+          }
+
+          if (st === "in-progress") {
+            return;
+          }
+        } catch {
+          // Keep UI resilient; next poll tick can recover.
+        }
+      }, 1300);
+    },
+    [
+      emitLaunchDurationIfSuccess,
+      isCurrentLaunchContext,
+      scheduleIdleReset,
+      setIsLaunching,
+      setLaunchFeedback,
+      stopLaunchStatusPolling,
+    ],
+  );
+
   useEffect(() => () => {
     stopLaunchStatusPolling();
   }, [stopLaunchStatusPolling]);
+
+  /** Hotkey / jump list / dock: main notifies after `onStarted` with run id. */
+  useEffect(() => {
+    const sub = window.electron?.subscribeProfileLaunchExternal?.((payload) => {
+      const launchProfileId = String(payload?.profileId || "").trim();
+      const launchRunId = String(payload?.runId || "").trim();
+      if (!launchProfileId || !launchRunId || !window.electron?.getLaunchProfileStatus) return;
+
+      stopLaunchStatusPolling();
+      activeLaunchRunRef.current = null;
+      if (launchFeedbackTimeoutRef.current) {
+        window.clearTimeout(launchFeedbackTimeoutRef.current);
+        launchFeedbackTimeoutRef.current = null;
+      }
+
+      launchWallClockStartMsRef.current = Date.now();
+      setIsLaunching(true);
+      setLaunchFeedback({
+        status: "in-progress",
+        message: "Launching profile…",
+      });
+      beginLaunchStatusPolling(launchProfileId, launchRunId);
+    });
+    return () => {
+      sub?.();
+    };
+  }, [
+    beginLaunchStatusPolling,
+    launchFeedbackTimeoutRef,
+    setIsLaunching,
+    setLaunchFeedback,
+    stopLaunchStatusPolling,
+  ]);
 
   const handleCancelLaunch = useCallback(async () => {
     const ctx = activeLaunchRunRef.current;
@@ -101,18 +266,6 @@ export function useProfileLaunch({
 
       let persistLaunchFeedback = false;
       let deferSpinnerOff = false;
-      const scheduleIdleReset = () => {
-        if (launchFeedbackTimeoutRef.current) {
-          window.clearTimeout(launchFeedbackTimeoutRef.current);
-        }
-        launchFeedbackTimeoutRef.current = window.setTimeout(() => {
-          setLaunchFeedback({
-            status: "idle",
-            message: "",
-          });
-          launchFeedbackTimeoutRef.current = null;
-        }, 7000);
-      };
       try {
         if (window.electron?.saveProfiles) {
           const saveResult = await window.electron.saveProfiles(
@@ -138,7 +291,7 @@ export function useProfileLaunch({
 
         const launchResult = await window.electron.launchProfile(
           launchProfileId,
-          { fireAndForget: true },
+          { fireAndForget: true, launchOrigin: "renderer" },
         );
 
         if (!launchResult?.ok) {
@@ -168,117 +321,9 @@ export function useProfileLaunch({
           return;
         }
 
-        activeLaunchRunRef.current = {
-          profileId: launchProfileId,
-          runId: launchRunId,
-        };
         persistLaunchFeedback = true;
         deferSpinnerOff = true;
-
-        const pollToken = launchStatusPollTokenRef.current;
-        launchStatusPollRef.current = window.setInterval(async () => {
-          if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
-          try {
-            const statusResult = await window.electron.getLaunchProfileStatus(launchProfileId);
-            if (!isCurrentLaunchContext(launchProfileId, launchRunId, pollToken)) return;
-            const status = statusResult?.status;
-            if (!statusResult?.ok || !status) return;
-            if (String(status.runId || "").trim() !== launchRunId) return;
-
-            const st = String(status.state || "").toLowerCase();
-            const launchedApps = Number(status.launchedAppCount || 0);
-            const launchedTabs = Number(status.launchedTabCount || 0);
-            const failedCount = Number(status.failedAppCount || 0);
-            const skippedCount = Number(status.skippedAppCount || 0);
-            const summaryParts = [
-              `${launchedApps} app${launchedApps === 1 ? "" : "s"}`,
-              `${launchedTabs} tab${launchedTabs === 1 ? "" : "s"}`,
-            ];
-            if (failedCount > 0) summaryParts.push(`${failedCount} failed`);
-            if (skippedCount > 0) summaryParts.push(`${skippedCount} skipped`);
-            const summaryText = summaryParts.join(", ");
-
-            if (st === "cancelled") {
-              stopLaunchStatusPolling();
-              launchWallClockStartMsRef.current = null;
-              activeLaunchRunRef.current = null;
-              setIsLaunching(false);
-              setLaunchFeedback({
-                status: "warning",
-                message: "Launch cancelled.",
-              });
-              scheduleIdleReset();
-              return;
-            }
-
-            if (st === "failed") {
-              stopLaunchStatusPolling();
-              launchWallClockStartMsRef.current = null;
-              activeLaunchRunRef.current = null;
-              setIsLaunching(false);
-              setLaunchFeedback({
-                status: "error",
-                message: `Launch finished with failures (${summaryText}).`,
-              });
-              scheduleIdleReset();
-              return;
-            }
-
-            if (st === "complete") {
-              stopLaunchStatusPolling();
-              activeLaunchRunRef.current = null;
-              setIsLaunching(false);
-              emitLaunchDurationIfSuccess(launchProfileId);
-              setLaunchFeedback({
-                status: "success",
-                message: `Launch complete: ${summaryText}.`,
-              });
-              scheduleIdleReset();
-              return;
-            }
-
-            if (st === "awaiting-confirmations") {
-              const unresolvedCount = Number(status.unresolvedPendingConfirmationCount || 0);
-              const pollingPendingNames = Array.isArray(status.pendingConfirmations)
-                ? status.pendingConfirmations
-                  .filter(
-                    (item) => String(item?.status || "waiting").toLowerCase() !== "resolved",
-                  )
-                  .map((item) => String(item?.name || "").trim())
-                  .filter(Boolean)
-                  .slice(0, 3)
-                : [];
-              if (unresolvedCount > 0) {
-                const namesList = pollingPendingNames.length > 0
-                  ? ` (${pollingPendingNames.join(", ")}${unresolvedCount > pollingPendingNames.length ? ", ..." : ""})`
-                  : "";
-                setLaunchFeedback({
-                  status: "warning",
-                  message: `Launch in progress: ${summaryText}. Waiting for ${unresolvedCount} confirmation${unresolvedCount === 1 ? "" : "s"}${namesList}.`,
-                });
-                return;
-              }
-              stopLaunchStatusPolling();
-              activeLaunchRunRef.current = null;
-              setIsLaunching(false);
-              emitLaunchDurationIfSuccess(launchProfileId);
-              setLaunchFeedback({
-                status: "success",
-                message: `Launch complete: ${summaryText}.`,
-              });
-              scheduleIdleReset();
-              return;
-            }
-
-            // Main-process steady state while apps launch; LaunchControl shows progress — no redundant feedback updates.
-            if (st === "in-progress") {
-              return;
-            }
-
-          } catch {
-            // Keep UI resilient; next poll tick can recover.
-          }
-        }, 1300);
+        beginLaunchStatusPolling(launchProfileId, launchRunId);
       } catch (error) {
         launchWallClockStartMsRef.current = null;
         activeLaunchRunRef.current = null;
@@ -317,8 +362,7 @@ export function useProfileLaunch({
     setLaunchFeedback,
     launchFeedbackTimeoutRef,
     stopLaunchStatusPolling,
-    isCurrentLaunchContext,
-    emitLaunchDurationIfSuccess,
+    beginLaunchStatusPolling,
   ]);
 
   return {

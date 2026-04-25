@@ -59,6 +59,12 @@ const {
   registerTrustedRendererIpc,
   scheduleInstalledAppsCatalogWarmup,
 } = require('./ipc/trusted-renderer-ipc');
+const { readAppPreferences } = require('./services/app-preferences-store');
+const {
+  createProfileAccessShell,
+  parseProfileLaunchIdFromArgv,
+} = require('./services/profile-access-shell');
+const { createProfileScheduleRunner } = require('./services/profile-schedule-runner');
 
 const shouldBootstrapElectronMain = (
   Boolean(app)
@@ -70,6 +76,11 @@ if (shouldBootstrapElectronMain) {
   if (!gotSingleInstanceLock) {
     app.quit();
     process.exit(0);
+  }
+
+  // Jump lists, notifications, and taskbar identity require a stable AUMID (must match packaged appId).
+  if (process.platform === 'win32') {
+    app.setAppUserModelId('app.flowswitch.desktop');
   }
 
   // GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
@@ -147,6 +158,7 @@ const {
   probeInstallFolderForWindowsExe,
   inferMsixUserWindowsAppsShimFromPackageDir,
   getWindowIconPath,
+  getJumpListIconPath,
   getSafeIconDataUrl,
   parseInternetShortcut,
   isAppProtocolUrl,
@@ -587,6 +599,8 @@ const isTrustedIpcSender = (event) => (
   isTrustedRendererUrl(event?.senderFrame?.url || '')
 );
 
+let mainWindow = null;
+
 // Function to create the main application window
 const createWindow = () => {
   const isWindows = process.platform === 'win32';
@@ -644,6 +658,10 @@ const createWindow = () => {
   });
   win.removeMenu();
   win.loadURL(appEntryUrl);
+  mainWindow = win;
+  win.on('closed', () => {
+    if (mainWindow === win) mainWindow = null;
+  });
 };
 
 
@@ -651,7 +669,32 @@ if (shouldBootstrapElectronMain) {
   app.whenReady().then(() => {
     setupSessionSecurity();
     Menu.setApplicationMenu(null);
+    // Jump list: apply before the first BrowserWindow so our Tasks category wins over
+    // Chromium’s default electron.exe entry; re-apply after load in case the shell updates.
+    profileAccessShell.refreshFromDisk();
+    profileScheduleRunner?.refreshFromDisk();
     createWindow();
+    const starterWin = BrowserWindow.getAllWindows()[0];
+    if (starterWin && !starterWin.isDestroyed()) {
+      starterWin.webContents.once('did-finish-load', () => {
+        profileAccessShell.refreshFromDisk();
+      });
+    }
+    const jumpProfileId = parseProfileLaunchIdFromArgv(process.argv);
+    const safeJumpId = jumpProfileId
+      ? safeLimitedString(jumpProfileId, MAX_PROFILE_ID_LENGTH)
+      : '';
+    if (!getLaunchAutomationConfig().enabled && safeJumpId) {
+      const win = BrowserWindow.getAllWindows()[0];
+      if (win && !win.isDestroyed()) {
+        win.webContents.once('did-finish-load', () => {
+          void launchProfileById(safeJumpId, {
+            fireAndForget: true,
+            launchOrigin: 'taskbar-jump-list',
+          });
+        });
+      }
+    }
     void runLaunchAutomationIfRequested();
 
     // On macOS, re-create a window when the dock icon is clicked and no windows are open
@@ -660,9 +703,19 @@ if (shouldBootstrapElectronMain) {
     });
   });
 
-  app.on('second-instance', () => {
+  app.on('second-instance', (event, commandLine) => {
+    const fromSecond = parseProfileLaunchIdFromArgv(commandLine);
+    const safeProfileId = fromSecond
+      ? safeLimitedString(fromSecond, MAX_PROFILE_ID_LENGTH)
+      : '';
+    if (safeProfileId) {
+      void launchProfileById(safeProfileId, {
+        fireAndForget: true,
+        launchOrigin: 'taskbar-jump-list',
+      });
+    }
     const existingWindow = BrowserWindow.getAllWindows()[0];
-    if (!existingWindow) return;
+    if (!existingWindow || existingWindow.isDestroyed()) return;
     if (existingWindow.isMinimized()) existingWindow.restore();
     existingWindow.focus();
   });
@@ -719,7 +772,7 @@ const publishLaunchProfileStatus = (profileId, runId, status) => (
 );
 
 const { createProfileLaunchRunner } = require('./services/profile-launch-runner');
-const { launchProfileById } = createProfileLaunchRunner({
+const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
   sleep,
   getVisibleWindowInfos,
   scoreWindowCandidate,
@@ -764,6 +817,97 @@ const { launchProfileById } = createProfileLaunchRunner({
   stabilizeKnownHandlePlacement,
   minimizeWindowHandle,
   ensureMinimizedAfterLaunch,
+});
+
+let profileAccessShell = null;
+let profileScheduleRunner = null;
+
+const applyLaunchVisibilityBegin = () => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  try {
+    const prefs = readAppPreferences();
+    if (prefs.pinMainWindowDuringProfileLaunch === false) {
+      if (win.isMinimized()) win.restore();
+      win.show();
+      win.focus();
+      return;
+    }
+    if (win.isMinimized()) win.restore();
+    win.show();
+    win.focus();
+    if (typeof win.moveTop === 'function') win.moveTop();
+    win.setAlwaysOnTop(true, 'floating');
+  } catch (err) {
+    console.warn('[launch-surface] begin failed:', String(err?.message || err));
+  }
+};
+
+const applyLaunchVisibilityEnd = () => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  try {
+    win.setAlwaysOnTop(false);
+  } catch (err) {
+    console.warn('[launch-surface] end failed:', String(err?.message || err));
+  }
+};
+
+const LAUNCH_ORIGINS_NOTIFY_RENDERER = new Set([
+  'global-shortcut',
+  'taskbar-jump-list',
+  'dock-menu',
+]);
+
+const launchProfileById = (profileId, options = {}) => {
+  const userOnStarted = options?.onStarted;
+  let surfaceActive = false;
+  const job = launchProfileByIdCore(profileId, {
+    ...options,
+    onStarted: (payload) => {
+      surfaceActive = true;
+      applyLaunchVisibilityBegin();
+      profileAccessShell?.onProfileLaunchStarted(payload.profileId);
+      const origin = options?.launchOrigin;
+      if (
+        origin
+        && LAUNCH_ORIGINS_NOTIFY_RENDERER.has(String(origin))
+        && mainWindow
+        && !mainWindow.isDestroyed()
+      ) {
+        try {
+          mainWindow.webContents.send('profile-launch-external', {
+            profileId: payload.profileId,
+            runId: payload.runId,
+          });
+        } catch (err) {
+          console.warn('[profile-launch-external] send failed:', String(err?.message || err));
+        }
+      }
+      if (typeof userOnStarted === 'function') userOnStarted(payload);
+    },
+  });
+  const releaseSurface = () => {
+    if (!surfaceActive) return;
+    applyLaunchVisibilityEnd();
+    surfaceActive = false;
+  };
+  void Promise.resolve(job).then(releaseSurface, releaseSurface);
+  return job;
+};
+
+profileAccessShell = createProfileAccessShell({
+  unpackProfilesReadResult,
+  readProfilesFromDisk,
+  launchProfileById,
+  getJumpListIconPath,
+});
+
+profileScheduleRunner = createProfileScheduleRunner({
+  unpackProfilesReadResult,
+  readProfilesFromDisk,
+  launchProfileById,
+  getMainWindow: () => mainWindow || null,
 });
 
 
@@ -895,6 +1039,10 @@ if (shouldBootstrapElectronMain) {
     safeLimitedString,
     MAX_PROFILE_ID_LENGTH,
     launchProfileById,
+    onProfilesAfterSave: () => {
+      profileAccessShell?.refreshFromDisk();
+      profileScheduleRunner?.refreshFromDisk();
+    },
     launchStatusStore,
     isLikelyUserApp,
     getCanonicalAppKey,

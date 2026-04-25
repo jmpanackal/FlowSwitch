@@ -4,6 +4,10 @@
  * Profile launch orchestration: post-confirmation resume placement and `launchProfileById`.
  * Dependencies are injected to avoid main.js declaration-order coupling.
  */
+const path = require('path');
+const { execFile } = require('child_process');
+const { hiddenProcessNamePatterns } = require('./windows-process-service');
+
 const createProfileLaunchRunner = (deps) => {
   const {
     sleep,
@@ -50,7 +54,286 @@ const createProfileLaunchRunner = (deps) => {
     stabilizeKnownHandlePlacement,
     minimizeWindowHandle,
     ensureMinimizedAfterLaunch,
+    getRunningWindowProcesses,
   } = deps;
+
+  const normalizeLabel = (value) => String(value || '').trim().toLowerCase();
+  const shouldCloseBlockedProfileApps = async (profile, diagnostics, diagnosticsContext = {}) => {
+    if (process.platform !== 'win32') return { attempted: 0, failures: 0, closed: [] };
+    const blocked = Array.isArray(profile?.restrictedApps) ? profile.restrictedApps : [];
+    const blockedSet = new Set(blocked.map(normalizeLabel).filter(Boolean));
+    if (blockedSet.size === 0) return { attempted: 0, failures: 0, closed: [] };
+
+    let processes = [];
+    try {
+      processes = await getRunningWindowProcesses();
+    } catch {
+      processes = [];
+    }
+
+    const targets = processes
+      .filter((row) => blockedSet.has(normalizeLabel(row?.name)))
+      .map((row) => ({
+        imageName: `${String(row?.name || '').trim()}.exe`,
+        pid: Number(row?.id || 0),
+      }))
+      .filter((row) => row.imageName && row.pid > 0);
+
+    const closed = [];
+    let failures = 0;
+    for (const target of targets) {
+      const result = await new Promise((resolve) => {
+        execFile(
+          'taskkill',
+          ['/PID', String(target.pid), '/T', '/F'],
+          { windowsHide: true, timeout: 20000 },
+          (error, stdout, stderr) => {
+            const output = `${String(stdout || '')}\n${String(stderr || '')}`.toLowerCase();
+            const noMatches = output.includes('not found') || output.includes('no running instance');
+            resolve({
+              ...target,
+              ok: !error || noMatches,
+              noMatches,
+              error: error ? String(error?.message || error) : null,
+            });
+          },
+        );
+      });
+      closed.push(result);
+      if (!result.ok) failures += 1;
+    }
+
+    if (diagnostics) {
+      diagnostics.result({
+        ...diagnosticsContext,
+        strategy: 'profile-blocked-apps-close',
+        reason: 'blocked-apps-closed',
+        attempted: targets.length,
+        failures,
+        blockedApps: Array.from(blockedSet),
+        closed,
+      });
+    }
+    return { attempted: targets.length, failures, closed };
+  };
+
+  /**
+   * Maps a running process row to the same placement key family used for profile-slot launches.
+   * @param {{ name?: string; executablePath?: string | null }} row
+   */
+  const rowToPlacementKey = (row) => {
+    const exePath = row?.executablePath;
+    if (exePath && typeof exePath === 'string' && exePath.trim()) {
+      const base = path.basename(String(exePath).trim());
+      return path.basename(base, path.extname(base)).toLowerCase();
+    }
+    return normalizeLabel(row?.name).replace(/\.exe$/i, '');
+  };
+
+  const isCriticalOrHiddenProcessRow = (row) => {
+    const n = normalizeLabel(row?.name);
+    if (!n) return true;
+    if (n === 'explorer' || n === 'dwm' || n === 'csrss' || n === 'winlogon' || n === 'fontdrvhost') {
+      return true;
+    }
+    return hiddenProcessNamePatterns.some((re) => re.test(n));
+  };
+
+  const taskkillPidTree = (pid) => new Promise((resolve) => {
+    const id = Number(pid || 0);
+    if (!Number.isFinite(id) || id <= 0) {
+      resolve({ ok: true, skipped: true });
+      return;
+    }
+    execFile(
+      'taskkill',
+      ['/PID', String(id), '/T', '/F'],
+      { windowsHide: true, timeout: 20000 },
+      (error, stdout, stderr) => {
+        const output = `${String(stdout || '')}\n${String(stderr || '')}`.toLowerCase();
+        const noMatches = output.includes('not found') || output.includes('no running instance');
+        resolve({
+          ok: !error || noMatches,
+          noMatches,
+          error: error ? String(error?.message || error) : null,
+        });
+      },
+    );
+  });
+
+  /**
+   * Pre-launch: optional close/minimize of profile-slot apps, then minimize/close of non-profile apps.
+   * Runs on Windows only, after filter/blocked-app closes.
+   */
+  const applyPreLaunchWindowPolicies = async ({
+    profile,
+    appLaunches,
+    diagnostics,
+    diagnosticsContext = {},
+  }) => {
+    if (process.platform !== 'win32') {
+      return { skipped: true, reason: 'non-win32' };
+    }
+
+    const inPolicy = String(profile?.preLaunchInProfileBehavior || 'reuse').trim();
+    const outPolicy = String(
+      profile?.preLaunchOutsideProfileBehavior || profile?.backgroundBehavior || 'keep',
+    ).trim();
+
+    const profileSlotKeys = new Set(
+      (Array.isArray(appLaunches) ? appLaunches : [])
+        .map((launch) => getPlacementProcessKey(launch))
+        .filter(Boolean),
+    );
+
+    const inTargetMode = (
+      Array.isArray(profile?.preLaunchInProfileTargetKeys)
+      && profile.preLaunchInProfileTargetKeys.length > 0
+    )
+      ? 'selected'
+      : 'all';
+    const inTargetKeySet = new Set(
+      (Array.isArray(profile?.preLaunchInProfileTargetKeys) ? profile.preLaunchInProfileTargetKeys : [])
+        .map((k) => String(k || '').trim().toLowerCase())
+        .filter(Boolean),
+    );
+
+    const outsideTargetMode = (
+      outPolicy !== 'keep'
+      && Array.isArray(profile?.preLaunchOutsideTargetNames)
+      && profile.preLaunchOutsideTargetNames.length > 0
+    )
+      ? 'selected'
+      : 'all';
+    const outsideNameSet = new Set(
+      (Array.isArray(profile?.preLaunchOutsideTargetNames) ? profile.preLaunchOutsideTargetNames : [])
+        .map((n) => normalizeLabel(n))
+        .filter(Boolean),
+    );
+
+    let processes = [];
+    try {
+      processes = await getRunningWindowProcesses();
+    } catch {
+      processes = [];
+    }
+
+    const rowInProfileSlots = (row) => profileSlotKeys.has(rowToPlacementKey(row));
+
+    const shouldMutateInProfileRow = (row) => {
+      if (!rowInProfileSlots(row)) return false;
+      const key = rowToPlacementKey(row);
+      if (inPolicy === 'reuse') {
+        if (inTargetMode !== 'selected') return false;
+        return profileSlotKeys.has(key) && !inTargetKeySet.has(key);
+      }
+      if (inPolicy === 'close_for_fresh_launch') {
+        if (inTargetMode === 'all') return true;
+        return inTargetKeySet.has(key);
+      }
+      if (inPolicy === 'minimize_then_launch') {
+        if (inTargetMode === 'all') return true;
+        return inTargetKeySet.has(key);
+      }
+      return false;
+    };
+
+    const inResults = [];
+    if (inPolicy === 'close_for_fresh_launch' || (inPolicy === 'reuse' && inTargetMode === 'selected')) {
+      const targets = processes.filter(
+        (row) => shouldMutateInProfileRow(row) && Number(row?.id || 0) > 0,
+      );
+      for (const row of targets) {
+        const res = await taskkillPidTree(row.id);
+        inResults.push({ pid: row.id, name: row.name, ...res });
+      }
+      if (targets.length > 0) {
+        await sleep(150);
+      }
+      try {
+        processes = await getRunningWindowProcesses();
+      } catch {
+        processes = [];
+      }
+    } else if (inPolicy === 'minimize_then_launch') {
+      for (const row of processes.filter(
+        (r) => shouldMutateInProfileRow(r) && Number(r?.id || 0) > 0,
+      )) {
+        const h = row?.mainWindowHandle ? String(row.mainWindowHandle).trim() : '';
+        if (!h) continue;
+        const ok = await minimizeWindowHandle(h);
+        inResults.push({ pid: row.id, name: row.name, minimized: ok });
+      }
+    }
+
+    const outResults = [];
+    if (outPolicy === 'keep') {
+      if (diagnostics?.result) {
+        diagnostics.result({
+          ...diagnosticsContext,
+          strategy: 'pre-launch-window-policies',
+          reason: 'outside-keep',
+          inPolicy,
+          outPolicy,
+          inTargetMode,
+          outsideTargetMode,
+          profileSlotKeyCount: profileSlotKeys.size,
+        });
+      }
+      return { inPolicy, outPolicy, inResults, outResults };
+    }
+
+    const outsideRowMatchesTargets = (row) => {
+      if (outsideTargetMode === 'all') return true;
+      const key = rowToPlacementKey(row);
+      const nm = normalizeLabel(row?.name);
+      return outsideNameSet.has(nm) || outsideNameSet.has(key);
+    };
+
+    const outsideRows = processes.filter(
+      (row) => !rowInProfileSlots(row)
+        && !isCriticalOrHiddenProcessRow(row)
+        && Number(row?.id || 0) > 0
+        && outsideRowMatchesTargets(row),
+    );
+
+    if (outPolicy === 'close') {
+      for (const row of outsideRows) {
+        const res = await taskkillPidTree(row.id);
+        outResults.push({ pid: row.id, name: row.name, ...res });
+      }
+      if (outsideRows.length > 0) {
+        await sleep(150);
+      }
+    } else if (outPolicy === 'minimize') {
+      for (const row of outsideRows) {
+        const h = row?.mainWindowHandle ? String(row.mainWindowHandle).trim() : '';
+        if (!h) {
+          outResults.push({ pid: row.id, name: row.name, minimized: false, reason: 'no-main-window-handle' });
+          continue;
+        }
+        const ok = await minimizeWindowHandle(h);
+        outResults.push({ pid: row.id, name: row.name, minimized: ok });
+      }
+    }
+
+    if (diagnostics?.result) {
+      diagnostics.result({
+        ...diagnosticsContext,
+        strategy: 'pre-launch-window-policies',
+        reason: 'applied',
+        inPolicy,
+        outPolicy,
+        inTargetMode,
+        outsideTargetMode,
+        profileSlotKeyCount: profileSlotKeys.size,
+        inResults,
+        outResults,
+      });
+    }
+
+    return { inPolicy, outPolicy, inResults, outResults };
+  };
 
   const resumePlacementAfterConfirmationModal = async ({
   processHintLc,
@@ -687,6 +970,22 @@ const launchProfileById = async (profileId, options = {}) => {
       processHintLc,
       count,
     })),
+  });
+
+  // Close blocked apps (filters) before launching profile apps.
+  await shouldCloseBlockedProfileApps(profile, profileDiagnostics, {
+    profileId: normalizedProfileId,
+    runId: activeRunId,
+  });
+
+  await applyPreLaunchWindowPolicies({
+    profile,
+    appLaunches,
+    diagnostics: profileDiagnostics,
+    diagnosticsContext: {
+      profileId: normalizedProfileId,
+      runId: activeRunId,
+    },
   });
 
   const runLaunch = async (launchItem) => {

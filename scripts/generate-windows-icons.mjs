@@ -330,17 +330,30 @@ async function main() {
   fs.writeFileSync(path.join(websiteAssetsDir, 'flowswitch-logo.png'), primaryRounded1024);
   fs.writeFileSync(path.join(websiteDir, 'flowswitch-logo.png'), primaryRounded1024);
 
-  const taskbar512 = roundedSquareBySize.get(512);
-  fs.writeFileSync(path.join(publicDir, 'flowswitch-taskbar.png'), taskbar512);
+  // HWND / taskbar: same buffer as primary 1024 rounded logo (matches master proportions).
+  fs.writeFileSync(path.join(publicDir, 'flowswitch-taskbar.png'), primaryRounded1024);
 
-  const icoSizes = [16, 24, 32, 48, 64, 128, 256];
+  // ICO sizes: same mark-vs-tile ratios as `sizeConfigs` (derived from master), slightly
+  // bolder only for small frames so tiny exe/jump-list pixels stay readable.
+  const markRatioForExeIcoSize = (size) => {
+    if (size >= 256) return 0.8;
+    if (size >= 128) return 0.81;
+    if (size >= 64) return 0.83;
+    if (size >= 48) return 0.84;
+    if (size >= 32) return 0.86;
+    if (size >= 24) return 0.87;
+    return 0.9;
+  };
+
+  // Largest size first: index 0 must be the primary frame (taskbar / jump-list app row).
+  const icoSizes = [256, 128, 64, 48, 32, 24, 16];
   const publicIco = buildIcoFromPngBuffers(
     await Promise.all(icoSizes.map((size) => composeLogo({
       size,
       shape: 'rounded-square',
       fillMode: 'gradient',
       markBuffer: markWhite,
-      markRatio: size <= 16 ? 0.9 : size <= 32 ? 0.86 : size <= 64 ? 0.83 : 0.8,
+      markRatio: markRatioForExeIcoSize(size),
       sharpenMark: size <= 64,
     }))),
   );
@@ -357,7 +370,7 @@ async function main() {
   fs.writeFileSync(path.join(websiteAssetsDir, 'favicon-64.png'), favicon64);
 
   const faviconIco = buildIcoFromPngBuffers(
-    await Promise.all([16, 32, 48, 64].map((size) => composeLogo({
+    await Promise.all([64, 48, 32, 16].map((size) => composeLogo({
       size,
       shape: 'squircle',
       fillMode: 'gradient',
