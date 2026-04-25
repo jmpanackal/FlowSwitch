@@ -12,7 +12,7 @@ declare global {
     electron: {
       launchProfile: (
         profileId: string,
-        options?: { fireAndForget?: boolean },
+        options?: { fireAndForget?: boolean; launchOrigin?: string },
       ) => Promise<{
         ok: boolean;
         started?: boolean;
@@ -49,6 +49,9 @@ declare global {
         pendingConfirmationCount?: number;
         unresolvedPendingConfirmationCount?: number;
       }>;
+      subscribeProfileLaunchExternal?: (
+        callback: (payload: { profileId: string; runId: string }) => void,
+      ) => () => void;
       cancelProfileLaunch?: (
         profileId: string,
         runId: string,
@@ -161,6 +164,18 @@ declare global {
           mostUsedApp: string | null;
           maxUseCount: number;
         };
+        error?: string;
+      }>;
+      getAppPreferences: () => Promise<{
+        ok: boolean;
+        preferences?: { pinMainWindowDuringProfileLaunch: boolean };
+        error?: string;
+      }>;
+      setAppPreferences: (patch: {
+        pinMainWindowDuringProfileLaunch?: boolean;
+      }) => Promise<{
+        ok: boolean;
+        preferences?: { pinMainWindowDuringProfileLaunch: boolean };
         error?: string;
       }>;
     };
