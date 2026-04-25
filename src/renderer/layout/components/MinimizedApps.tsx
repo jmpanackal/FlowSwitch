@@ -118,7 +118,7 @@ export function MinimizedApps({
         <img
           src={iconSrc}
           alt={app.name}
-          className="w-5 h-5 object-contain rounded"
+          className="h-7 w-7 object-contain rounded"
           draggable={false}
         />
       );
@@ -126,8 +126,8 @@ export function MinimizedApps({
 
     if (!app.icon) {
       return (
-        <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-          <Package className="w-3 h-3 text-flow-text-muted" />
+        <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+          <Package className="h-4 w-4 text-flow-text-muted" />
         </div>
       );
     }
@@ -136,12 +136,12 @@ export function MinimizedApps({
     if (typeof app.icon === 'function') {
       try {
         const IconComponent = app.icon;
-        return <IconComponent className="w-5 h-5 text-flow-text-primary" />;
+        return <IconComponent className="h-7 w-7 text-flow-text-primary" />;
       } catch (error) {
         console.warn('Failed to render icon for app:', app.name, error);
         return (
-          <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-            <Package className="w-3 h-3 text-flow-text-muted" />
+          <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+            <Package className="h-4 w-4 text-flow-text-muted" />
           </div>
         );
       }
@@ -149,8 +149,8 @@ export function MinimizedApps({
     
     // If it's not a function, show fallback
     return (
-      <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-        <Package className="w-3 h-3 text-flow-text-muted" />
+      <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+        <Package className="h-4 w-4 text-flow-text-muted" />
       </div>
     );
   };
@@ -627,7 +627,7 @@ export function MinimizedApps({
                     >
                       {/* App Icon Container */}
                       <div
-                        className={`relative ${compact ? "h-8 w-8" : "h-10 w-10"} flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105`}
+                        className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105"
                         style={{
                           backgroundColor: `${app.color}20`,
                           border: `1px solid ${app.color}40`,
@@ -696,8 +696,8 @@ export function MinimizedApps({
                   compact ? 'w-[4.25rem]' : 'w-[5rem]'
                 }`}
               >
-                <div className="w-8 h-8 rounded-lg border border-flow-border/60 bg-flow-surface/50 flex items-center justify-center">
-                  <MoreHorizontal className="w-4 h-4 text-flow-text-muted" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-flow-border/60 bg-flow-surface/50">
+                  <MoreHorizontal className="h-5 w-5 text-flow-text-muted" />
                 </div>
                 <span className="text-[10px] text-flow-text-muted font-medium">+{hiddenAppsCount} more</span>
               </div>
@@ -777,13 +777,13 @@ export function MinimizedApps({
                       className={`flex flex-col items-center ${compact ? "gap-1 px-1.5 pb-1.5 pt-1" : "gap-1.5 p-2"}`}
                     >
                       <div
-                        className={`relative flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105 ${compact ? "h-8 w-8" : "h-10 w-10"}`}
+                        className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105"
                         style={{
                           backgroundColor: `${fileColor}20`,
                           border: `1px solid ${fileColor}40`,
                         }}
                       >
-                        <FileIcon type={file.type} className={compact ? "h-4 w-4" : "h-5 w-5"} />
+                        <FileIcon type={file.type} className="h-7 w-7" />
                       </div>
 
                       <div className="w-full text-center">

@@ -39,7 +39,7 @@ import {
   isHiddenStackMember,
 } from "./MonitorAppStackCluster";
 /** Floor so monitor cards stay legible; slight overlap is preferable to a pixel-sized cluster. */
-const MIN_MONITOR_PREVIEW_SCALE = 0.32;
+const MIN_MONITOR_PREVIEW_SCALE = 0.4;
 
 /**
  * Floating "Stack on top of X" preview chip that follows the cursor while a
@@ -419,6 +419,8 @@ export function MonitorLayout({
   const prevMonitorsIdentityKeyRef = useRef<string | null>(null);
   /** Tracks preview size so we can detect first transition off the {1,1} placeholder / tiny rect. */
   const prevMeaningfulPreviewBoundsRef = useRef<{ width: number; height: number }>({ width: 0, height: 0 });
+  /** Used to force a full preview resync when edit chrome toggles (footprint + scale model changes). */
+  const prevIsEditModeForLayoutSyncRef = useRef(isEditMode);
   const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
   const [monitorEditActionsOpenId, setMonitorEditActionsOpenId] = useState<string | null>(null);
 
@@ -829,6 +831,17 @@ export function MonitorLayout({
 
   useLayoutEffect(() => {
     if (draggingMonitor) return;
+
+    const editModeChanged =
+      isEditMode !== prevIsEditModeForLayoutSyncRef.current;
+    prevIsEditModeForLayoutSyncRef.current = isEditMode;
+    if (editModeChanged) {
+      // View vs edit uses different card chrome in getMonitorFootprint. Reusing the
+      // "signature unchanged" fast path with the old layoutPreviewScale (from the prior
+      // mode) clamps monitors badly after a wide preview (e.g. both shell sidebars closed).
+      lastSyncedMonitorLayoutSignatureRef.current = "";
+    }
+
     if (monitors.length === 0) {
       lastSyncedMonitorLayoutSignatureRef.current = "";
       prevMonitorsIdentityKeyRef.current = "";
@@ -878,13 +891,15 @@ export function MonitorLayout({
 
     if (!signatureChanged) {
       const prevSnap = previewPositionsRef.current;
+      // Seed from current geometry, not layoutPreviewScale state (can lag one mode behind).
+      let scale = computeMultiMonitorPreviewScale(prevSnap);
       const next: Record<string, { x: number; y: number }> = {};
       for (const monitor of monitors) {
         const p = prevSnap[monitor.id] || { x: 50, y: 50 };
-        next[monitor.id] = clampPreviewPosition(monitor, p, layoutPreviewScale);
+        next[monitor.id] = clampPreviewPosition(monitor, p, scale);
       }
       previewPositionsRef.current = next;
-      let scale = computeMultiMonitorPreviewScale(next);
+      scale = computeMultiMonitorPreviewScale(next);
       for (const monitor of monitors) {
         next[monitor.id] = clampPreviewPosition(monitor, next[monitor.id], scale);
       }
@@ -2178,7 +2193,7 @@ export function MonitorLayout({
         <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(14rem,36vh,22rem)] ${large ? 'md:min-h-[clamp(18rem,42vh,30rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(16rem,42vh,28rem)] ${large ? 'md:min-h-[clamp(20rem,48vh,34rem)]' : ''}`}
           >
             <div
               ref={monitorPreviewInnerRef}
@@ -2699,7 +2714,7 @@ export function MonitorLayout({
                                 if (isEditMode) return;
                                 onAppSelect?.(app, "minimized", undefined, appIndex);
                               }}
-                              className={`group relative flex h-8 w-8 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                              className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
                                 selected
                                   ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
                                   : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
@@ -2710,13 +2725,13 @@ export function MonitorLayout({
                                 <img
                                   src={iconSrc}
                                   alt=""
-                                  className="h-5 w-5 object-contain"
+                                  className="h-7 w-7 object-contain"
                                   draggable={false}
                                 />
                               ) : app.icon ? (
-                                <app.icon className="h-5 w-5 text-white/90" />
+                                <app.icon className="h-7 w-7 text-white/90" />
                               ) : (
-                                <Package className="h-5 w-5 text-white/60" />
+                                <Package className="h-7 w-7 text-white/60" />
                               )}
                             </button>
                           </FlowTooltip>
@@ -2724,7 +2739,7 @@ export function MonitorLayout({
                       })}
                       {minimizedDropActive ? (
                         <div
-                          className="pointer-events-none h-8 w-8 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
+                          className="pointer-events-none h-10 w-10 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
                           aria-hidden
                         />
                       ) : null}
