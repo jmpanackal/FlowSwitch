@@ -1,6 +1,6 @@
 {
   "name": "flowswitch",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Windows desktop app for profile-based workspace and window flows.",
   "author": "FlowSwitch",
   "main": "src/main/main.js",
