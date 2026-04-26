@@ -1,8 +1,105 @@
+import { safeIconSrc } from "../renderer/utils/safeIconSrc";
+
+/** Canonical use-case for a profile (sidebar filter + settings). */
+export const FLOW_PROFILE_KINDS = [
+  "general",
+  "work",
+  "study",
+  "gaming",
+  "development",
+  "creative",
+  "streaming",
+  "personal",
+] as const;
+
+export type FlowProfileKind = (typeof FLOW_PROFILE_KINDS)[number];
+
+export const FLOW_PROFILE_KIND_LABELS: Record<FlowProfileKind, string> = {
+  general: "General",
+  work: "Work",
+  study: "Study",
+  gaming: "Gaming",
+  development: "Development",
+  creative: "Creative",
+  streaming: "Streaming",
+  personal: "Personal",
+};
+
+export function normalizeProfileKind(value: unknown): FlowProfileKind {
+  if (typeof value !== "string") return "general";
+  return (FLOW_PROFILE_KINDS as readonly string[]).includes(value)
+    ? (value as FlowProfileKind)
+    : "general";
+}
+
+/** Sidebar / header visual icon (independent of profile kind filter). */
+export const FLOW_PROFILE_VISUAL_ICON_IDS = [
+  "work",
+  "gaming",
+  "personal",
+  "study",
+  "development",
+  "creative",
+  "streaming",
+  "music",
+  "fitness",
+  "coffee",
+  "rocket",
+  "moon",
+  "laptop",
+] as const;
+
+export type FlowProfileVisualIconId = (typeof FLOW_PROFILE_VISUAL_ICON_IDS)[number];
+
+export const FLOW_PROFILE_VISUAL_ICON_LABELS: Record<
+  FlowProfileVisualIconId,
+  string
+> = {
+  work: "Folder",
+  gaming: "Gaming",
+  personal: "Personal",
+  study: "Study",
+  development: "Development",
+  creative: "Creative",
+  streaming: "Streaming",
+  music: "Music",
+  fitness: "Fitness",
+  coffee: "Coffee",
+  rocket: "Rocket",
+  moon: "Night",
+  laptop: "Laptop",
+};
+
+export function normalizeProfileVisualIcon(
+  value: unknown,
+): FlowProfileVisualIconId {
+  if (typeof value !== "string") return "work";
+  const s = value.trim().toLowerCase().replace(/-/g, "_");
+  return (FLOW_PROFILE_VISUAL_ICON_IDS as readonly string[]).includes(s)
+    ? (s as FlowProfileVisualIconId)
+    : "work";
+}
+
+/**
+ * Canonical `profile.icon` value: a preset id or a validated raster `data:image/…;base64,…` URL.
+ * Unknown / invalid strings fall back to `"work"`.
+ */
+export function normalizeStoredProfileIcon(value: unknown): string {
+  if (typeof value !== "string") return "work";
+  const trimmed = value.trim();
+  const data = safeIconSrc(trimmed);
+  if (data) return data;
+  return normalizeProfileVisualIcon(trimmed);
+}
+
 /** Profile document used by the main layout UI and IPC persistence. */
 export type FlowProfile = {
   id: string;
   name: string;
   description: string;
+  /** Use-case category for the library sidebar filter and organization. */
+  profileKind: FlowProfileKind;
+  /** Preset id from {@link FLOW_PROFILE_VISUAL_ICON_IDS} or a validated raster data URL. */
   icon: string;
   appCount: number;
   tabCount: number;
@@ -124,7 +221,7 @@ export function normalizeFlowProfile(rawProfile: unknown): FlowProfile {
     id: String(r?.id || `profile-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`),
     name: String(r?.name || "Untitled Profile"),
     description: String(r?.description || "Profile without description"),
-    icon: String(r?.icon || "work"),
+    icon: normalizeStoredProfileIcon(r?.icon),
     appCount: Number(r?.appCount || 0),
     tabCount: Number(r?.tabCount || 0),
     fileCount: Number(r?.fileCount || 0),
@@ -168,6 +265,7 @@ export function normalizeFlowProfile(rawProfile: unknown): FlowProfile {
       r?.appLaunchDelays && typeof r.appLaunchDelays === "object"
         ? (r.appLaunchDelays as Record<string, number>)
         : {},
+    profileKind: normalizeProfileKind(r?.profileKind),
   } as FlowProfile;
 }
 

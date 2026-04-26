@@ -1165,7 +1165,6 @@ export function AppFileWindow({
         data-item-index={itemIndex}
         data-item-type={item.type}
       >
-        <FlowTooltip label={isFile ? undefined : item.name}>
         <div 
           ref={mainWindowRef}
           className={`relative flex h-full min-h-0 w-full flex-col overflow-hidden ${monitorTileRadiusClass} ring-1 ring-inset transition-all duration-200 select-none ${
@@ -1192,12 +1191,10 @@ export function AppFileWindow({
                 monitorPreviewSurface ? "" : "backdrop-blur-md"
               }`}
             >
-              <FlowTooltip label={(item as AppItem).name}>
-                <div
-                  className="min-h-0 min-w-0 flex-1 cursor-move"
-                  aria-hidden
-                />
-              </FlowTooltip>
+              <div
+                className="min-h-0 min-w-0 flex-1 cursor-move"
+                aria-hidden
+              />
               <div className="flex shrink-0 items-stretch divide-x divide-white/[0.06]">
                 {onMoveToMinimized ? (
                   <FlowTooltip label="Minimize to row">
@@ -1247,12 +1244,10 @@ export function AppFileWindow({
                 monitorPreviewSurface ? "" : "backdrop-blur-sm"
               }`}
             >
-              <FlowTooltip label={(item as FileItem).name}>
-                <div
-                  className="min-h-0 min-w-0 flex-1 cursor-move"
-                  aria-hidden
-                />
-              </FlowTooltip>
+              <div
+                className="min-h-0 min-w-0 flex-1 cursor-move"
+                aria-hidden
+              />
               <div className="flex shrink-0 items-center divide-x divide-white/[0.06]">
                 {onMoveToMinimized ? (
                   <FlowTooltip label="Minimize to row">
@@ -1322,7 +1317,6 @@ export function AppFileWindow({
             </div>
           ) : null}
         </div>
-        </FlowTooltip>
       </div>
       
 

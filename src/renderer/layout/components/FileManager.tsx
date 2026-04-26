@@ -18,6 +18,7 @@ import {
   Video,
   Archive
 } from "lucide-react";
+import { flowDropdownNativeSelectClass } from "./inspectorStyles";
 
 interface FileManagerProps {
   profiles: any[];
@@ -207,7 +208,7 @@ export function FileManager({
           <select
             value={filterType}
             onChange={(e) => setFilterType(e.target.value)}
-            className="w-full px-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+            className={flowDropdownNativeSelectClass}
           >
             <option value="all">All types</option>
             <option value="folder">Folders</option>

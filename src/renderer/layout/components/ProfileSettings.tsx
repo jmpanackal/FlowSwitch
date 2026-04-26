@@ -1,5 +1,5 @@
-import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef } from "react";
-import { X, User, Settings, Zap, Volume2, VolumeX, Clock, Minimize2, Maximize2, RotateCcw, Play, ArrowRight, AlertTriangle, Sparkles, Monitor, Copy, Trash2, Ban, HelpCircle, ChevronUp, ChevronDown, ChevronRight, Download, RefreshCw } from "lucide-react";
+import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
+import { X, User, Settings, Zap, Volume2, VolumeX, Clock, Minimize2, Maximize2, RotateCcw, Play, ArrowRight, AlertTriangle, Sparkles, Monitor, Copy, Trash2, Ban, HelpCircle, ChevronUp, ChevronDown, ChevronRight, Download, RefreshCw, Upload, Image } from "lucide-react";
 import { DeleteConfirmation } from "./profile-settings/DeleteConfirmation";
 import { Switch } from "./ui/switch";
 import { Checkbox } from "./ui/checkbox";
@@ -10,6 +10,20 @@ import { HotkeyRecorderField } from "./HotkeyRecorderField";
 import { FlowTooltip } from "./ui/tooltip";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { profileAppPlacementKey } from "../../utils/profileAppPlacementKey";
+import type { FlowProfileKind } from "../../../types/flow-profile";
+import {
+  FLOW_PROFILE_KINDS,
+  FLOW_PROFILE_KIND_LABELS,
+  FLOW_PROFILE_VISUAL_ICON_IDS,
+  FLOW_PROFILE_VISUAL_ICON_LABELS,
+  normalizeProfileKind,
+  normalizeProfileVisualIcon,
+  normalizeStoredProfileIcon,
+} from "../../../types/flow-profile";
+import { ProfileIconFrame } from "../utils/profileHeaderPresentation";
+import { flowDropdownNativeSelectClass } from "./inspectorStyles";
+
+const PROFILE_CUSTOM_ICON_MAX_FILE_BYTES = Math.floor(1.5 * 1024 * 1024);
 
 interface ScheduleData {
   type: 'daily' | 'weekly';
@@ -27,6 +41,8 @@ interface ProfileSettingsProps {
     id: string;
     name: string;
     description: string;
+    profileKind?: FlowProfileKind;
+    icon?: string;
     globalVolume?: number;
     applyProfileVolumesOnLaunch?: boolean;
     backgroundBehavior?: "keep" | "close" | "minimize";
@@ -52,6 +68,8 @@ interface ProfileSettingsProps {
   onRename?: (newName: string, newDescription: string) => void;
   onDelete?: () => void;
   onExport?: () => void;
+  /** When set, Profile tab shows Import wired to a hidden `<input type="file" id={…}>` (e.g. in MainLayout). */
+  importProfileInputId?: string;
   allProfiles?: any[];
   /** When the modal opens, select this section (e.g. Automation). Legacy `"security"` opens Behavior. */
   initialSection?: ProfileSettingsInitialSection;
@@ -84,7 +102,7 @@ const settingsTabs: SettingsTab[] = [
     id: 'profile',
     label: 'Profile',
     icon: User,
-    description: 'Name, description, and actions'
+    description: "Name, icon, type, description, and actions",
   },
   {
     id: 'audio',
@@ -114,6 +132,7 @@ function ProfileSettingsInner({
   onRename,
   onDelete,
   onExport,
+  importProfileInputId,
   allProfiles = [],
   initialSection,
 }: ProfileSettingsInnerProps) {
@@ -171,6 +190,11 @@ function ProfileSettingsInner({
   const [restrictedApps, setRestrictedApps] = useState<string[]>([]);
   const [profileName, setProfileName] = useState('');
   const [profileDescription, setProfileDescription] = useState('');
+  const [profileKind, setProfileKind] = useState<FlowProfileKind>("general");
+  const [profileIcon, setProfileIcon] = useState<string>("work");
+  const [iconPickError, setIconPickError] = useState<string | null>(null);
+  const profileCustomIconInputId = useId();
+  const profileCustomIconInputRef = useRef<HTMLInputElement>(null);
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   
   // Advanced settings
@@ -253,6 +277,9 @@ function ProfileSettingsInner({
       setRestrictedApps(profile.restrictedApps || []);
       setProfileName(profile.name || '');
       setProfileDescription(profile.description || '');
+      setProfileKind(normalizeProfileKind(profile.profileKind));
+      setProfileIcon(normalizeStoredProfileIcon(profile.icon));
+      setIconPickError(null);
       setAutoLaunchOnBoot(profile.autoLaunchOnBoot || false);
       
       // Handle both new scheduleData format and legacy autoSwitchTime
@@ -407,6 +434,8 @@ function ProfileSettingsInner({
 
   const buildPersistPayload = useCallback(
     () => ({
+      profileKind,
+      icon: profileIcon,
       globalVolume: profile.globalVolume ?? 70,
       applyProfileVolumesOnLaunch,
       backgroundBehavior: preLaunchOutsideProfileBehavior,
@@ -437,6 +466,8 @@ function ProfileSettingsInner({
       ...buildVolumeProfilePayload(),
     }),
     [
+      profileKind,
+      profileIcon,
       profile.globalVolume,
       applyProfileVolumesOnLaunch,
       preLaunchInProfileBehavior,
@@ -557,6 +588,35 @@ function ProfileSettingsInner({
     }
   };
 
+  const handleProfileIconFileChange = useCallback(
+    (e: React.ChangeEvent<HTMLInputElement>) => {
+      setIconPickError(null);
+      const input = e.target;
+      const file = input.files?.[0];
+      input.value = "";
+      if (!file) return;
+      if (file.size > PROFILE_CUSTOM_ICON_MAX_FILE_BYTES) {
+        setIconPickError("Image must be about 1.5 MB or smaller.");
+        return;
+      }
+      const reader = new FileReader();
+      reader.onload = () => {
+        const result = typeof reader.result === "string" ? reader.result : "";
+        const safe = safeIconSrc(result);
+        if (!safe) {
+          setIconPickError("Use PNG, JPEG, WebP, GIF, or BMP.");
+          return;
+        }
+        setProfileIcon(safe);
+      };
+      reader.onerror = () => {
+        setIconPickError("Could not read that file.");
+      };
+      reader.readAsDataURL(file);
+    },
+    [],
+  );
+
   const handleDeleteConfirm = () => {
     flushPendingSettings();
     onDelete?.();
@@ -617,22 +677,46 @@ function ProfileSettingsInner({
                 </div>
                 <div>
                   <h3 className="font-medium text-flow-text-primary">Profile Information</h3>
-                  <p className="text-xs text-flow-text-muted">Update name, description, and manage profile</p>
+                  <p className="text-xs text-flow-text-muted">
+                    Update name, icon, type, description, and manage profile
+                  </p>
                 </div>
               </div>
               
               <div className="space-y-3">
-                <div>
-                  <label className="block text-xs font-medium text-flow-text-secondary mb-1">Profile Name</label>
-                  <input
-                    type="text"
-                    value={profileName}
-                    onChange={(e) => handleProfileNameChange(e.target.value)}
-                    className="w-full px-3 py-2 bg-flow-bg-secondary border border-flow-border rounded-lg text-flow-text-primary placeholder:text-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue transition-colors text-sm"
-                    placeholder="Enter profile name"
-                  />
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:gap-4">
+                  <div className="min-w-0 sm:flex-[2]">
+                    <label className="block text-xs font-medium text-flow-text-secondary mb-1">
+                      Profile Name
+                    </label>
+                    <input
+                      type="text"
+                      value={profileName}
+                      onChange={(e) => handleProfileNameChange(e.target.value)}
+                      className="w-full px-3 py-2 bg-flow-bg-secondary border border-flow-border rounded-lg text-flow-text-primary placeholder:text-flow-text-muted focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue transition-colors text-sm"
+                      placeholder="Enter profile name"
+                    />
+                  </div>
+                  <div className="min-w-0 sm:flex-[1]">
+                    <label className="block text-xs font-medium text-flow-text-secondary mb-1">
+                      Profile type
+                    </label>
+                    <select
+                      value={profileKind}
+                      onChange={(e) =>
+                        setProfileKind(normalizeProfileKind(e.target.value))
+                      }
+                      className={flowDropdownNativeSelectClass}
+                    >
+                      {FLOW_PROFILE_KINDS.map((k) => (
+                        <option key={k} value={k}>
+                          {FLOW_PROFILE_KIND_LABELS[k]}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
                 </div>
-                
+
                 <div>
                   <label className="block text-xs font-medium text-flow-text-secondary mb-1">Description</label>
                   <textarea
@@ -643,33 +727,123 @@ function ProfileSettingsInner({
                     placeholder="Describe what this profile is for"
                   />
                 </div>
-                
-                <div className="flex gap-2 pt-2">
+
+                <div>
+                  <label className="block text-xs font-medium text-flow-text-secondary mb-1">
+                    Profile icon
+                  </label>
+                  <p className="mb-2 text-[11px] leading-snug text-flow-text-muted">
+                    Preset icons below, or pick an image from your computer (PNG, JPEG, WebP, GIF, or BMP, about 1.5 MB max). Independent of profile type.
+                  </p>
+                  <div className="mb-3 flex flex-wrap items-center gap-2">
+                    <input
+                      ref={profileCustomIconInputRef}
+                      id={profileCustomIconInputId}
+                      type="file"
+                      accept="image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp"
+                      className="sr-only"
+                      onChange={handleProfileIconFileChange}
+                    />
+                    <button
+                      type="button"
+                      onClick={() => profileCustomIconInputRef.current?.click()}
+                      className="inline-flex items-center gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary px-3 py-2 text-xs font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50"
+                    >
+                      <Image className="h-3.5 w-3.5 shrink-0 opacity-90" aria-hidden />
+                      Choose from computer
+                    </button>
+                    {safeIconSrc(profileIcon) ? (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setProfileIcon("work");
+                          setIconPickError(null);
+                        }}
+                        className="inline-flex items-center rounded-lg border border-flow-border/80 bg-transparent px-3 py-2 text-xs font-medium text-flow-text-muted transition-colors hover:border-flow-border hover:text-flow-text-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50"
+                      >
+                        Clear custom image
+                      </button>
+                    ) : null}
+                  </div>
+                  {iconPickError ? (
+                    <p className="mb-2 text-[11px] text-rose-300" role="alert">
+                      {iconPickError}
+                    </p>
+                  ) : null}
+                  <div
+                    className="grid grid-cols-6 gap-2 sm:grid-cols-7"
+                    role="listbox"
+                    aria-label="Profile icon presets"
+                  >
+                    {FLOW_PROFILE_VISUAL_ICON_IDS.map((id) => {
+                      const selected =
+                        !safeIconSrc(profileIcon) &&
+                        normalizeProfileVisualIcon(profileIcon) === id;
+                      return (
+                        <button
+                          key={id}
+                          type="button"
+                          role="option"
+                          aria-selected={selected}
+                          aria-label={FLOW_PROFILE_VISUAL_ICON_LABELS[id]}
+                          onClick={() => {
+                            setProfileIcon(id);
+                            setIconPickError(null);
+                          }}
+                          className={`rounded-lg p-1 transition focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/55 ${
+                            selected
+                              ? "ring-2 ring-flow-accent-blue ring-offset-2 ring-offset-flow-surface"
+                              : "ring-1 ring-transparent hover:ring-flow-border"
+                          }`}
+                        >
+                          <ProfileIconFrame
+                            icon={id}
+                            className="mx-auto scale-90"
+                          />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                <div className="flex flex-wrap gap-2 pt-2">
+                  {importProfileInputId ? (
+                    <label
+                      htmlFor={importProfileInputId}
+                      className="flex min-w-[6.5rem] flex-1 cursor-pointer items-center justify-center gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary px-3 py-2 text-sm text-flow-text-secondary transition-all hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
+                    >
+                      <Upload className="h-3.5 w-3.5 shrink-0" />
+                      Import
+                    </label>
+                  ) : null}
                   {onExport && (
                     <button
+                      type="button"
                       onClick={onExport}
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-flow-border bg-flow-bg-secondary hover:bg-flow-surface-elevated hover:border-flow-border-accent text-flow-text-secondary hover:text-flow-text-primary transition-all text-sm"
+                      className="flex min-w-[6.5rem] flex-1 items-center justify-center gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary px-3 py-2 text-sm text-flow-text-secondary transition-all hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
                     >
-                      <Download className="w-3.5 h-3.5" />
+                      <Download className="w-3.5 h-3.5 shrink-0" />
                       Export
                     </button>
                   )}
                   {onDuplicate && (
                     <button
+                      type="button"
                       onClick={onDuplicate}
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-flow-border bg-flow-bg-secondary hover:bg-flow-surface-elevated hover:border-flow-border-accent text-flow-text-secondary hover:text-flow-text-primary transition-all text-sm"
+                      className="flex min-w-[6.5rem] flex-1 items-center justify-center gap-2 rounded-lg border border-flow-border bg-flow-bg-secondary px-3 py-2 text-sm text-flow-text-secondary transition-all hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary"
                     >
-                      <Copy className="w-3.5 h-3.5" />
+                      <Copy className="h-3.5 w-3.5 shrink-0" />
                       Duplicate
                     </button>
                   )}
-                  
+
                   {onDelete && (
                     <button
+                      type="button"
                       onClick={() => setShowDeleteConfirm(true)}
-                      className="flex-1 flex items-center justify-center gap-2 px-3 py-2 rounded-lg border border-flow-accent-red/30 bg-flow-accent-red/10 hover:bg-flow-accent-red/20 text-flow-accent-red transition-all text-sm"
+                      className="flex min-w-[6.5rem] flex-1 items-center justify-center gap-2 rounded-lg border border-flow-accent-red/30 bg-flow-accent-red/10 px-3 py-2 text-sm text-flow-accent-red transition-all hover:bg-flow-accent-red/20"
                     >
-                      <Trash2 className="w-3.5 h-3.5" />
+                      <Trash2 className="h-3.5 w-3.5 shrink-0" />
                       Delete
                     </button>
                   )}

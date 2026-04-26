@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { LayoutGrid, Plus, Scan } from "lucide-react";
+import { ChevronDown, LayoutGrid, Plus, Scan } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
 
 type NewProfileMenuProps = {
@@ -7,16 +7,19 @@ type NewProfileMenuProps = {
   busy?: boolean;
   onCreateEmpty: () => void;
   onCaptureCurrentLayout: () => void;
+  /** When set, replaces the default compact trigger (e.g. library toolbar pill). */
+  triggerClassName?: string;
 };
 
 const menuPanelClass =
-  "flow-menu-panel absolute right-0 top-full z-[30000] mt-1.5 min-w-[12.5rem]";
+  "flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1.5 min-w-[12.5rem]";
 
 export function NewProfileMenu({
   disabled,
   busy = false,
   onCreateEmpty,
   onCaptureCurrentLayout,
+  triggerClassName,
 }: NewProfileMenuProps) {
   const [open, setOpen] = useState(false);
   const rootRef = useRef<HTMLDivElement>(null);
@@ -49,10 +52,10 @@ export function NewProfileMenu({
       ? "Please wait…"
       : disabled
         ? "Cannot create a profile while in edit mode"
-        : "Create profile";
+        : "New profile — empty layout or capture current layout";
 
   return (
-    <div className="relative" ref={rootRef}>
+    <div className="relative min-w-0" ref={rootRef}>
       <FlowTooltip label={triggerHint}>
         <span className="inline-flex">
           <button
@@ -62,16 +65,27 @@ export function NewProfileMenu({
               e.stopPropagation();
               if (!blocked) setOpen((v) => !v);
             }}
-            className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded-lg transition-all duration-150 ease-out ${
-              blocked
-                ? "text-flow-text-muted cursor-not-allowed opacity-50"
-                : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
-            }`}
+            className={
+              triggerClassName
+                ? `${triggerClassName}${
+                    blocked ? " cursor-not-allowed opacity-50" : ""
+                  }`
+                : `inline-flex items-center gap-0.5 rounded-lg px-1.5 py-1 text-xs transition-all duration-150 ease-out ${
+                    blocked
+                      ? "cursor-not-allowed text-flow-text-muted opacity-50"
+                      : "text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary"
+                  }`
+            }
             aria-expanded={open}
             aria-haspopup="menu"
+            aria-label={triggerHint}
           >
-            <Plus className="w-3 h-3 shrink-0" strokeWidth={2} />
-            {busy ? "Working…" : "New"}
+            <Plus className="h-3.5 w-3.5 shrink-0" strokeWidth={2} aria-hidden />
+            <ChevronDown
+              className={`h-3 w-3 shrink-0 opacity-80 ${open ? "rotate-180" : ""} transition-transform duration-150`}
+              strokeWidth={2}
+              aria-hidden
+            />
           </button>
         </span>
       </FlowTooltip>

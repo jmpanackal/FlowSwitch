@@ -9,7 +9,7 @@ const {
   MAX_PROFILE_PAYLOAD_SIZE_BYTES,
 } = require('./limits');
 const { safeLimitedString, normalizeSafeUrl } = require('./url-safety');
-const { sanitizeProfileIconPathsDeep } = require('./profile-icon-paths');
+const { sanitizeProfileIconPathsDeep, sanitizeProfileRootIcon } = require('./profile-icon-paths');
 const { sanitizeProfileLaunchFieldsDeep } = require('./profile-launch-fields');
 
 const MAX_CONTENT_ITEMS = 8000;
@@ -33,6 +33,7 @@ const sanitizeProfilesArray = (profiles) => {
       const normalized = { ...profile };
       normalized.id = safeLimitedString(profile.id, MAX_PROFILE_ID_LENGTH);
       normalized.name = safeLimitedString(profile.name, MAX_PROFILE_NAME_LENGTH);
+      normalized.icon = sanitizeProfileRootIcon(profile.icon);
       if (Array.isArray(profile.browserTabs)) {
         normalized.browserTabs = profile.browserTabs
           .map((tab) => {

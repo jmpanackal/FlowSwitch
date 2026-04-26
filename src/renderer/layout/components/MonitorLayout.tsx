@@ -2136,7 +2136,7 @@ export function MonitorLayout({
             />
             <div className="min-w-0 flex-1 shrink">
               <h3
-                className={`truncate font-semibold tracking-tight text-flow-text-primary ${densePreviewMode ? "text-sm" : "text-base md:text-lg"}`}
+                className={`truncate font-medium tracking-tight text-flow-text-primary ${densePreviewMode ? "text-xs" : "text-sm sm:text-base"}`}
               >
                 Monitor layout
               </h3>
@@ -2719,43 +2719,42 @@ export function MonitorLayout({
                         const iconSrc = safeIconSrc(app.iconPath ?? undefined);
                         const selected = matchesMinimizedAppSelection(selectedApp, appIndex, app);
                         return (
-                          <FlowTooltip key={`${monitor.id}-min-${app.instanceId || appIndex}`} label={app.name}>
-                            <button
-                              type="button"
-                              onMouseDown={(e) => {
-                                e.stopPropagation();
-                                if (!isEditMode) return;
-                                e.preventDefault();
-                                handleMiniTaskbarDragStart(app, appIndex, {
-                                  x: e.clientX,
-                                  y: e.clientY,
-                                });
-                              }}
-                              onClick={() => {
-                                if (isEditMode) return;
-                                onAppSelect?.(app, "minimized", undefined, appIndex);
-                              }}
-                              className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
-                                selected
-                                  ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
-                                  : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
-                              }`}
-                              aria-label={`Restore ${app.name} to ${monitor.name}`}
-                            >
-                              {iconSrc ? (
-                                <img
-                                  src={iconSrc}
-                                  alt=""
-                                  className="h-7 w-7 object-contain"
-                                  draggable={false}
-                                />
-                              ) : app.icon ? (
-                                <app.icon className="h-7 w-7 text-white/90" />
-                              ) : (
-                                <Package className="h-7 w-7 text-white/60" />
-                              )}
-                            </button>
-                          </FlowTooltip>
+                          <button
+                            key={`${monitor.id}-min-${app.instanceId || appIndex}`}
+                            type="button"
+                            onMouseDown={(e) => {
+                              e.stopPropagation();
+                              if (!isEditMode) return;
+                              e.preventDefault();
+                              handleMiniTaskbarDragStart(app, appIndex, {
+                                x: e.clientX,
+                                y: e.clientY,
+                              });
+                            }}
+                            onClick={() => {
+                              if (isEditMode) return;
+                              onAppSelect?.(app, "minimized", undefined, appIndex);
+                            }}
+                            className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                              selected
+                                ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
+                                : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
+                            }`}
+                            aria-label={`Restore ${app.name} to ${monitor.name}`}
+                          >
+                            {iconSrc ? (
+                              <img
+                                src={iconSrc}
+                                alt=""
+                                className="h-7 w-7 object-contain"
+                                draggable={false}
+                              />
+                            ) : app.icon ? (
+                              <app.icon className="h-7 w-7 text-white/90" />
+                            ) : (
+                              <Package className="h-7 w-7 text-white/60" />
+                            )}
+                          </button>
                         );
                       })}
                       {minimizedDropActive ? (

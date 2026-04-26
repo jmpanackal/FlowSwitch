@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Minimize2, Globe, Square, X, Package, MoreHorizontal } from "lucide-react";
+import { Minimize2, Square, X, Package, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
@@ -83,7 +83,8 @@ export function MinimizedApps({
   isEditMode = false,
   compact = false,
 }: MinimizedAppsProps) {
-  const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
+  /** `file-{index}` when showing file hover details; apps do not use a hover popover. */
+  const [hoveredApp, setHoveredApp] = useState<string | null>(null);
   /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
   
@@ -416,8 +417,6 @@ export function MinimizedApps({
     setTooltipAnchor(null);
   };
 
-  const hoveredAppData =
-    typeof hoveredApp === "number" ? visibleApps[hoveredApp] : null;
   const hoveredFileData =
     typeof hoveredApp === "string" && hoveredApp.startsWith("file-")
       ? files[parseInt(hoveredApp.replace("file-", ""), 10)]
@@ -425,58 +424,6 @@ export function MinimizedApps({
 
   const renderHoverPortal = () => {
     if (!tooltipAnchor || hoveredApp === null) return null;
-
-    if (hoveredAppData) {
-      const app = hoveredAppData;
-      const monitorInfo = getMonitorInfo(app.targetMonitor || "monitor-1");
-      const isBrowser =
-        app.name.toLowerCase().includes("chrome") ||
-        app.name.toLowerCase().includes("browser");
-
-      return (
-        <div className="flow-tooltip-inner-pop inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-flow-shadow-lg">
-          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate">
-            {app.name}
-          </div>
-          <div className="text-xs text-flow-text-muted mb-2 whitespace-normal">
-            Target: {monitorInfo.name}
-            {monitorInfo.primary && (
-              <span className="ml-1 text-flow-accent-blue">(Primary)</span>
-            )}
-          </div>
-          {isBrowser && app.browserTabs && app.browserTabs.length > 0 && (
-            <div className="border-t border-flow-border pt-2">
-              <div className="text-xs text-flow-text-muted mb-1 font-medium">
-                Browser Tabs ({app.browserTabs.length})
-              </div>
-              <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-elegant">
-                {app.browserTabs.slice(0, 3).map((tab, tabIndex) => (
-                  <div
-                    key={tabIndex}
-                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
-                      tab.isActive
-                        ? "bg-flow-accent-blue/20 text-flow-accent-blue"
-                        : "text-flow-text-muted"
-                    }`}
-                  >
-                    <Globe className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate flex-1">{tab.name}</span>
-                    {tab.isActive && (
-                      <div className="w-1.5 h-1.5 bg-flow-accent-blue rounded-full flex-shrink-0" />
-                    )}
-                  </div>
-                ))}
-                {app.browserTabs.length > 3 && (
-                  <div className="text-xs text-flow-text-muted text-center py-1">
-                    +{app.browserTabs.length - 3} more tabs
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
 
     if (hoveredFileData) {
       const file = hoveredFileData;
@@ -566,15 +513,6 @@ export function MinimizedApps({
                   key={app.instanceId ? `min-${app.instanceId}` : `min-${index}-${app.name}`}
                   data-minimized-tile=""
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
-                  onMouseEnter={(e) => {
-                    setHoveredApp(index);
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setTooltipAnchor({
-                      x: r.left + r.width / 2,
-                      y: r.top,
-                    });
-                  }}
-                  onMouseLeave={clearHover}
                 >
                   {/* App Card */}
                   <div

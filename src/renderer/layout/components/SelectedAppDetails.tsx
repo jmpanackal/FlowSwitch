@@ -37,6 +37,12 @@ import {
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
 import { ClickCopyPathBlock } from "./ClickCopyPathBlock";
+import type { InstalledAppCatalogKeySource } from "../../utils/installedAppCatalogKey";
+import {
+  APP_LIBRARY_CATEGORIES,
+  inferInstalledAppLibraryCategory,
+  isAppLibraryCategory,
+} from "../../utils/installedAppLibraryCategory";
 import {
   inspectorFieldLabelClass,
   inspectorHelperTextClass,
@@ -137,6 +143,14 @@ interface SelectedAppDetailsProps {
   /** Installed app from Apps sidebar: place on layout (same behavior as sidebar + menu). */
   onAddSidebarAppToMonitor?: (monitorId: string) => void;
   onAddSidebarAppToMinimized?: () => void;
+  /**
+   * Persisted Apps-library type for this installed identity (mirrors to all catalog key
+   * variants so the Apps list stays in sync with layout inspector edits).
+   */
+  onSetInstalledAppLibraryCategory?: (
+    app: InstalledAppCatalogKeySource,
+    category: string,
+  ) => void;
 }
 
 type TabType = "overview" | "launch" | "content";
@@ -155,6 +169,7 @@ export function SelectedAppDetails({
   onAddBrowserTab,
   onAddSidebarAppToMonitor,
   onAddSidebarAppToMinimized,
+  onSetInstalledAppLibraryCategory,
 }: SelectedAppDetailsProps) {
   const [addAssocMenuOpen, setAddAssocMenuOpen] = useState(false);
   const addAssocMenuRef = useRef<HTMLDivElement>(null);
@@ -267,7 +282,7 @@ export function SelectedAppDetails({
     );
   }
 
-  const { data, type, source, monitorId } = selectedApp;
+  const { data, type, source, monitorId, appIndex } = selectedApp;
   const isProfileSlot = source === "monitor" || source === "minimized";
 
   const monitorDisplayName =
@@ -289,6 +304,12 @@ export function SelectedAppDetails({
 
   // Get current data
   const currentData = data;
+
+  const installedAppTypeFieldId = `installed-app-library-type-${source}-${String(
+    monitorId ?? "",
+  )}-${String(appIndex ?? "na")}-${String(
+    currentData?.instanceId ?? currentData?.name ?? "app",
+  )}`.replace(/[^a-zA-Z0-9_-]/g, "-");
 
   const copyIdentityExecutablePath = async () => {
     const t = typeof currentData.executablePath === "string"
@@ -539,6 +560,52 @@ export function SelectedAppDetails({
           <p className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-2 text-[11px] leading-snug text-flow-text-muted">
             This app is not on the current profile layout. Use the + button on its row in the Apps sidebar to place it on a monitor or the minimized row.
           </p>
+        ) : null}
+
+        {type === "app" &&
+        typeof onSetInstalledAppLibraryCategory === "function" ? (
+          <div className="min-w-0">
+            <label
+              className={inspectorFieldLabelClass}
+              htmlFor={installedAppTypeFieldId}
+            >
+              App type
+            </label>
+            <select
+              id={installedAppTypeFieldId}
+              className={inspectorPanelNativeSelectClass}
+              value={
+                isAppLibraryCategory(currentData.category)
+                  ? currentData.category
+                  : inferInstalledAppLibraryCategory(
+                      String(currentData.name ?? ""),
+                    )
+              }
+              onChange={(e) => {
+                const v = e.target.value;
+                if (isAppLibraryCategory(v)) {
+                  onSetInstalledAppLibraryCategory(
+                    {
+                      name: String(currentData.name ?? ""),
+                      executablePath: currentData.executablePath ?? null,
+                      shortcutPath: currentData.shortcutPath ?? null,
+                      launchUrl: currentData.launchUrl ?? null,
+                    },
+                    v,
+                  );
+                }
+              }}
+            >
+              {APP_LIBRARY_CATEGORIES.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            <p className={`${inspectorHelperTextClass} mt-1.5`}>
+              Used for the type chip in the Apps library. Your choice is saved on this device.
+            </p>
+          </div>
         ) : null}
 
         <div>
@@ -1159,7 +1226,7 @@ export function SelectedAppDetails({
                   <ChevronDown className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
                 </button>
                 {addAssocMenuOpen ? (
-                  <div className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 w-44 min-w-0 py-0.5 shadow-lg">
+                  <div className="flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1 w-44 min-w-0 py-0.5">
                     <button
                       type="button"
                       className="flow-menu-item text-xs"
@@ -1326,35 +1393,55 @@ export function SelectedAppDetails({
         >
           <div
             className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
-              activeTab === "overview" ? "" : "pointer-events-none select-none"
+              activeTab === "overview"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "overview"}
           >
-            <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4">
+            <div
+              className={
+                activeTab === "overview"
+                  ? "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
+              }
+            >
               {renderOverviewTab()}
             </div>
           </div>
           <div
             className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
-              activeTab === "launch" ? "" : "pointer-events-none select-none"
+              activeTab === "launch"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "launch"}
           >
-            <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4">
+            <div
+              className={
+                activeTab === "launch"
+                  ? "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
+              }
+            >
               {renderLaunchTab()}
             </div>
           </div>
           <div
             className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
-              activeTab === "content" ? "" : "pointer-events-none select-none"
+              activeTab === "content"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "content"}
           >
             <div
               className={
-                isProfileSlot
-                  ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
-                  : "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                activeTab === "content"
+                  ? isProfileSlot
+                    ? "flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pr-3 sm:pr-4"
+                    : "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
               }
             >
               {renderContentTab()}

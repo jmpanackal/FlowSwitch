@@ -1,7 +1,7 @@
 const fs = require('fs');
 const path = require('path');
 const { app, safeStorage } = require('electron');
-const { sanitizeProfileIconPathsDeep } = require('../utils/profile-icon-paths');
+const { sanitizeProfileIconPathsDeep, sanitizeProfileRootIcon } = require('../utils/profile-icon-paths');
 const { sanitizeProfileLaunchFieldsDeep } = require('../utils/profile-launch-fields');
 
 const PROFILE_STORE_FILENAME = 'profiles.v1.json';
@@ -23,9 +23,11 @@ const parseProfilesPayload = (parsed) => {
   return [];
 };
 
-const mapSanitizedProfiles = (profiles) => (
-  profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)))
-);
+const mapSanitizedProfiles = (profiles) =>
+  profiles.map((p) => {
+    const s = sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p));
+    return { ...s, icon: sanitizeProfileRootIcon(s.icon) };
+  });
 
 const emptyLibrary = () => ({ items: [], folders: [] });
 

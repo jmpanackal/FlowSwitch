@@ -16,6 +16,7 @@ import {
   Terminal,
   Globe
 } from "lucide-react";
+import { flowDropdownNativeSelectClass } from "./inspectorStyles";
 
 interface AddFileModalProps {
   isOpen: boolean;
@@ -235,7 +236,7 @@ export function AddFileModal({ isOpen, onClose, onAddFile, commonApps }: AddFile
                   id="type"
                   value={type}
                   onChange={(e) => setType(e.target.value)}
-                  className="w-full px-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+                  className={flowDropdownNativeSelectClass}
                 >
                   {fileTypes.map(ft => (
                     <option key={ft.value} value={ft.value}>{ft.label}</option>
@@ -322,7 +323,7 @@ export function AddFileModal({ isOpen, onClose, onAddFile, commonApps }: AddFile
                 id="windowSize"
                 value={windowSize}
                 onChange={(e) => setWindowSize(e.target.value)}
-                className="w-full px-3 py-2 bg-flow-surface border border-flow-border rounded-lg text-sm text-flow-text-primary focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50 focus:border-flow-accent-blue"
+                className={flowDropdownNativeSelectClass}
               >
                 {windowSizePresets.map(preset => (
                   <option key={preset.value} value={preset.value}>{preset.label}</option>

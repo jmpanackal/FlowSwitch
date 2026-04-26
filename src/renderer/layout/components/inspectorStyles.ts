@@ -27,12 +27,14 @@ export const inspectorFieldLabelClass =
 export const inspectorHelperTextClass =
   "text-[11px] leading-snug text-flow-text-muted";
 
-/** Native `<select>` / text inputs — same density as {@link inspectorPanelListButtonClass} (text-xs, py-2). */
-export const inspectorPanelNativeSelectClass =
-  "min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-xs text-flow-text-primary transition-[border-color,box-shadow] duration-200 ease-out focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50";
+/** Native `<select>` — same family as library toolbar pills / {@link flowDropdownNativeSelectClass}. */
+export const flowDropdownNativeSelectClass = "flow-dropdown-native-select";
 
-/** Same surface as {@link inspectorPanelNativeSelectClass} for `<input type="text" | "number" | ...>`. */
-export const inspectorPanelNativeTextInputClass = inspectorPanelNativeSelectClass;
+export const inspectorPanelNativeSelectClass = flowDropdownNativeSelectClass;
+
+/** Text/number inputs: keep denser field well (selects use pill-adjacent chrome). */
+export const inspectorPanelNativeTextInputClass =
+  "min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-bg-primary px-3 py-2 text-xs text-flow-text-primary transition-[border-color,box-shadow] duration-200 ease-out focus:border-flow-accent-blue focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50";
 
 /** Text/number input in a horizontal flex row (e.g. paste + button); no `w-full`. */
 export const inspectorPanelNativeTextInputFlexClass =

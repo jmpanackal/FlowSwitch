@@ -14,6 +14,7 @@ import type { LucideIcon } from "lucide-react";
 import type { ContentItem, ContentFolder } from "./ContentManager";
 import { ClickCopyPathBlock } from "./ClickCopyPathBlock";
 import {
+  flowDropdownNativeSelectClass,
   inspectorEyebrowBlock,
   inspectorEyebrowText,
   inspectorHelperTextClass,
@@ -516,7 +517,7 @@ export function SelectedContentDetails({
           onChange={(e) =>
             onChangeDefaultApp(id, e.target.value, isFolder ? "folder" : "item")
           }
-          className="flow-sidebar-search min-w-0 max-w-full w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-3 pr-3 text-sm text-flow-text-primary"
+          className={flowDropdownNativeSelectClass}
         >
           {appOptions.map((app) => (
             <option key={app} value={app}>
@@ -653,28 +654,58 @@ export function SelectedContentDetails({
           }}
         >
           <div
-            className={`scrollbar-elegant flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto ${
-              activeTab === "browse" ? "" : "pointer-events-none select-none"
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "browse"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "browse"}
           >
-            <div className="min-w-0 space-y-4 pr-3 sm:pr-4">{renderBrowseTab()}</div>
+            <div
+              className={
+                activeTab === "browse"
+                  ? "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
+              }
+            >
+              <div className="min-w-0 space-y-4">{renderBrowseTab()}</div>
+            </div>
           </div>
           <div
-            className={`scrollbar-elegant flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto ${
-              activeTab === "organize" ? "" : "pointer-events-none select-none"
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "organize"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "organize"}
           >
-            <div className="min-w-0 space-y-4 pr-3 sm:pr-4">{renderOrganizeTab()}</div>
+            <div
+              className={
+                activeTab === "organize"
+                  ? "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
+              }
+            >
+              <div className="min-w-0 space-y-4">{renderOrganizeTab()}</div>
+            </div>
           </div>
           <div
-            className={`scrollbar-elegant flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col overflow-x-hidden overflow-y-auto ${
-              activeTab === "add" ? "" : "pointer-events-none select-none"
+            className={`flex h-full min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+              activeTab === "add"
+                ? ""
+                : "pointer-events-none select-none overflow-hidden"
             }`}
             aria-hidden={activeTab !== "add"}
           >
-            <div className="min-w-0 space-y-4 pr-3 sm:pr-4">{renderAddTab()}</div>
+            <div
+              className={
+                activeTab === "add"
+                  ? "scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto pr-3 sm:pr-4"
+                  : "min-h-0 flex-1 overflow-hidden pr-3 sm:pr-4"
+              }
+            >
+              <div className="min-w-0 space-y-4">{renderAddTab()}</div>
+            </div>
           </div>
         </div>
       </div>

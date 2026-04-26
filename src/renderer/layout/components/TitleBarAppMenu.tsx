@@ -32,7 +32,7 @@ export function TitleBarAppMenu({
       setMenuRect({
         top: r.bottom + 6,
         left: r.left,
-        minWidth: Math.max(r.width, 13.5 * 16),
+        minWidth: Math.max(r.width, 12 * 16),
       });
     };
     update();
@@ -73,7 +73,7 @@ export function TitleBarAppMenu({
     open && menuRect
       ? createPortal(
           <div
-            className="flow-menu-panel fixed z-[30000]"
+            className="flow-menu-panel flow-menu-panel-enter fixed z-[30000]"
             style={{
               top: menuRect.top,
               left: menuRect.left,
@@ -106,37 +106,35 @@ export function TitleBarAppMenu({
       : null;
 
   return (
-    <div className="app-no-drag relative" ref={rootRef}>
+    <div className="app-no-drag relative flex shrink-0 items-center" ref={rootRef}>
       <FlowTooltip label="FlowSwitch menu" side="bottom">
-      <button
-        ref={triggerRef}
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        className="inline-flex max-w-full items-center gap-1.5 rounded-md px-1.5 py-1 text-left text-flow-text-primary transition-colors hover:bg-white/[0.08]"
-        aria-expanded={open}
-        aria-haspopup="menu"
-      >
-        <img
-          src={`${import.meta.env.BASE_URL}flowswitch-logo.png`}
-          alt=""
-          className="h-7 w-7 shrink-0 rounded-md object-contain"
-          width={28}
-          height={28}
-        />
-        <span className="truncate text-sm font-semibold tracking-tight">
-          FlowSwitch
-        </span>
-        <ChevronDown
-          className={`h-4 w-4 shrink-0 text-flow-text-muted transition-transform duration-150 ${
-            open ? "rotate-180" : ""
-          }`}
-          strokeWidth={2}
-          aria-hidden
-        />
-      </button>
+        <button
+          ref={triggerRef}
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setOpen((v) => !v);
+          }}
+          className="inline-flex max-w-full items-center gap-0.5 rounded-md p-0.5 text-flow-text-primary transition-colors hover:bg-white/[0.08]"
+          aria-label="FlowSwitch menu"
+          aria-expanded={open}
+          aria-haspopup="menu"
+        >
+          <img
+            src={`${import.meta.env.BASE_URL}flowswitch-logo.png`}
+            alt=""
+            className="h-7 w-7 shrink-0 rounded-md object-contain"
+            width={28}
+            height={28}
+          />
+          <ChevronDown
+            className={`h-4 w-4 shrink-0 text-flow-text-muted transition-transform duration-150 ${
+              open ? "rotate-180" : ""
+            }`}
+            strokeWidth={2}
+            aria-hidden
+          />
+        </button>
       </FlowTooltip>
       {menu}
     </div>

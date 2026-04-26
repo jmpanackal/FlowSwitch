@@ -1,6 +1,23 @@
 /** Max decoded size for base64 icon payloads (~2 MiB). */
 const MAX_ICON_BYTES = 2 * 1024 * 1024;
 
+/** Preset ids for `FlowProfile.icon` (must stay aligned with renderer `FLOW_PROFILE_VISUAL_ICON_IDS`). */
+const FLOW_PROFILE_ROOT_ICON_PRESETS = new Set([
+  'work',
+  'gaming',
+  'personal',
+  'study',
+  'development',
+  'creative',
+  'streaming',
+  'music',
+  'fitness',
+  'coffee',
+  'rocket',
+  'moon',
+  'laptop',
+]);
+
 /**
  * Allowlist: only raster image data URLs from main/icon pipeline (no SVG — XSS surface).
  * @param {unknown} value
@@ -46,7 +63,22 @@ const sanitizeProfileIconPathsDeep = (value) => {
   return value;
 };
 
+/**
+ * Top-level profile visual icon: preset id or validated raster data URL.
+ * @param {unknown} raw
+ * @returns {string}
+ */
+const sanitizeProfileRootIcon = (raw) => {
+  if (raw == null) return 'work';
+  const s = String(raw).trim();
+  if (isSafeIconDataUrl(s)) return s;
+  const lc = s.toLowerCase().replace(/-/g, '_');
+  if (FLOW_PROFILE_ROOT_ICON_PRESETS.has(lc)) return lc;
+  return 'work';
+};
+
 module.exports = {
   isSafeIconDataUrl,
   sanitizeProfileIconPathsDeep,
+  sanitizeProfileRootIcon,
 };

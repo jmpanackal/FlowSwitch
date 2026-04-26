@@ -3,6 +3,7 @@ import { X, Volume2, VolumeX, Shield, Power, Save, Monitor, Minimize2, FileText,
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
 import { FlowTooltip } from "./ui/tooltip";
+import { flowDropdownNativeSelectClass } from "./inspectorStyles";
 
 interface AppSettingsProps {
   app: {
@@ -352,7 +353,7 @@ export function AppSettings({
                   <select
                     value={newFileType}
                     onChange={(e) => setNewFileType(e.target.value)}
-                    className="w-full px-3 py-2 bg-flow-surface-elevated border border-flow-border rounded text-flow-text-primary text-sm"
+                    className={flowDropdownNativeSelectClass}
                   >
                     <option value="document">Document</option>
                     <option value="code">Code</option>

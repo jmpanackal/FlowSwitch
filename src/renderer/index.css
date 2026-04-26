@@ -215,6 +215,96 @@
     @apply text-xs text-flow-text-muted tabular-nums;
   }
 
+  /** Native selects for Profiles / Apps / Content sidebar filters (one pattern everywhere). */
+  .flow-sidebar-filter-select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 88%, transparent);
+    padding: 0.4375rem 0.5rem;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    font-weight: 500;
+    color: var(--flow-text-primary);
+    cursor: pointer;
+    transition:
+      border-color 200ms var(--flow-ease-out-expo),
+      box-shadow 200ms var(--flow-ease-out-expo),
+      background-color 200ms var(--flow-ease-out-expo);
+  }
+
+  .flow-sidebar-filter-select:hover:not(:disabled) {
+    border-color: color-mix(in oklch, var(--flow-border-accent) 35%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 94%, transparent);
+  }
+
+  .flow-sidebar-filter-select:focus {
+    outline: none;
+  }
+
+  .flow-sidebar-filter-select:focus-visible {
+    border-color: color-mix(in oklch, var(--flow-accent-blue) 45%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 24%, transparent);
+  }
+
+  .flow-sidebar-filter-select:focus:not(:focus-visible) {
+    box-shadow: none;
+  }
+
+  .flow-sidebar-filter-select:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
+  /**
+   * Native `<select>` — same chrome language as `.flow-sidebar-filter-select` and
+   * inspector list rows (`border-flow-border/50`, `flow-surface`, blue focus ring).
+   */
+  .flow-dropdown-native-select {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    border-radius: 0.5rem;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 88%, transparent);
+    padding: 0.5rem 0.75rem;
+    font-size: 0.75rem;
+    line-height: 1.25;
+    font-weight: 500;
+    color: var(--flow-text-primary);
+    cursor: pointer;
+    box-shadow: none;
+    transition:
+      border-color 200ms var(--flow-ease-out-expo),
+      box-shadow 200ms var(--flow-ease-out-expo),
+      background-color 200ms var(--flow-ease-out-expo);
+  }
+
+  .flow-dropdown-native-select:hover:not(:disabled) {
+    border-color: color-mix(in oklch, var(--flow-border-accent) 35%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 94%, transparent);
+  }
+
+  .flow-dropdown-native-select:focus {
+    outline: none;
+  }
+
+  .flow-dropdown-native-select:focus-visible {
+    border-color: color-mix(in oklch, var(--flow-accent-blue) 45%, transparent);
+    box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 24%, transparent);
+  }
+
+  .flow-dropdown-native-select:focus:not(:focus-visible) {
+    box-shadow: none;
+  }
+
+  .flow-dropdown-native-select:disabled {
+    cursor: not-allowed;
+    opacity: 0.55;
+  }
+
   .flow-card-quiet {
     @apply rounded-xl transition-all duration-150 ease-out;
     border: 1px solid color-mix(in oklch, var(--flow-border) 62%, transparent);
@@ -262,14 +352,14 @@
   .flow-menu-panel {
     min-width: 13.5rem;
     overflow: hidden;
-    border-radius: 0.5rem;
-    border: 1px solid color-mix(in oklch, white 12%, transparent);
-    background-color: var(--flow-bg-secondary);
+    border-radius: 0.75rem;
+    border: 1px solid color-mix(in oklch, var(--flow-border) 55%, transparent);
+    background-color: color-mix(in oklch, var(--flow-bg-secondary) 96%, transparent);
     padding-top: 0.25rem;
     padding-bottom: 0.25rem;
-    box-shadow:
-      0 18px 50px -14px rgb(0 0 0 / 0.65),
-      0 0 0 1px color-mix(in oklch, white 4%, transparent);
+    /* Single shadow stack avoids a second “hairline” that reads as choppy next to the border. */
+    box-shadow: 0 18px 48px -14px rgb(0 0 0 / 0.52);
+    -webkit-font-smoothing: antialiased;
   }
 
   /** Compact sidebar “+” popovers (match width to app row menu, avoid max-content blowout) */
@@ -287,7 +377,7 @@
   }
 
   .flow-menu-item {
-    @apply flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-flow-text-primary transition-colors duration-150 ease-out;
+    @apply flex w-full items-center gap-2 px-3 py-2.5 text-left text-sm text-flow-text-primary transition-colors duration-200 ease-out;
   }
 
   .flow-menu-item:hover:not(:disabled) {
@@ -313,6 +403,30 @@
     box-shadow:
       inset 0 2px 4px 0 rgb(0 0 0 / 0.12),
       0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 30%, transparent);
+  }
+
+  /**
+   * Library toolbar search: keep focus treatment inside the field so a sidebar
+   * `overflow-x-clip` column does not clip or grow from an outer glow ring.
+   */
+  .flow-library-toolbar .flow-sidebar-search:focus {
+    outline: none;
+    border-color: color-mix(in oklch, var(--flow-accent-blue) 45%, transparent);
+    box-shadow:
+      inset 0 2px 4px 0 rgb(0 0 0 / 0.12),
+      inset 0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 32%, transparent);
+  }
+
+  /** Chip row: scroll without visible horizontal scrollbar (use chevron buttons). */
+  .flow-library-chip-track {
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+
+  .flow-library-chip-track::-webkit-scrollbar {
+    display: none;
+    height: 0;
+    width: 0;
   }
 
   /**
@@ -1392,6 +1506,20 @@
   animation: flow-tooltip-inner-pop-kf 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+/* Portal overlay menus (library filter/sort, row overflow): short ease-in; opacity-only keeps fixed layout stable. */
+@keyframes flow-menu-panel-enter-kf {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.flow-menu-panel-enter {
+  animation: flow-menu-panel-enter-kf 0.2s var(--flow-ease-out-expo) both;
+}
+
 /* Inspector drawer (fixed right): subtle slide-in on mount. */
 @keyframes flow-inspector-panel-enter-kf {
   from {
@@ -1470,7 +1598,8 @@
   .flow-modal-panel-enter,
   .flow-modal-nested-panel-enter,
   .flow-inspector-panel-enter,
-  .flow-tooltip-inner-pop {
+  .flow-tooltip-inner-pop,
+  .flow-menu-panel-enter {
     animation: none !important;
   }
 
