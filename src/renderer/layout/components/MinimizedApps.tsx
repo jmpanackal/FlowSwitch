@@ -1,7 +1,7 @@
 import { useState, useRef, useEffect } from "react";
 import { createPortal } from "react-dom";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { Minimize2, Globe, Square, X, Package, MoreHorizontal } from "lucide-react";
+import { Minimize2, Square, X, Package, MoreHorizontal } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { matchesMinimizedAppSelection } from "../utils/appSelection";
@@ -83,7 +83,8 @@ export function MinimizedApps({
   isEditMode = false,
   compact = false,
 }: MinimizedAppsProps) {
-  const [hoveredApp, setHoveredApp] = useState<number | string | null>(null);
+  /** `file-{index}` when showing file hover details; apps do not use a hover popover. */
+  const [hoveredApp, setHoveredApp] = useState<string | null>(null);
   /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
   
@@ -118,7 +119,7 @@ export function MinimizedApps({
         <img
           src={iconSrc}
           alt={app.name}
-          className="w-5 h-5 object-contain rounded"
+          className="h-7 w-7 object-contain rounded"
           draggable={false}
         />
       );
@@ -126,8 +127,8 @@ export function MinimizedApps({
 
     if (!app.icon) {
       return (
-        <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-          <Package className="w-3 h-3 text-flow-text-muted" />
+        <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+          <Package className="h-4 w-4 text-flow-text-muted" />
         </div>
       );
     }
@@ -136,12 +137,12 @@ export function MinimizedApps({
     if (typeof app.icon === 'function') {
       try {
         const IconComponent = app.icon;
-        return <IconComponent className="w-5 h-5 text-flow-text-primary" />;
+        return <IconComponent className="h-7 w-7 text-flow-text-primary" />;
       } catch (error) {
         console.warn('Failed to render icon for app:', app.name, error);
         return (
-          <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-            <Package className="w-3 h-3 text-flow-text-muted" />
+          <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+            <Package className="h-4 w-4 text-flow-text-muted" />
           </div>
         );
       }
@@ -149,8 +150,8 @@ export function MinimizedApps({
     
     // If it's not a function, show fallback
     return (
-      <div className="w-5 h-5 bg-flow-text-muted/20 rounded flex items-center justify-center">
-        <Package className="w-3 h-3 text-flow-text-muted" />
+      <div className="flex h-7 w-7 items-center justify-center rounded bg-flow-text-muted/20">
+        <Package className="h-4 w-4 text-flow-text-muted" />
       </div>
     );
   };
@@ -416,8 +417,6 @@ export function MinimizedApps({
     setTooltipAnchor(null);
   };
 
-  const hoveredAppData =
-    typeof hoveredApp === "number" ? visibleApps[hoveredApp] : null;
   const hoveredFileData =
     typeof hoveredApp === "string" && hoveredApp.startsWith("file-")
       ? files[parseInt(hoveredApp.replace("file-", ""), 10)]
@@ -425,58 +424,6 @@ export function MinimizedApps({
 
   const renderHoverPortal = () => {
     if (!tooltipAnchor || hoveredApp === null) return null;
-
-    if (hoveredAppData) {
-      const app = hoveredAppData;
-      const monitorInfo = getMonitorInfo(app.targetMonitor || "monitor-1");
-      const isBrowser =
-        app.name.toLowerCase().includes("chrome") ||
-        app.name.toLowerCase().includes("browser");
-
-      return (
-        <div className="flow-tooltip-inner-pop inline-block w-max max-w-[min(18rem,calc(100vw-1.5rem))] rounded-lg border border-flow-border bg-flow-surface-elevated px-2.5 py-2 shadow-flow-shadow-lg">
-          <div className="text-sm font-medium text-flow-text-primary mb-1 max-w-[14rem] truncate">
-            {app.name}
-          </div>
-          <div className="text-xs text-flow-text-muted mb-2 whitespace-normal">
-            Target: {monitorInfo.name}
-            {monitorInfo.primary && (
-              <span className="ml-1 text-flow-accent-blue">(Primary)</span>
-            )}
-          </div>
-          {isBrowser && app.browserTabs && app.browserTabs.length > 0 && (
-            <div className="border-t border-flow-border pt-2">
-              <div className="text-xs text-flow-text-muted mb-1 font-medium">
-                Browser Tabs ({app.browserTabs.length})
-              </div>
-              <div className="space-y-1 max-h-24 overflow-y-auto scrollbar-elegant">
-                {app.browserTabs.slice(0, 3).map((tab, tabIndex) => (
-                  <div
-                    key={tabIndex}
-                    className={`flex items-center gap-2 px-2 py-1 rounded text-xs ${
-                      tab.isActive
-                        ? "bg-flow-accent-blue/20 text-flow-accent-blue"
-                        : "text-flow-text-muted"
-                    }`}
-                  >
-                    <Globe className="w-3 h-3 flex-shrink-0" />
-                    <span className="truncate flex-1">{tab.name}</span>
-                    {tab.isActive && (
-                      <div className="w-1.5 h-1.5 bg-flow-accent-blue rounded-full flex-shrink-0" />
-                    )}
-                  </div>
-                ))}
-                {app.browserTabs.length > 3 && (
-                  <div className="text-xs text-flow-text-muted text-center py-1">
-                    +{app.browserTabs.length - 3} more tabs
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
-      );
-    }
 
     if (hoveredFileData) {
       const file = hoveredFileData;
@@ -566,15 +513,6 @@ export function MinimizedApps({
                   key={app.instanceId ? `min-${app.instanceId}` : `min-${index}-${app.name}`}
                   data-minimized-tile=""
                   className={`relative group shrink-0 ${compact ? 'w-[4.25rem]' : 'w-[5rem]'}`}
-                  onMouseEnter={(e) => {
-                    setHoveredApp(index);
-                    const r = e.currentTarget.getBoundingClientRect();
-                    setTooltipAnchor({
-                      x: r.left + r.width / 2,
-                      y: r.top,
-                    });
-                  }}
-                  onMouseLeave={clearHover}
                 >
                   {/* App Card */}
                   <div
@@ -627,7 +565,7 @@ export function MinimizedApps({
                     >
                       {/* App Icon Container */}
                       <div
-                        className={`relative ${compact ? "h-8 w-8" : "h-10 w-10"} flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105`}
+                        className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105"
                         style={{
                           backgroundColor: `${app.color}20`,
                           border: `1px solid ${app.color}40`,
@@ -696,8 +634,8 @@ export function MinimizedApps({
                   compact ? 'w-[4.25rem]' : 'w-[5rem]'
                 }`}
               >
-                <div className="w-8 h-8 rounded-lg border border-flow-border/60 bg-flow-surface/50 flex items-center justify-center">
-                  <MoreHorizontal className="w-4 h-4 text-flow-text-muted" />
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg border border-flow-border/60 bg-flow-surface/50">
+                  <MoreHorizontal className="h-5 w-5 text-flow-text-muted" />
                 </div>
                 <span className="text-[10px] text-flow-text-muted font-medium">+{hiddenAppsCount} more</span>
               </div>
@@ -777,13 +715,13 @@ export function MinimizedApps({
                       className={`flex flex-col items-center ${compact ? "gap-1 px-1.5 pb-1.5 pt-1" : "gap-1.5 p-2"}`}
                     >
                       <div
-                        className={`relative flex items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105 ${compact ? "h-8 w-8" : "h-10 w-10"}`}
+                        className="relative flex h-10 w-10 items-center justify-center rounded-lg transition-all duration-200 group-hover:scale-105"
                         style={{
                           backgroundColor: `${fileColor}20`,
                           border: `1px solid ${fileColor}40`,
                         }}
                       >
-                        <FileIcon type={file.type} className={compact ? "h-4 w-4" : "h-5 w-5"} />
+                        <FileIcon type={file.type} className="h-7 w-7" />
                       </div>
 
                       <div className="w-full text-center">

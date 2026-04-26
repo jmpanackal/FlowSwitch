@@ -127,7 +127,7 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
 
       {/* Dropdown Panel */}
       {isOpen && !disabled && (
-        <div className="absolute top-full left-0 mt-2 w-full bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg z-50 overflow-hidden">
+        <div className="absolute left-0 top-full z-50 mt-2 w-full overflow-hidden rounded-lg border border-flow-border bg-flow-surface-elevated shadow-lg flow-modal-panel-enter">
           {/* Quick Presets */}
           <div className="p-3 border-b border-flow-border">
             <h4 className="text-xs font-medium text-flow-text-secondary mb-2">Quick Select</h4>
@@ -160,7 +160,7 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
                 <select
                   value={hour}
                   onChange={(e) => handleCustomTimeChange(parseInt(e.target.value), minute, period)}
-                  className="w-full px-2 py-1.5 bg-flow-bg-secondary border border-flow-border rounded text-sm text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className="flow-dropdown-native-select w-full text-sm leading-snug"
                 >
                   {Array.from({ length: 12 }, (_, i) => i + 1).map((h) => (
                     <option key={h} value={h}>{h}</option>
@@ -174,7 +174,7 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
                 <select
                   value={minute}
                   onChange={(e) => handleCustomTimeChange(hour, parseInt(e.target.value), period)}
-                  className="w-full px-2 py-1.5 bg-flow-bg-secondary border border-flow-border rounded text-sm text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className="flow-dropdown-native-select w-full text-sm leading-snug"
                 >
                   {Array.from({ length: 60 }, (_, i) => i).filter(m => m % 5 === 0).map((m) => (
                     <option key={m} value={m}>{m.toString().padStart(2, '0')}</option>
@@ -188,7 +188,7 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
                 <select
                   value={period}
                   onChange={(e) => handleCustomTimeChange(hour, minute, e.target.value as 'AM' | 'PM')}
-                  className="w-full px-2 py-1.5 bg-flow-bg-secondary border border-flow-border rounded text-sm text-flow-text-primary focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className="flow-dropdown-native-select w-full text-sm leading-snug"
                 >
                   <option value="AM">AM</option>
                   <option value="PM">PM</option>

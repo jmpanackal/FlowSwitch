@@ -202,8 +202,8 @@ export function AddAppModal({
   if (!isOpen) return null;
 
   return (
-    <div className="fixed inset-0 bg-black/50 backdrop-blur-sm z-50 flex items-center justify-center p-4">
-      <div className="bg-flow-surface-elevated border border-flow-border rounded-xl w-full max-w-2xl max-h-[80vh] flex flex-col shadow-lg">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm flow-modal-backdrop-enter">
+      <div className="app-no-drag flex max-h-[80vh] w-full max-w-2xl flex-col rounded-xl border border-flow-border bg-flow-surface-elevated shadow-lg flow-modal-panel-enter">
         {/* Header */}
         <div className="flex items-center justify-between p-6 border-b border-flow-border">
           <div>

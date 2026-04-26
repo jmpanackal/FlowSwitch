@@ -8,6 +8,13 @@ import {
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
 import { FlowTooltip } from "./ui/tooltip";
+import {
+  FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS,
+  FLOW_LIBRARY_TOOLBAR_PILL_CLASS,
+  FlowLibraryToolbar,
+  type FlowLibraryViewMode,
+} from "./FlowLibraryToolbar";
+import { flowDropdownNativeSelectClass } from "./inspectorStyles";
 
 // Enhanced content types for the unified system
 export interface ContentFolder {
@@ -213,6 +220,8 @@ export function ContentManager({
   const effectiveSearchQuery = sidebarSearchControlled
     ? sidebarSearchQuery
     : searchQuery;
+  const [contentLibraryView, setContentLibraryView] =
+    useState<FlowLibraryViewMode>("list");
   const [selectedType, setSelectedType] = useState<'all' | 'link' | 'file' | 'folder'>('all');
   const [sortBy, setSortBy] = useState<SortOption>('name');
   const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
@@ -993,18 +1002,28 @@ export function ContentManager({
     const baseClasses = "group relative cursor-pointer";
 
     if (compact) {
+      const isGrid = contentLibraryView === "grid";
+      const tight = contentLibraryView === "compact";
+      const rowPad = tight ? "p-2" : "p-3";
+      const titleSz = tight ? "text-xs" : "text-sm";
       return (
         <div key={folder.id} className={baseClasses}>
-          <div className="flow-card-quiet rounded-lg">
+          <div className="flow-card-quiet min-w-0 rounded-lg">
             <div
-              className="flex cursor-pointer items-center gap-3 p-3"
+              className={`flex cursor-pointer gap-3 ${rowPad} ${
+                isGrid
+                  ? "min-w-0 flex-col items-center text-center"
+                  : "items-center"
+              }`}
               onClick={() => handleContentClick(folder)}
             >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
                 <Folder className="h-4 w-4 text-amber-400" aria-hidden />
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="truncate text-sm font-medium text-flow-text-primary">
+              <div className={`min-w-0 ${isGrid ? "w-full" : "flex-1"}`}>
+                <h3
+                  className={`truncate font-medium text-flow-text-primary ${titleSz}`}
+                >
                   {folder.name}
                 </h3>
               </div>
@@ -1282,11 +1301,19 @@ export function ContentManager({
     const baseClasses = "group relative cursor-grab active:cursor-grabbing";
 
     if (compact) {
+      const isGrid = contentLibraryView === "grid";
+      const tight = contentLibraryView === "compact";
+      const rowPad = tight ? "p-2" : "p-3";
+      const titleSz = tight ? "text-xs" : "text-sm";
       return (
         <div key={item.id} className={baseClasses}>
-          <div className="flow-card-quiet rounded-lg">
+          <div className="flow-card-quiet min-w-0 rounded-lg">
             <div
-              className="flex cursor-grab items-center gap-3 p-3 active:cursor-grabbing"
+              className={`flex cursor-grab gap-3 ${rowPad} active:cursor-grabbing ${
+                isGrid
+                  ? "min-w-0 flex-col items-center text-center"
+                  : "items-center"
+              }`}
               onMouseDown={(e) => handleMouseDown(e, item)}
               onMouseEnter={() => setHoveredItem(item.id)}
               onMouseLeave={() => setHoveredItem(null)}
@@ -1294,8 +1321,10 @@ export function ContentManager({
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
                 {getContentIcon(item)}
               </div>
-              <div className="min-w-0 flex-1">
-                <h3 className="truncate text-sm font-medium text-flow-text-primary">
+              <div className={`min-w-0 ${isGrid ? "w-full" : "flex-1"}`}>
+                <h3
+                  className={`truncate font-medium text-flow-text-primary ${titleSz}`}
+                >
                   {item.name}
                 </h3>
               </div>
@@ -1585,6 +1614,33 @@ export function ContentManager({
     };
   }, [appDropdownOpen]);
 
+  const libraryTypeCounts = useMemo(
+    () => ({
+      all: content.length + folders.length,
+      link: content.filter((i) => i.type === "link").length,
+      file: content.filter((i) => i.type === "file").length,
+      folder: folders.length,
+    }),
+    [content, folders],
+  );
+
+  useEffect(() => {
+    if (selectedType === "link" && libraryTypeCounts.link === 0) {
+      setSelectedType("all");
+    }
+    if (selectedType === "file" && libraryTypeCounts.file === 0) {
+      setSelectedType("all");
+    }
+    if (selectedType === "folder" && libraryTypeCounts.folder === 0) {
+      setSelectedType("all");
+    }
+  }, [
+    selectedType,
+    libraryTypeCounts.link,
+    libraryTypeCounts.file,
+    libraryTypeCounts.folder,
+  ]);
+
   const { folders: displayFolders, content: displayContent } = getDisplayItems();
   const breadcrumbs = getCurrentBreadcrumbs();
 
@@ -1599,99 +1655,222 @@ export function ContentManager({
           : "p-4"
       }
     >
-      {/* Header */}
-      <div
-        className={`flex items-center justify-between ${
-          compact
-            ? "shrink-0 border-b border-flow-border/50 px-3 py-3"
-            : "mb-4"
-        }`}
-      >
-        <div className="flex min-w-0 items-center gap-2">
-          {compact ? (
+      {compact ? (
+        <FlowLibraryToolbar
+          toolbarStart={
             <FlowTooltip label={CONTENT_SIDEBAR_COMPACT_HELP}>
               <button
                 type="button"
-                className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
+                className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-flow-text-muted transition-colors hover:bg-white/[0.06] hover:text-flow-text-primary"
                 aria-label={CONTENT_SIDEBAR_COMPACT_HELP}
               >
                 <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
               </button>
             </FlowTooltip>
-          ) : (
-            <>
-              <Link
-                className="h-4 w-4 shrink-0 text-flow-text-muted"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-              <h2 className="text-sm font-medium uppercase tracking-wide text-flow-text-secondary">
-                Content
-              </h2>
-
-              <div className="relative">
-                <button
-                  type="button"
-                  onMouseEnter={() => setShowHelpTooltip(true)}
-                  onMouseLeave={() => setShowHelpTooltip(false)}
-                  className="inline-flex items-center justify-center rounded p-1 text-flow-text-muted transition-colors hover:text-flow-text-secondary"
-                  aria-label="Show help"
-                >
-                  <Info className="h-3 w-3" />
-                </button>
-
-                {showHelpTooltip && (
-                  <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-flow-border bg-flow-surface-elevated p-3 shadow-lg">
-                    <div className="mb-2 text-xs font-medium text-flow-text-secondary">
-                      Actions:
-                    </div>
-                    <div className="space-y-1 text-xs text-flow-text-muted">
-                      {getHelpTooltipContent().map((line, index) => (
-                        <div key={index}>{line}</div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {currentFolder && selectedType === "all" && (
-                <span className="text-xs text-flow-text-muted">
-                  in {currentFolder.name}
+          }
+          toolbarEnd={
+            <div className="relative min-w-0">
+              <FlowTooltip
+                label={
+                  !currentProfile
+                    ? "Select a profile first"
+                    : "Add link or files"
+                }
+              >
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    disabled={!currentProfile}
+                    onClick={() => {
+                      if (!currentProfile) return;
+                      setShowAddMenu(!showAddMenu);
+                    }}
+                    className={`${FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS}${
+                      !currentProfile ? " cursor-not-allowed opacity-50" : ""
+                    }`}
+                    aria-expanded={showAddMenu}
+                    aria-haspopup="menu"
+                    aria-label={
+                      !currentProfile
+                        ? "Select a profile first"
+                        : "Add link or files"
+                    }
+                  >
+                    <Plus
+                      className="h-3.5 w-3.5 shrink-0"
+                      strokeWidth={2}
+                      aria-hidden
+                    />
+                    <ChevronDown
+                      className={`h-3.5 w-3.5 shrink-0 opacity-80 ${showAddMenu ? "rotate-180" : ""} transition-transform duration-150`}
+                      strokeWidth={2}
+                      aria-hidden
+                    />
+                  </button>
                 </span>
-              )}
-              {(selectedType === "link" || selectedType === "file") && (
-                <span className="text-xs text-flow-text-muted">
-                  {selectedType}s from all folders
-                </span>
-              )}
-            </>
-          )}
-        </div>
-        <div className="flex shrink-0 items-center gap-2">
-          {compact ? (
-            <span className="flow-sidebar-meta">
-              {displayFolders.length + displayContent.length} in view
-            </span>
-          ) : null}
-          <div className="relative">
-            <FlowTooltip label="Add Content">
+              </FlowTooltip>
+
+              {showAddMenu ? (
+                <div className="flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1 w-40 min-w-0 py-0.5">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddModalType("link");
+                      setShowAddModal(true);
+                      setShowAddMenu(false);
+                    }}
+                    className="flow-menu-item text-xs"
+                  >
+                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-blue-400" />
+                    Add Link
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setAddModalType("file");
+                      setShowAddModal(true);
+                      setShowAddMenu(false);
+                    }}
+                    className="flow-menu-item text-xs"
+                  >
+                    <Upload className="h-3.5 w-3.5 shrink-0 text-emerald-400" />
+                    Add files…
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          }
+          filterChips={[
+            {
+              id: "all",
+              label: "All",
+              count: libraryTypeCounts.all,
+            },
+            {
+              id: "link",
+              label: "Links",
+              count: libraryTypeCounts.link,
+              disabled: libraryTypeCounts.link === 0,
+            },
+            {
+              id: "file",
+              label: "Files",
+              count: libraryTypeCounts.file,
+              disabled: libraryTypeCounts.file === 0,
+            },
+            {
+              id: "folder",
+              label: "Folders",
+              count: libraryTypeCounts.folder,
+              disabled: libraryTypeCounts.folder === 0,
+            },
+          ]}
+          selectedFilterId={selectedType}
+          onSelectFilter={(id) =>
+            setSelectedType(id as "all" | "link" | "file" | "folder")
+          }
+          searchValue={effectiveSearchQuery}
+          onSearchChange={
+            sidebarSearchControlled
+              ? onSidebarSearchQueryChange!
+              : setSearchQuery
+          }
+          searchPlaceholder="Search content…"
+          searchAriaLabel="Search content library"
+          sortOptions={[
+            { id: "name", label: "Name" },
+            { id: "lastUsed", label: "Recent" },
+            { id: "dateAdded", label: "Added" },
+            { id: "type", label: "Type" },
+            { id: "favorites", label: "Favorites" },
+          ]}
+          selectedSortId={sortBy}
+          onSelectSort={(id) => setSortBy(id as SortOption)}
+          viewMode={contentLibraryView}
+          onViewModeChange={setContentLibraryView}
+          showViewModes
+        />
+      ) : (
+        <div className="mb-4 flex items-center justify-between gap-2">
+          <div className="flex min-w-0 shrink-0 items-center gap-2">
+            <Link
+              className="h-4 w-4 shrink-0 text-flow-text-muted"
+              strokeWidth={1.75}
+              aria-hidden
+            />
+            <h2 className="text-sm font-medium uppercase tracking-wide text-flow-text-secondary">
+              Content
+            </h2>
+
+            <div className="relative">
               <button
                 type="button"
-                onClick={() => setShowAddMenu(!showAddMenu)}
-                className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-flow-text-secondary transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                onMouseEnter={() => setShowHelpTooltip(true)}
+                onMouseLeave={() => setShowHelpTooltip(false)}
+                className="inline-flex items-center justify-center rounded p-1 text-flow-text-muted transition-colors hover:text-flow-text-secondary"
+                aria-label="Show help"
               >
-                <Plus className="h-3 w-3" />
-                Add
-                <ChevronDown className="h-3 w-3" />
+                <Info className="h-3 w-3" />
               </button>
+
+              {showHelpTooltip ? (
+                <div className="absolute left-0 top-full z-50 mt-2 w-64 rounded-lg border border-flow-border bg-flow-surface-elevated p-3 shadow-lg">
+                  <div className="mb-2 text-xs font-medium text-flow-text-secondary">
+                    Actions:
+                  </div>
+                  <div className="space-y-1 text-xs text-flow-text-muted">
+                    {getHelpTooltipContent().map((line, index) => (
+                      <div key={index}>{line}</div>
+                    ))}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            {currentFolder && selectedType === "all" ? (
+              <span className="text-xs text-flow-text-muted">
+                in {currentFolder.name}
+              </span>
+            ) : null}
+            {selectedType === "link" || selectedType === "file" ? (
+              <span className="text-xs text-flow-text-muted">
+                {selectedType}s from all folders
+              </span>
+            ) : null}
+          </div>
+          <div className="relative shrink-0">
+            <FlowTooltip
+              label={!currentProfile ? "Select a profile first" : "Add Content"}
+            >
+              <span className="inline-flex">
+                <button
+                  type="button"
+                  disabled={!currentProfile}
+                  onClick={() => {
+                    if (!currentProfile) return;
+                    setShowAddMenu(!showAddMenu);
+                  }}
+                  className="inline-flex items-center gap-1 rounded-lg px-2 py-1 text-xs text-flow-text-secondary transition-colors hover:bg-flow-surface hover:text-flow-text-primary"
+                  aria-expanded={showAddMenu}
+                  aria-haspopup="menu"
+                >
+                  <Plus
+                    className="h-3 w-3 shrink-0"
+                    strokeWidth={1.75}
+                    aria-hidden
+                  />
+                  Add
+                  <ChevronDown className="h-3 w-3" aria-hidden />
+                </button>
+              </span>
             </FlowTooltip>
 
-            {showAddMenu && (
-              <div className="flow-menu-panel absolute right-0 top-full z-[30000] mt-1 w-40 min-w-0 py-0.5">
+            {showAddMenu ? (
+              <div className="flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1 w-40 min-w-0 py-0.5">
                 <button
                   type="button"
                   onClick={() => {
-                    setAddModalType('link');
+                    setAddModalType("link");
                     setShowAddModal(true);
                     setShowAddMenu(false);
                   }}
@@ -1703,7 +1882,7 @@ export function ContentManager({
                 <button
                   type="button"
                   onClick={() => {
-                    setAddModalType('file');
+                    setAddModalType("file");
                     setShowAddModal(true);
                     setShowAddMenu(false);
                   }}
@@ -1713,15 +1892,13 @@ export function ContentManager({
                   Add files…
                 </button>
               </div>
-            )}
+            ) : null}
           </div>
         </div>
-      </div>
+      )}
 
-      <div
-        className={`space-y-3 ${compact ? "mb-3 shrink-0 px-3 pt-3" : "mb-4"}`}
-      >
-        {!sidebarSearchControlled ? (
+      {!compact ? (
+        <div className="mb-4 space-y-3">
           <div className="relative">
             <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 transform text-flow-text-muted" />
             <input
@@ -1729,16 +1906,9 @@ export function ContentManager({
               placeholder="Search content..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
-              className={
-                compact
-                  ? "flow-sidebar-search w-full py-2 pl-9 pr-3"
-                  : "w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary placeholder-flow-text-muted transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
-              }
+              className="w-full rounded-lg border border-flow-border bg-flow-surface py-2 pl-9 pr-3 text-sm text-flow-text-primary placeholder-flow-text-muted transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-2 focus:ring-flow-accent-blue/50"
             />
           </div>
-        ) : null}
-
-        {!compact ? (
           <div className="space-y-3">
             <div className="grid grid-cols-2 gap-2">
               <FlowTooltip label="Filter by content type">
@@ -1749,7 +1919,7 @@ export function ContentManager({
                       e.target.value as "all" | "link" | "file" | "folder",
                     )
                   }
-                  className="w-full rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className={flowDropdownNativeSelectClass}
                 >
                   <option value="all">All Types</option>
                   <option value="link">Links</option>
@@ -1762,7 +1932,7 @@ export function ContentManager({
                 <select
                   value={sortBy}
                   onChange={(e) => setSortBy(e.target.value as SortOption)}
-                  className="w-full rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className={flowDropdownNativeSelectClass}
                 >
                   <option value="name">Name</option>
                   <option value="lastUsed">Recent</option>
@@ -1778,7 +1948,7 @@ export function ContentManager({
                 <select
                   value={viewMode}
                   onChange={(e) => setViewMode(e.target.value as ViewMode)}
-                  className="min-w-0 flex-1 rounded border border-flow-border bg-flow-surface px-2 py-1.5 text-xs text-flow-text-primary transition-all duration-200 focus:border-flow-accent-blue/50 focus:outline-none focus:ring-1 focus:ring-flow-accent-blue/50"
+                  className={`min-w-0 flex-1 ${flowDropdownNativeSelectClass}`}
                 >
                   <option value="normal">Normal</option>
                   <option value="detailed">Detailed</option>
@@ -1810,8 +1980,8 @@ export function ContentManager({
               </FlowTooltip>
             </div>
           </div>
-        ) : null}
-      </div>
+        </div>
+      ) : null}
 
       {/* Breadcrumbs - Moved to appear under filters */}
       {breadcrumbs.length > 1 && selectedType === 'all' && (
@@ -1850,7 +2020,15 @@ export function ContentManager({
         }
       >
         <div
-          className={`${viewMode === "simplified" ? "space-y-1" : "space-y-2"}${compact ? " pr-2.5" : ""}`}
+          className={
+            compact
+              ? contentLibraryView === "grid"
+                ? "grid grid-cols-2 gap-2 pr-2.5"
+                : contentLibraryView === "compact"
+                  ? "space-y-1 pr-2.5"
+                  : "space-y-2 pr-2.5"
+              : `${viewMode === "simplified" ? "space-y-1" : "space-y-2"}`
+          }
         >
         {displayFolders.length === 0 && displayContent.length === 0 ? (
           <div className="text-center py-8">

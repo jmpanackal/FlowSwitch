@@ -14,6 +14,11 @@ type SidebarOverlayMenuProps = {
   anchorEl: HTMLElement | null;
   onClose: () => void;
   children: React.ReactNode;
+  /**
+   * When true, avoid the compact max-height + internal scroll used for long per-row menus.
+   * Library filter/sort popovers are short; this shows full content without a scrollbar.
+   */
+  unconstrainedHeight?: boolean;
 };
 
 /**
@@ -25,6 +30,7 @@ export function SidebarOverlayMenu({
   anchorEl,
   onClose,
   children,
+  unconstrainedHeight = false,
 }: SidebarOverlayMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [layoutTick, setLayoutTick] = useState(0);
@@ -46,7 +52,12 @@ export function SidebarOverlayMenu({
     const vw = window.innerWidth;
     const vh = window.innerHeight;
 
-    menu.style.maxHeight = `${MENU_MAX_H_PX}px`;
+    if (unconstrainedHeight) {
+      menu.style.maxHeight = "";
+      menu.style.overflowY = "visible";
+    } else {
+      menu.style.maxHeight = `${MENU_MAX_H_PX}px`;
+    }
 
     const mw = Math.min(menu.offsetWidth, vw - margin * 2);
 
@@ -60,6 +71,14 @@ export function SidebarOverlayMenu({
       const aboveTop = r.top - margin - h;
       if (aboveTop >= margin) {
         top = aboveTop;
+      } else if (unconstrainedHeight) {
+        const maxH = Math.max(120, vh - margin * 2);
+        menu.style.maxHeight = `${maxH}px`;
+        menu.style.overflowY = "auto";
+        h = menu.offsetHeight;
+        if (top + h > vh - margin) {
+          top = Math.max(margin, vh - margin - h);
+        }
       } else {
         const maxH = Math.max(120, vh - top - margin);
         menu.style.maxHeight = `${maxH}px`;
@@ -76,7 +95,7 @@ export function SidebarOverlayMenu({
     menu.style.right = "auto";
     menu.style.bottom = "auto";
     menu.style.zIndex = "30000";
-  }, [open, anchorEl, layoutTick]);
+  }, [open, anchorEl, layoutTick, unconstrainedHeight]);
 
   useEffect(() => {
     if (!open) return;
@@ -109,10 +128,14 @@ export function SidebarOverlayMenu({
 
   if (!open || !anchorEl) return null;
 
+  const panelClass = unconstrainedHeight
+    ? "flow-menu-panel flow-menu-panel--compact flow-menu-panel-enter max-h-none overflow-visible py-0.5"
+    : "flow-menu-panel flow-menu-panel--compact flow-menu-panel-enter scrollbar-elegant max-h-56 overflow-y-auto py-0.5";
+
   return createPortal(
     <div
       ref={menuRef}
-      className="flow-menu-panel flow-menu-panel--compact scrollbar-elegant max-h-56 overflow-y-auto py-0.5"
+      className={panelClass}
       role="menu"
     >
       {children}

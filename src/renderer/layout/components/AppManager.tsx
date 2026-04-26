@@ -1,7 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
-  Search,
   Settings,
   Power,
   Save,
@@ -11,6 +10,7 @@ import {
 import { useInstalledApps } from "../../hooks/useInstalledApps";
 import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
 import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
+import { resolveInstalledAppLibraryCategory } from "../../utils/installedAppLibraryCategory";
 import {
   placeInstalledSidebarAppOnMinimized,
   placeInstalledSidebarAppOnMonitor,
@@ -18,6 +18,10 @@ import {
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 import { FlowTooltip } from "./ui/tooltip";
+import {
+  FlowLibraryToolbar,
+  type FlowLibraryViewMode,
+} from "./FlowLibraryToolbar";
 
 type AppType = {
   name: string;
@@ -44,6 +48,8 @@ interface AppManagerProps {
   onSidebarSearchQueryChange?: (query: string) => void;
   /** Compact sidebar: open right-hand inspector for this installed app (not on layout). */
   onInspectInstalledApp?: (app: AppType) => void;
+  /** User overrides for Apps library category (key = `getInstalledAppCatalogKey`). */
+  installedAppCategoryOverrides?: Record<string, string>;
 }
 
 const getStableColor = (name: string) => {
@@ -58,17 +64,6 @@ const getStableColor = (name: string) => {
 const APPS_SIDEBAR_HELP =
   "Open ⋯ on a row to add to a monitor or minimized row, or change catalog visibility.";
 
-const inferCategory = (name: string) => {
-  const normalized = name.toLowerCase();
-  if (/(chrome|firefox|edge|brave|vivaldi|opera|safari|browser)/.test(normalized)) return "Browser";
-  if (/(code|studio|terminal|intellij|pycharm|webstorm|developer)/.test(normalized)) return "Development";
-  if (/(discord|slack|teams|zoom|mail|outlook|telegram|whatsapp)/.test(normalized)) return "Communication";
-  if (/(spotify|music|vlc|media|camera|photos|video)/.test(normalized)) return "Media";
-  if (/(calendar|note|notion|office|word|excel|powerpoint|task)/.test(normalized)) return "Productivity";
-  if (/(steam|epic|game|xbox|battle\\.net|gog)/.test(normalized)) return "Gaming";
-  return "Other";
-};
-
 export function AppManager({
   profiles,
   onUpdateProfile: _onUpdateProfile,
@@ -81,6 +76,7 @@ export function AppManager({
   sidebarSearchQuery,
   onSidebarSearchQueryChange,
   onInspectInstalledApp,
+  installedAppCategoryOverrides = {},
 }: AppManagerProps) {
   const [searchTerm, setSearchTerm] = useState('');
   const sidebarSearchControlled =
@@ -90,6 +86,8 @@ export function AppManager({
   const effectiveSearchTerm = sidebarSearchControlled
     ? sidebarSearchQuery
     : searchTerm;
+  const [appsLibraryView, setAppsLibraryView] =
+    useState<FlowLibraryViewMode>("list");
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [overflowMenuOpen, setOverflowMenuOpen] = useState<{
     catalogKey: string;
@@ -105,17 +103,27 @@ export function AppManager({
     include: includeInCatalog,
   } = useInstalledCatalogExclusions();
   const installedAppsListLoading = installedAppsLoading && installedApps.length === 0;
-  const allApps = useMemo<AppType[]>(() => (
-    installedApps.map((app) => ({
-      name: app.name,
-      iconPath: app.iconPath,
-      executablePath: app.executablePath ?? null,
-      shortcutPath: app.shortcutPath ?? null,
-      launchUrl: app.launchUrl ?? null,
-      color: getStableColor(app.name),
-      category: inferCategory(app.name),
-    }))
-  ), [installedApps]);
+  const allApps = useMemo<AppType[]>(
+    () =>
+      installedApps.map((app) => ({
+        name: app.name,
+        iconPath: app.iconPath,
+        executablePath: app.executablePath ?? null,
+        shortcutPath: app.shortcutPath ?? null,
+        launchUrl: app.launchUrl ?? null,
+        color: getStableColor(app.name),
+        category: resolveInstalledAppLibraryCategory(
+          {
+            name: app.name,
+            executablePath: app.executablePath ?? null,
+            shortcutPath: app.shortcutPath ?? null,
+            launchUrl: app.launchUrl ?? null,
+          },
+          installedAppCategoryOverrides,
+        ),
+      })),
+    [installedApps, installedAppCategoryOverrides],
+  );
 
 
   // Last-accessed and executable size are not tracked yet in renderer.
@@ -309,88 +317,85 @@ export function AppManager({
   };
 
   if (compact) {
+    const appsListLayoutClass =
+      appsLibraryView === "grid"
+        ? "grid grid-cols-2 gap-2"
+        : appsLibraryView === "compact"
+          ? "flex min-h-0 flex-col gap-1"
+          : "flex min-h-0 flex-col gap-2";
+    const rowPad = appsLibraryView === "compact" ? "p-2" : "p-3";
+    const titleCls =
+      appsLibraryView === "compact"
+        ? "text-xs font-medium"
+        : "text-sm font-medium";
+
     return (
       <div className="flex min-h-0 flex-1 flex-col">
-        <div className="flex shrink-0 items-center justify-between gap-2 border-b border-flow-border/50 px-3 py-2.5">
-          <FlowTooltip label={APPS_SIDEBAR_HELP}>
-            <button
-              type="button"
-              className="inline-flex shrink-0 items-center justify-center rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-secondary"
-              aria-label={APPS_SIDEBAR_HELP}
-            >
-              <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
-            </button>
-          </FlowTooltip>
-          <div className="min-w-0 flex-1">
-            {installedAppsListLoading ? (
-              <div className="text-right">
-                <span className="flow-sidebar-meta">Loading…</span>
-              </div>
-            ) : (
-              <div
-                className="flex min-w-0 flex-wrap items-center justify-end gap-1"
-                role="tablist"
-                aria-label="Installed apps list"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={listTab === "available"}
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors ${
-                    listTab === "available"
-                      ? "bg-flow-surface text-flow-text-primary ring-1 ring-flow-border/60"
-                      : "text-flow-text-muted hover:bg-flow-surface/60 hover:text-flow-text-secondary"
-                  }`}
-                  onClick={() => setListTab("available")}
-                >
-                  <span>Available</span>
-                  <span className="tabular-nums opacity-90">
-                    {availableTabCount}
-                  </span>
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={listTab === "hidden"}
-                  disabled={hiddenTabCount === 0}
-                  className={`inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium transition-colors disabled:pointer-events-none disabled:opacity-35 ${
-                    listTab === "hidden"
-                      ? "bg-flow-surface text-flow-text-primary ring-1 ring-flow-border/60"
-                      : "text-flow-text-muted hover:bg-flow-surface/60 hover:text-flow-text-secondary"
-                  }`}
-                  onClick={() => setListTab("hidden")}
-                >
-                  <span>Hidden</span>
-                  <span className="tabular-nums opacity-90">
-                    {hiddenTabCount}
-                  </span>
-                </button>
-              </div>
-            )}
+        {installedAppsListLoading ? (
+          <div className="flex shrink-0 items-center justify-center border-b border-flow-border/40 px-3 py-3 text-xs text-flow-text-muted">
+            Loading catalog…
           </div>
-        </div>
+        ) : (
+          <FlowLibraryToolbar
+            toolbarStart={
+              <FlowTooltip label={APPS_SIDEBAR_HELP}>
+                <button
+                  type="button"
+                  className="inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-flow-text-muted transition-colors hover:bg-white/[0.06] hover:text-flow-text-primary"
+                  aria-label={APPS_SIDEBAR_HELP}
+                >
+                  <Info className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+                </button>
+              </FlowTooltip>
+            }
+            filterChips={[
+              {
+                id: "available",
+                label: "Available",
+                count: availableTabCount,
+              },
+              {
+                id: "hidden",
+                label: "Hidden",
+                count: hiddenTabCount,
+                disabled: hiddenTabCount === 0,
+              },
+            ]}
+            selectedFilterId={listTab}
+            onSelectFilter={(id) =>
+              setListTab(id as "available" | "hidden")
+            }
+            searchValue={effectiveSearchTerm}
+            onSearchChange={
+              sidebarSearchControlled
+                ? onSidebarSearchQueryChange!
+                : setSearchTerm
+            }
+            searchPlaceholder="Search apps…"
+            searchAriaLabel="Search installed apps"
+            sortOptions={[
+              { id: "name", label: "Name" },
+              { id: "lastAccessed", label: "Recent" },
+              { id: "size", label: "Size" },
+            ]}
+            selectedSortId={sortOption}
+            onSelectSort={(id) =>
+              setSortOption(id as "name" | "lastAccessed" | "size")
+            }
+            viewMode={appsLibraryView}
+            onViewModeChange={setAppsLibraryView}
+            showViewModes
+          />
+        )}
 
-        <div className="flex min-h-0 min-w-0 flex-1 flex-col pl-3 pr-0 pb-3 pt-3">
-          {!sidebarSearchControlled ? (
-            <div className="relative mb-3 shrink-0">
-              <Search className="absolute left-3 top-1/2 h-3 w-3 -translate-y-1/2 transform text-flow-text-muted" />
-              <input
-                type="text"
-                placeholder="Search apps..."
-                value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
-                className="flow-sidebar-search w-full py-2 pl-9 pr-3"
-              />
-            </div>
-          ) : null}
-
+        <div className="flex min-h-0 min-w-0 flex-1 flex-col px-0 pb-3 pt-3 pl-3 pr-0">
         <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-x-hidden overflow-y-auto overscroll-contain">
           {installedAppsListLoading ? (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center px-2 py-6 pr-2.5">
               <InstalledAppsSidebarSkeleton />
             </div>
           ) : (
-          <div className="flex min-h-0 flex-col gap-2 pr-2.5">
+          <div className={`min-h-0 pr-2.5 ${appsListLayoutClass}`}>
           {filteredApps.map((app) => {
             const catalogKey = getInstalledAppCatalogKey(app);
             const layoutFlags = getAppLayoutAggregateFlags(app.name);
@@ -398,9 +403,17 @@ export function AppManager({
             return (
               <div
                 key={catalogKey}
-                className="flow-card-quiet rounded-lg"
+                className={`flow-card-quiet rounded-lg min-w-0 ${
+                  appsLibraryView === "grid" ? "min-w-0" : ""
+                }`}
               >
-                <div className="flex items-center gap-3 p-3">
+                <div
+                  className={`flex gap-3 ${rowPad} ${
+                    appsLibraryView === "grid"
+                      ? "flex-col items-center text-center"
+                      : "items-center"
+                  }`}
+                >
                   <FlowTooltip label="Drag to add to monitor or minimized apps">
                   <div 
                     className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
@@ -436,7 +449,9 @@ export function AppManager({
                   </div>
                   </FlowTooltip>
                   <div
-                    className={`flex-1 min-w-0${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
+                    className={`min-w-0 ${
+                      appsLibraryView === "grid" ? "w-full" : "flex-1"
+                    }${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
                     onClick={
                       compact && onInspectInstalledApp
                         ? () => onInspectInstalledApp(app)
@@ -455,8 +470,14 @@ export function AppManager({
                     role={compact && onInspectInstalledApp ? "button" : undefined}
                     tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
                   >
-                    <div className="flex items-center gap-2 mb-0.5">
-                      <h4 className="text-flow-text-primary text-sm font-medium truncate">
+                    <div
+                      className={`flex items-center gap-2 ${
+                        appsLibraryView === "grid" ? "justify-center" : ""
+                      } mb-0.5`}
+                    >
+                      <h4
+                        className={`text-flow-text-primary truncate ${titleCls}`}
+                      >
                         {app.name}
                       </h4>
                       <div className="flex items-center gap-1">
@@ -473,14 +494,20 @@ export function AppManager({
                         )}
                       </div>
                     </div>
-                    <div className="flex items-center gap-2 text-xs text-flow-text-muted">
-                      <span className="rounded bg-flow-bg-tertiary px-1.5 py-0.5 text-xs">
-                        {app.category}
-                      </span>
-                    </div>
+                    {appsLibraryView === "grid" ? null : (
+                      <div className="flex items-center gap-2 text-xs text-flow-text-muted">
+                        <span className="rounded bg-flow-bg-tertiary px-1.5 py-0.5 text-xs">
+                          {app.category}
+                        </span>
+                      </div>
+                    )}
                   </div>
                   <div
-                    className="flex shrink-0 items-center gap-0 self-center"
+                    className={`flex shrink-0 items-center gap-0 ${
+                      appsLibraryView === "grid"
+                        ? "justify-center self-center"
+                        : "self-center"
+                    }`}
                     onMouseDown={stopRowPointerForDrag}
                     onClick={(e) => e.stopPropagation()}
                   >

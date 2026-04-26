@@ -7,9 +7,17 @@ import {
 } from "react";
 import { LaunchControl } from "./components/LaunchControl";
 import { TitleBarAppMenu } from "./components/TitleBarAppMenu";
+import { TitleBarSidebarToggleIcon } from "./components/TitleBarSidebarToggleIcons";
 import { AppChromeModals } from "./components/AppChromeModals";
-import { ProfileHeaderOverflowMenu } from "./components/ProfileHeaderOverflowMenu";
+import { ProfileHeaderSettingsButton } from "./components/ProfileHeaderSettingsButton";
+import { ProfileHeaderMetaChips } from "./components/ProfileHeaderMetaChips";
 import { NewProfileMenu } from "./components/NewProfileMenu";
+import {
+  FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS,
+  FLOW_LIBRARY_TOOLBAR_PILL_CLASS,
+  FlowLibraryToolbar,
+  type FlowLibraryViewMode,
+} from "./components/FlowLibraryToolbar";
 import { ProfileCard } from "./components/ProfileCard";
 import { FlowTooltip } from "./components/ui/tooltip";
 import { MonitorLayout } from "./components/MonitorLayout";
@@ -45,23 +53,34 @@ import {
   Settings,
   Edit,
   PenLine,
-  Clock,
-  Zap,
   LayoutGrid,
   Link,
   Users,
-  Search,
   ArrowRight,
   ChevronRight,
-  ChevronLeft,
+  ChevronDown,
   X,
   Check,
   AlertTriangle,
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
-import type { FlowProfile, ProfileSavePayload } from "../../types/flow-profile";
-import { normalizeFlowProfile, toSerializableProfiles } from "../../types/flow-profile";
+import type { InstalledAppCatalogKeySource } from "../utils/installedAppCatalogKey";
+import {
+  readInstalledAppCategoryOverrides,
+  persistInstalledAppCategoryOverrides,
+  isAppLibraryCategory,
+  resolveInstalledAppLibraryCategory,
+  installedAppCategoryOverrideLookupKeys,
+} from "../utils/installedAppLibraryCategory";
+import type { FlowProfile, FlowProfileKind, ProfileSavePayload } from "../../types/flow-profile";
+import {
+  FLOW_PROFILE_KINDS,
+  FLOW_PROFILE_KIND_LABELS,
+  normalizeFlowProfile,
+  normalizeProfileKind,
+  toSerializableProfiles,
+} from "../../types/flow-profile";
 import {
   deleteLibraryFolder,
   deleteLibraryItem,
@@ -84,7 +103,10 @@ import {
 } from "./hooks/useMainLayoutProfileMutations";
 import { ProfileIconFrame } from "./utils/profileHeaderPresentation";
 import { formatUnit } from "../utils/pluralize";
-import { prefetchInstalledAppsCatalog } from "../hooks/useInstalledApps";
+import {
+  prefetchInstalledAppsCatalog,
+  useInstalledApps,
+} from "../hooks/useInstalledApps";
 import type { MemoryCapture } from "./utils/buildNewProfile";
 import {
   buildEmptyFlowProfile,
@@ -128,16 +150,30 @@ export default function App() {
   const [headerNameDraft, setHeaderNameDraft] = useState("");
   const headerNameInputRef = useRef<HTMLInputElement>(null);
   const skipNextHeaderRenameBlurCommitRef = useRef(false);
+  const [profileKindMenuOpen, setProfileKindMenuOpen] = useState(false);
+  const profileKindMenuRef = useRef<HTMLDivElement>(null);
   const [appChromeModal, setAppChromeModal] = useState<
     null | "preferences" | "about"
   >(null);
   const [sidebarSearchQuery, setSidebarSearchQuery] = useState("");
+  /** Compact sidebar: filter profile list by `profileKind` from settings. */
+  const [profileKindListFilter, setProfileKindListFilter] = useState<
+    FlowProfileKind | "all"
+  >("all");
+  const [profilesSortId, setProfilesSortId] = useState<
+    "name" | "apps" | "startup"
+  >("name");
+  const [profilesLibraryView, setProfilesLibraryView] =
+    useState<FlowLibraryViewMode>("list");
   const [currentView, setCurrentView] = useState<
     "profiles" | "apps" | "content"
   >("profiles");
   const [selectedApp, setSelectedApp] =
     useState<MainLayoutSelectedApp | null>(null);
+  const [installedAppCategoryOverrides, setInstalledAppCategoryOverrides] =
+    useState<Record<string, string>>(readInstalledAppCategoryOverrides);
 
+  const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
   const [librarySelection, setLibrarySelection] =
@@ -211,7 +247,34 @@ export default function App() {
 
   useEffect(() => {
     setSidebarSearchQuery("");
+    setProfileKindListFilter("all");
   }, [currentView]);
+
+  const { apps: installedCatalogApps } = useInstalledApps();
+
+  const contentLibraryEntryCount = useMemo(() => {
+    const items = contentLibrary.items as ContentItem[];
+    const fds = contentLibrary.folders as ContentFolder[];
+    return items.length + fds.length;
+  }, [contentLibrary.items, contentLibrary.folders]);
+
+  const profileKindCounts = useMemo(() => {
+    const counts = Object.fromEntries(
+      FLOW_PROFILE_KINDS.map((k) => [k, 0]),
+    ) as Record<FlowProfileKind, number>;
+    for (const p of profiles) {
+      const k = normalizeProfileKind(p.profileKind);
+      counts[k] += 1;
+    }
+    return counts;
+  }, [profiles]);
+
+  useEffect(() => {
+    if (profileKindListFilter === "all") return;
+    if (profileKindCounts[profileKindListFilter] === 0) {
+      setProfileKindListFilter("all");
+    }
+  }, [profileKindCounts, profileKindListFilter]);
 
   /** Warm installed-apps catalog while the user is on Profiles/Content so the Apps tab opens quickly. */
   useEffect(() => {
@@ -228,10 +291,51 @@ export default function App() {
   }, []);
 
   const filteredProfiles = useMemo(() => {
+    let base = profiles;
+    if (profileKindListFilter !== "all") {
+      base = base.filter(
+        (p) => normalizeProfileKind(p.profileKind) === profileKindListFilter,
+      );
+    }
     const q = sidebarSearchQuery.trim().toLowerCase();
-    if (!q) return profiles;
-    return profiles.filter((p) => p.name.toLowerCase().includes(q));
-  }, [profiles, sidebarSearchQuery]);
+    if (!q) return base;
+    return base.filter((p) => p.name.toLowerCase().includes(q));
+  }, [profiles, sidebarSearchQuery, profileKindListFilter]);
+
+  const profileFilterChips = useMemo(
+    () => [
+      {
+        id: "all",
+        label: "All",
+        count: profiles.length,
+        disabled: false,
+      },
+      ...FLOW_PROFILE_KINDS.map((kind) => ({
+        id: kind,
+        label: FLOW_PROFILE_KIND_LABELS[kind],
+        count: profileKindCounts[kind],
+        disabled: profileKindCounts[kind] === 0,
+      })),
+    ],
+    [profiles.length, profileKindCounts],
+  );
+
+  const sortedFilteredProfiles = useMemo(() => {
+    const list = [...filteredProfiles];
+    if (profilesSortId === "name") {
+      list.sort((a, b) =>
+        a.name.localeCompare(b.name, undefined, { sensitivity: "base" }),
+      );
+    } else if (profilesSortId === "apps") {
+      list.sort((a, b) => (b.appCount || 0) - (a.appCount || 0));
+    } else {
+      list.sort(
+        (a, b) =>
+          (a.estimatedStartupTime || 0) - (b.estimatedStartupTime || 0),
+      );
+    }
+    return list;
+  }, [filteredProfiles, profilesSortId]);
 
   const profileLaunchSummaryParts = useMemo(() => {
     if (!currentProfile) return [] as string[];
@@ -247,6 +351,80 @@ export default function App() {
     }
     return parts;
   }, [currentProfile]);
+
+  const profileKindEyebrow = useMemo(() => {
+    if (!currentProfile) return "";
+    return FLOW_PROFILE_KIND_LABELS[
+      normalizeProfileKind(currentProfile.profileKind)
+    ];
+  }, [currentProfile]);
+
+  /** Profile strip: text lead + icon chips (tooltips) + optional tail; `srSummary` for `aria-describedby`. */
+  const profileHeaderMeta = useMemo(() => {
+    if (!currentProfile) return null;
+    const p = currentProfile;
+    const leadParts: string[] = [];
+    if (profileLaunchSummaryParts.length > 0) {
+      leadParts.push(...profileLaunchSummaryParts);
+    }
+    leadParts.push(`~${p.estimatedStartupTime ?? 0}s`);
+    const lead = leadParts.join(" · ");
+
+    const tailParts: string[] = [];
+    if (p.autoLaunchOnBoot) tailParts.push("boot");
+    if (p.autoSwitchTime?.trim()) tailParts.push(p.autoSwitchTime.trim());
+    const tail = tailParts.join(" · ");
+
+    const orderSentence =
+      p.launchOrder === "sequential"
+        ? "Apps launch one at a time."
+        : "Apps launch all at once.";
+    const outsideSentence =
+      p.preLaunchOutsideProfileBehavior === "minimize"
+        ? "Apps outside this profile are minimized before launch."
+        : p.preLaunchOutsideProfileBehavior === "close"
+          ? "Apps outside this profile are closed before launch."
+          : "Apps outside this profile are left as-is before launch.";
+    const insideSentence =
+      p.preLaunchInProfileBehavior === "close_for_fresh_launch"
+        ? "Profile apps close first for a clean relaunch."
+        : p.preLaunchInProfileBehavior === "minimize_then_launch"
+          ? "Profile apps minimize first, then launch."
+          : "Profile apps reuse existing windows when possible.";
+
+    const srParts = [
+      `${lead.replace(/ · /g, ", ")}.`,
+      orderSentence,
+      outsideSentence,
+      insideSentence,
+    ];
+    if (p.hotkey?.trim()) {
+      srParts.push(
+        `Quick-switch hotkey: ${p.hotkey.trim()} (shown on the Launch profile button).`,
+      );
+    } else {
+      srParts.push(
+        "No quick-switch hotkey. Add one in Profile settings, Automation.",
+      );
+    }
+    if (p.autoLaunchOnBoot) {
+      srParts.push("Runs at Windows sign-in.");
+    }
+    if (p.autoSwitchTime?.trim()) {
+      srParts.push(`Scheduled switch: ${p.autoSwitchTime.trim()}.`);
+    }
+    const srSummary = srParts.join(" ");
+
+    return {
+      lead,
+      tail,
+      srSummary,
+      launchOrder: p.launchOrder,
+      outside: p.preLaunchOutsideProfileBehavior,
+      inside: p.preLaunchInProfileBehavior,
+    };
+  }, [currentProfile, profileLaunchSummaryParts]);
+
   const profileForSettings =
     profiles.find((p) => p.id === profileSettingsIntent?.profileId) || null;
 
@@ -401,7 +579,31 @@ export default function App() {
 
   useEffect(() => {
     setHeaderNameEditOpen(false);
+    setProfileKindMenuOpen(false);
   }, [selectedProfile]);
+
+  useEffect(() => {
+    if (!profileKindMenuOpen) return;
+    const onPointerDown = (e: PointerEvent) => {
+      const el = profileKindMenuRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setProfileKindMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setProfileKindMenuOpen(false);
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    window.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [profileKindMenuOpen]);
+
+  useEffect(() => {
+    if (isEditMode) setProfileKindMenuOpen(false);
+  }, [isEditMode]);
 
   useEffect(() => {
     if (!headerNameEditOpen) return;
@@ -667,6 +869,18 @@ export default function App() {
       // Get fresh app data with current browser tabs
       const freshAppData = { ...appData };
 
+      if (!isBrowser) {
+        freshAppData.category = resolveInstalledAppLibraryCategory(
+          {
+            name: freshAppData.name ?? "",
+            executablePath: freshAppData.executablePath ?? null,
+            shortcutPath: freshAppData.shortcutPath ?? null,
+            launchUrl: freshAppData.launchUrl ?? null,
+          },
+          installedAppCategoryOverrides,
+        );
+      }
+
       if (isBrowser) {
         if (source === "monitor" && monitorId) {
           // For monitor apps, get browser tabs using INSTANCE ID for precise matching
@@ -727,7 +941,7 @@ export default function App() {
       // Auto-open right sidebar when app is selected
       setRightSidebarOpen(true);
     },
-    [currentProfile],
+    [currentProfile, installedAppCategoryOverrides],
   );
 
   /** Installed-app row in the Apps sidebar: inspector only, not a profile layout slot. */
@@ -770,6 +984,40 @@ export default function App() {
       setRightSidebarOpen(true);
     },
     [currentProfile],
+  );
+
+  const handleSetInstalledAppLibraryCategory = useCallback(
+    (source: InstalledAppCatalogKeySource, category: string) => {
+      if (!isAppLibraryCategory(category)) return;
+      const variants = installedAppCategoryOverrideLookupKeys(source);
+      const variantSet = new Set(variants);
+
+      setInstalledAppCategoryOverrides((prev) => {
+        const next = { ...prev };
+        for (const k of variants) {
+          next[k] = category;
+        }
+        persistInstalledAppCategoryOverrides(next);
+        return next;
+      });
+
+      setSelectedApp((prev) => {
+        if (!prev || prev.type !== "app") return prev;
+        const prevVariants = installedAppCategoryOverrideLookupKeys({
+          name: prev.data?.name ?? "",
+          executablePath: prev.data?.executablePath ?? null,
+          shortcutPath: prev.data?.shortcutPath ?? null,
+          launchUrl: prev.data?.launchUrl ?? null,
+        });
+        const overlaps = prevVariants.some((k) => variantSet.has(k));
+        if (!overlaps) return prev;
+        return {
+          ...prev,
+          data: { ...prev.data, category },
+        };
+      });
+    },
+    [],
   );
 
   /** Apps sidebar inspector: add installed app to the active profile (same placement as list +). */
@@ -1133,9 +1381,10 @@ export default function App() {
     }
   }, [selectedApp, currentProfile]);
 
+  /** Collapse inspector only; keep selection so reopen shows the same app/library entry. */
   const handleCloseSidebar = useCallback(() => {
-    clearInspectorSelection();
-  }, [clearInspectorSelection]);
+    setRightSidebarOpen(false);
+  }, []);
 
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
@@ -1180,6 +1429,10 @@ export default function App() {
     }
   };
 
+  /** Library sidebar tab strip: 0 Profiles, 1 Apps, 2 Content — drives horizontal slide (transform only). */
+  const librarySidebarSlideIndex =
+    currentView === "profiles" ? 0 : currentView === "apps" ? 1 : 2;
+
   return (
     <div className="flow-shell-canvas flex h-screen min-h-0 flex-col overflow-hidden">
       {profileStoreError ? (
@@ -1194,11 +1447,62 @@ export default function App() {
           Autosave is disabled until you restart the app after the issue is resolved, to avoid overwriting your data.
         </div>
       ) : null}
-      <div className="app-drag-region flow-shell-titlebar flex h-9 shrink-0 items-stretch px-2 select-none md:px-3">
+      <div className="app-drag-region flow-shell-titlebar flex h-9 shrink-0 select-none items-start pl-1.5 pt-1.5 pr-2 md:pl-2 md:pt-2 md:pr-3">
         <TitleBarAppMenu
           onAppPreferences={() => setAppChromeModal("preferences")}
           onAbout={() => setAppChromeModal("about")}
         />
+        {/*
+          Sidebar toggles sit after the app menu, not at the trailing edge: on Windows,
+          titleBarOverlay paints system caption buttons over the top-right of this strip,
+          which hid the controls when they were flex-end aligned.
+        */}
+        <div className="app-no-drag ml-1 flex shrink-0 items-center gap-0.5 border-l border-white/[0.08] pl-1.5 md:ml-2 md:gap-1 md:pl-2">
+          <FlowTooltip
+            label={leftSidebarOpen ? "Hide library sidebar" : "Show library sidebar"}
+            side="bottom"
+          >
+            <button
+              type="button"
+              onClick={() => setLeftSidebarOpen((o) => !o)}
+              aria-pressed={leftSidebarOpen}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-flow-text-secondary transition-[color,background-color,transform] duration-200 ease-out hover:bg-white/[0.06] hover:text-flow-text-primary active:scale-95 motion-reduce:active:scale-100 md:h-7 md:w-7 ${
+                leftSidebarOpen ? "text-flow-text-primary" : ""
+              }`}
+              aria-label={
+                leftSidebarOpen ? "Hide library sidebar" : "Show library sidebar"
+              }
+            >
+              <TitleBarSidebarToggleIcon
+                side="left"
+                open={leftSidebarOpen}
+                className="h-4 w-4 shrink-0"
+              />
+            </button>
+          </FlowTooltip>
+          <FlowTooltip
+            label={rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar"}
+            side="bottom"
+          >
+            <button
+              type="button"
+              onClick={() => setRightSidebarOpen((o) => !o)}
+              aria-pressed={rightSidebarOpen}
+              className={`inline-flex h-8 w-8 items-center justify-center rounded-md text-flow-text-secondary transition-[color,background-color,transform] duration-200 ease-out hover:bg-white/[0.06] hover:text-flow-text-primary active:scale-95 motion-reduce:active:scale-100 md:h-7 md:w-7 ${
+                rightSidebarOpen ? "text-flow-text-primary" : ""
+              }`}
+              aria-label={
+                rightSidebarOpen ? "Hide details sidebar" : "Show details sidebar"
+              }
+            >
+              <TitleBarSidebarToggleIcon
+                side="right"
+                open={rightSidebarOpen}
+                className="h-4 w-4 shrink-0"
+              />
+            </button>
+          </FlowTooltip>
+        </div>
         <div className="min-h-0 min-w-0 flex-1" aria-hidden />
       </div>
       <input
@@ -1210,129 +1514,158 @@ export default function App() {
         aria-hidden
       />
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* Left Sidebar - FIXED: Better height management */}
-        <div className="flow-shell-nav flex h-full max-h-full min-h-0 w-[clamp(16rem,24vw,24rem)] min-w-[16rem] shrink-0 flex-col overflow-hidden">
+        {/* Left sidebar: no width transition — animating width reflows the monitor preview and ResizeObserver would fire every frame (jank). */}
+        <div
+          className={`shrink-0 overflow-hidden transition-none ${
+            leftSidebarOpen
+              ? "w-[clamp(16rem,24vw,24rem)] min-w-[16rem]"
+              : "w-0 min-w-0"
+          }`}
+        >
+        <div className="flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden">
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
-            <div className="flow-nav-tab-strip" role="tablist" aria-label="Sidebar view">
-              <button
-                type="button"
-                role="tab"
-                aria-selected={currentView === "profiles"}
-                onClick={() => setCurrentView("profiles")}
-                className={`flow-nav-tab ${
-                  currentView === "profiles"
-                    ? "flow-nav-tab-active"
-                    : "flow-nav-tab-idle"
-                }`}
-              >
-                <Users className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
-                Profiles
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={currentView === "apps"}
-                onClick={() => setCurrentView("apps")}
-                className={`flow-nav-tab ${
-                  currentView === "apps"
-                    ? "flow-nav-tab-active"
-                    : "flow-nav-tab-idle"
-                }`}
-              >
-                <LayoutGrid className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
-                Apps
-              </button>
-              <button
-                type="button"
-                role="tab"
-                aria-selected={currentView === "content"}
-                onClick={() => setCurrentView("content")}
-                className={`flow-nav-tab ${
-                  currentView === "content"
-                    ? "flow-nav-tab-active"
-                    : "flow-nav-tab-idle"
-                }`}
-              >
-                <Link className="h-4 w-4 shrink-0 opacity-90" strokeWidth={1.75} />
-                Content
-              </button>
-            </div>
-            <div className="relative">
-              <Search
-                className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-flow-text-muted"
-                strokeWidth={1.75}
-                aria-hidden
-              />
-              <input
-                type="search"
-                value={sidebarSearchQuery}
-                onChange={(e) => setSidebarSearchQuery(e.target.value)}
-                placeholder={
-                  currentView === "profiles"
-                    ? "Search profiles…"
-                    : currentView === "apps"
-                      ? "Search apps…"
-                      : "Search content…"
-                }
-                className="flow-sidebar-search"
-                aria-label={
-                  currentView === "profiles"
-                    ? "Search profiles"
-                    : currentView === "apps"
-                      ? "Search apps"
-                      : "Search content"
-                }
-              />
+            <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
+              <div className="flow-library-tablist-rail">
+                <div
+                  className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 rounded-full bg-flow-accent-blue flow-tab-slide-track"
+                  aria-hidden
+                  style={{
+                    transform: `translate3d(calc(${librarySidebarSlideIndex} * 100%), 0, 0)`,
+                  }}
+                />
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={currentView === "profiles"}
+                  onClick={() => setCurrentView("profiles")}
+                  className={`flow-library-tab ${
+                    currentView === "profiles"
+                      ? "flow-library-tab-active"
+                      : "flow-library-tab-idle"
+                  }`}
+                  aria-label={`Profiles, ${profiles.length} total`}
+                >
+                  <Users className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                  Profiles
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={currentView === "apps"}
+                  onClick={() => setCurrentView("apps")}
+                  className={`flow-library-tab ${
+                    currentView === "apps"
+                      ? "flow-library-tab-active"
+                      : "flow-library-tab-idle"
+                  }`}
+                  aria-label={`Installed apps, ${installedCatalogApps.length} in catalog`}
+                >
+                  <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                  Apps
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={currentView === "content"}
+                  onClick={() => setCurrentView("content")}
+                  className={`flow-library-tab ${
+                    currentView === "content"
+                      ? "flow-library-tab-active"
+                      : "flow-library-tab-idle"
+                  }`}
+                  aria-label={`Content library, ${contentLibraryEntryCount} entries`}
+                >
+                  <Link className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                  Content
+                </button>
+              </div>
             </div>
           </div>
 
-          {/* List region below tabs + search: scrollbars live only inside child views */}
-          <div className="flex min-h-0 flex-1 flex-col border-t border-flow-border/30 bg-flow-bg-primary/15 pt-1">
-            {currentView === "profiles" && (
-              <div className="flex-1 flex flex-col min-h-0">
-                <div className="flex-shrink-0 border-b border-flow-border/50 p-3">
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-2">
-                      <Users
-                        className="h-3.5 w-3.5 shrink-0 text-flow-text-muted"
-                        strokeWidth={1.75}
-                        aria-hidden
-                      />
-                      <h2 className="flow-sidebar-section-title">
-                        Profiles
-                      </h2>
-                    </div>
+          {/* List region: three panels on one row; slide via translate3d (no width animation). */}
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-flow-border/30 bg-flow-bg-primary/15 pt-1">
+            <div
+              className="flow-tab-slide-track flex h-full min-h-0 w-[300%] flex-shrink-0"
+              style={{
+                transform: `translate3d(calc(-100% / 3 * ${librarySidebarSlideIndex}), 0, 0)`,
+              }}
+            >
+              <div
+                className={`flex min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+                  currentView === "profiles" ? "" : "pointer-events-none select-none"
+                }`}
+                aria-hidden={currentView !== "profiles"}
+              >
+                <FlowLibraryToolbar
+                  toolbarEnd={
                     <NewProfileMenu
                       disabled={isEditMode}
                       busy={isProfileCreationBusy}
                       onCreateEmpty={() => void handleNewEmptyProfile()}
                       onCaptureCurrentLayout={() => void handleNewFromCapturedLayout()}
+                      triggerClassName={FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS}
                     />
-                  </div>
+                  }
+                  filterChips={profileFilterChips}
+                  selectedFilterId={profileKindListFilter}
+                  onSelectFilter={(id) =>
+                    setProfileKindListFilter(
+                      id === "all" ? "all" : (id as FlowProfileKind),
+                    )
+                  }
+                  searchValue={sidebarSearchQuery}
+                  onSearchChange={setSidebarSearchQuery}
+                  searchPlaceholder="Search profiles…"
+                  searchAriaLabel="Search profiles"
+                  sortOptions={[
+                    { id: "name", label: "Name" },
+                    { id: "apps", label: "Most apps" },
+                    { id: "startup", label: "Startup time" },
+                  ]}
+                  selectedSortId={profilesSortId}
+                  onSelectSort={(id) =>
+                    setProfilesSortId(id as "name" | "apps" | "startup")
+                  }
+                  viewMode={profilesLibraryView}
+                  onViewModeChange={setProfilesLibraryView}
+                  showViewModes
+                />
 
-                  {isEditMode && (
-                    <div className="mt-3 p-2.5 rounded-lg border border-flow-border/60 bg-flow-surface/80">
+                {isEditMode ? (
+                  <div className="shrink-0 border-b border-flow-border/50 px-3 pb-2 pt-1">
+                    <div className="rounded-lg border border-flow-border/60 bg-flow-surface/80 p-2.5">
                       <div className="flex items-center gap-2 text-xs text-flow-text-secondary">
-                        <Edit className="w-3 h-3 text-flow-accent-blue shrink-0" />
+                        <Edit className="h-3 w-3 shrink-0 text-flow-accent-blue" />
                         <span>
-                          Profile switching disabled while
-                          editing
+                          Profile switching disabled while editing
                         </span>
                       </div>
                     </div>
-                  )}
-                </div>
+                  </div>
+                ) : null}
 
                 <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain py-3 pl-3 pr-0">
-                  <div className="space-y-2.5 pr-2.5">
-                    {filteredProfiles.length === 0 ? (
+                  <div
+                    className={`pr-2.5 ${
+                      profilesLibraryView === "grid"
+                        ? "grid grid-cols-2 gap-2"
+                        : profilesLibraryView === "compact"
+                          ? "flex min-h-0 flex-col gap-0.5"
+                          : "flex min-h-0 flex-col gap-1"
+                    }`}
+                  >
+                    {sortedFilteredProfiles.length === 0 ? (
                       <p className="py-6 text-center text-xs text-flow-text-muted">
                         {profiles.length === 0
-                          ? "No profiles yet. Create one with New."
-                          : "No profiles match this search."}
+                          ? "No profiles yet. Use + to add one."
+                          : sidebarSearchQuery.trim()
+                            ? "No profiles match this search."
+                            : profileKindListFilter !== "all"
+                              ? "No profiles match this type."
+                              : "No profiles match this search."}
                       </p>
                     ) : (
-                      filteredProfiles.map((profile) => (
+                      sortedFilteredProfiles.map((profile) => (
                         <ProfileCard
                           key={profile.id}
                           profile={{
@@ -1353,16 +1686,26 @@ export default function App() {
                                   })
                           }
                           disabled={isEditMode}
+                          density={
+                            profilesLibraryView === "compact"
+                              ? "compact"
+                              : profilesLibraryView === "grid"
+                                ? "grid"
+                                : "default"
+                          }
                         />
                       ))
                     )}
                   </div>
                 </div>
               </div>
-            )}
 
-            {currentView === "apps" && (
-              <div className="flex min-h-0 flex-1 flex-col">
+              <div
+                className={`flex min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+                  currentView === "apps" ? "" : "pointer-events-none select-none"
+                }`}
+                aria-hidden={currentView !== "apps"}
+              >
                 <AppManager
                   profiles={profiles}
                   onUpdateProfile={updateProfile}
@@ -1381,12 +1724,18 @@ export default function App() {
                   sidebarSearchQuery={sidebarSearchQuery}
                   onSidebarSearchQueryChange={setSidebarSearchQuery}
                   onInspectInstalledApp={handleSidebarInstalledAppSelect}
+                  installedAppCategoryOverrides={
+                    installedAppCategoryOverrides
+                  }
                 />
               </div>
-            )}
 
-            {currentView === "content" && (
-              <div className="flex min-h-0 flex-1 flex-col">
+              <div
+                className={`flex min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
+                  currentView === "content" ? "" : "pointer-events-none select-none"
+                }`}
+                aria-hidden={currentView !== "content"}
+              >
                 <ContentManager
                   profiles={profiles}
                   currentProfile={currentProfile}
@@ -1428,131 +1777,229 @@ export default function App() {
                   onSidebarSearchQueryChange={setSidebarSearchQuery}
                 />
               </div>
-            )}
+            </div>
           </div>
+        </div>
         </div>
 
         {/* Main Content Area with Header and Right Sidebar */}
         <div
-          className={`flex min-h-0 min-w-0 flex-1 flex-col transition-[margin] duration-200 ease-out ${
+          className={`flex min-h-0 min-w-0 flex-1 flex-col bg-flow-bg-primary transition-none ${
             rightSidebarOpen ? FLOW_SHELL_INSPECTOR_MARGIN_CLASS : "mr-0"
           }`}
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
-            <header className="relative z-10 flex min-h-[5.75rem] shrink-0 items-center border-b border-white/[0.06] bg-flow-bg-secondary/90 px-4 py-3 backdrop-blur-sm md:px-6 xl:px-8">
-              <div className="flex w-full min-w-0 flex-col gap-3 lg:flex-row lg:items-center lg:justify-between lg:gap-4">
+            <header className="relative z-10 flex shrink-0 items-center border-b border-white/[0.06] bg-flow-bg-secondary/90 px-4 py-3 backdrop-blur-sm md:px-6 md:py-4 xl:px-8">
+              <div className="flex w-full min-w-0 flex-col gap-3 sm:gap-4 lg:flex-row lg:items-center lg:justify-between lg:gap-5">
                 <div
-                  className={`flex min-w-0 flex-1 flex-col gap-3 lg:flex-row lg:items-center lg:gap-6 ${
+                  className={`flex min-w-0 flex-1 items-center gap-4 md:gap-5 ${
                     isEditMode ? "opacity-50" : ""
                   }`}
                   aria-label="Active profile"
                 >
-                  <div className="flex min-w-0 flex-wrap items-start gap-3">
-                    <div className="ring-2 ring-flow-accent-blue/35 ring-offset-2 ring-offset-flow-bg-secondary rounded-xl">
-                      <ProfileIconFrame icon={currentProfile.icon} />
-                    </div>
-                    <div className="flex min-w-0 flex-col gap-1.5">
-                      <div className="flex min-w-0 flex-wrap items-center gap-2">
-                        {headerNameEditOpen && !isEditMode ? (
-                          <input
-                            ref={headerNameInputRef}
-                            value={headerNameDraft}
-                            onChange={(e) => setHeaderNameDraft(e.target.value)}
-                            onBlur={() => commitHeaderProfileRename()}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter") {
-                                e.preventDefault();
-                                headerNameInputRef.current?.blur();
-                              }
-                              if (e.key === "Escape") {
-                                e.preventDefault();
-                                skipNextHeaderRenameBlurCommitRef.current = true;
-                                setHeaderNameDraft(currentProfile.name);
-                                setHeaderNameEditOpen(false);
-                              }
-                            }}
-                            maxLength={120}
-                            aria-label="Profile name"
-                            className="min-w-0 max-w-full rounded-md border border-flow-border/60 bg-flow-bg-primary/80 px-2 py-0.5 text-xl font-extrabold tracking-tight text-flow-text-primary shadow-sm outline-none ring-flow-accent-blue/40 focus:ring-2 md:text-2xl"
+                  <FlowTooltip
+                    label={isEditMode ? undefined : "Change profile icon"}
+                  >
+                    <button
+                      type="button"
+                      disabled={isEditMode}
+                      onClick={() => {
+                        if (isEditMode) return;
+                        if (headerNameEditOpen) {
+                          commitHeaderProfileRename();
+                        }
+                        setProfileSettingsIntent({
+                          profileId: currentProfile.id,
+                          initialTab: "profile",
+                        });
+                      }}
+                      aria-label="Change profile icon"
+                      className={`shrink-0 rounded-2xl p-0.5 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40 ${
+                        isEditMode
+                          ? "cursor-default"
+                          : "cursor-pointer hover:bg-white/[0.06]"
+                      }`}
+                    >
+                      <ProfileIconFrame
+                        icon={currentProfile.icon}
+                        variant="hero"
+                      />
+                    </button>
+                  </FlowTooltip>
+                  <div className="flex min-w-0 flex-1 flex-col gap-1.5">
+                    <div ref={profileKindMenuRef} className="relative self-start">
+                      <FlowTooltip
+                        label={isEditMode ? undefined : "Change profile type"}
+                      >
+                        <button
+                          type="button"
+                          disabled={isEditMode}
+                          aria-haspopup="listbox"
+                          aria-expanded={profileKindMenuOpen}
+                          aria-label={`Profile type: ${profileKindEyebrow}`}
+                          onClick={() => {
+                            if (isEditMode) return;
+                            if (headerNameEditOpen) {
+                              commitHeaderProfileRename();
+                            }
+                            setProfileKindMenuOpen((open) => !open);
+                          }}
+                          className={`inline-flex max-w-full items-center gap-0.5 rounded-md px-1 py-0.5 text-left text-[10px] font-semibold uppercase tracking-[0.18em] text-flow-text-muted/70 outline-none transition-colors sm:text-[11px] ${
+                            isEditMode
+                              ? "cursor-default"
+                              : "hover:bg-white/[0.06] hover:text-flow-text-muted focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
+                          }`}
+                        >
+                          <span className="min-w-0 truncate">
+                            {profileKindEyebrow}
+                          </span>
+                          <ChevronDown
+                            className={`h-3 w-3 shrink-0 opacity-70 transition-transform duration-200 ${
+                              profileKindMenuOpen ? "rotate-180" : ""
+                            }`}
+                            aria-hidden
                           />
-                        ) : (
-                          <FlowTooltip
-                            label={isEditMode ? undefined : "Click to rename"}
-                          >
-                            <button
-                              type="button"
-                              disabled={isEditMode}
-                              onClick={() => {
-                                if (isEditMode) return;
-                                skipNextHeaderRenameBlurCommitRef.current = false;
-                                setHeaderNameDraft(currentProfile.name);
-                                setHeaderNameEditOpen(true);
-                              }}
-                              className={`min-w-0 truncate text-left text-xl font-extrabold tracking-tight text-flow-text-primary md:text-2xl ${
-                                isEditMode
-                                  ? "cursor-default"
-                                  : "cursor-text rounded-md hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
-                              }`}
-                            >
-                              {currentProfile.name}
-                            </button>
-                          </FlowTooltip>
-                        )}
-                      </div>
-                      <div className="flex flex-wrap items-center gap-1.5">
-                        {currentProfile.autoLaunchOnBoot && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-emerald-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-emerald-200/95">
-                            <Zap className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-                            Boot
-                          </span>
-                        )}
-                        {currentProfile.autoSwitchTime && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-violet-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-violet-100/90">
-                            <Clock className="h-3 w-3 shrink-0" strokeWidth={1.75} />
-                            {currentProfile.autoSwitchTime}
-                          </span>
-                        )}
-                        {currentProfile.hotkey && (
-                          <span className="inline-flex items-center gap-1 rounded-md bg-sky-500/[0.14] px-2 py-0.5 text-[11px] font-medium text-sky-100/90">
-                            {currentProfile.hotkey}
-                          </span>
-                        )}
-                      </div>
+                        </button>
+                      </FlowTooltip>
+                      {profileKindMenuOpen && currentProfile ? (
+                        <ul
+                          role="listbox"
+                          aria-label="Profile type"
+                          className="absolute left-0 top-full z-[200] mt-1 min-w-[11rem] max-w-[min(100vw-2rem,16rem)] isolate rounded-lg border border-flow-border bg-flow-bg-primary py-1 shadow-2xl shadow-black/50 ring-1 ring-white/[0.06]"
+                        >
+                          {FLOW_PROFILE_KINDS.map((kind) => {
+                            const active =
+                              normalizeProfileKind(currentProfile.profileKind) ===
+                              kind;
+                            return (
+                              <li key={kind} role="presentation">
+                                <button
+                                  type="button"
+                                  role="option"
+                                  aria-selected={active}
+                                  className={`flex w-full items-center px-3 py-2 text-left text-xs font-medium transition-colors ${
+                                    active
+                                      ? "bg-flow-accent-blue/15 text-flow-text-primary"
+                                      : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
+                                  }`}
+                                  onClick={() => {
+                                    updateProfile(currentProfile.id, {
+                                      profileKind: kind,
+                                    });
+                                    setProfileKindMenuOpen(false);
+                                  }}
+                                >
+                                  {FLOW_PROFILE_KIND_LABELS[kind]}
+                                </button>
+                              </li>
+                            );
+                          })}
+                        </ul>
+                      ) : null}
                     </div>
-                  </div>
-                  <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2.5 lg:gap-3">
-                    <div className="inline-flex items-center gap-2 rounded-lg bg-amber-500/[0.09] px-3 py-1.5 text-xs font-medium text-amber-100/95">
-                      <Clock className="h-3.5 w-3.5 shrink-0 text-amber-200/90" strokeWidth={1.75} aria-hidden />
-                      <span>
-                        ~{currentProfile.estimatedStartupTime}s startup
-                        {currentProfile.launchOrder === "sequential"
-                          ? " · sequential"
-                          : ""}
-                      </span>
+                    <div className="flex min-w-0 flex-col gap-2">
+                      {headerNameEditOpen && !isEditMode ? (
+                        <input
+                          ref={headerNameInputRef}
+                          value={headerNameDraft}
+                          onChange={(e) => setHeaderNameDraft(e.target.value)}
+                          onBlur={() => commitHeaderProfileRename()}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              headerNameInputRef.current?.blur();
+                            }
+                            if (e.key === "Escape") {
+                              e.preventDefault();
+                              skipNextHeaderRenameBlurCommitRef.current = true;
+                              setHeaderNameDraft(currentProfile.name);
+                              setHeaderNameEditOpen(false);
+                            }
+                          }}
+                          maxLength={120}
+                          aria-label="Profile name"
+                          aria-describedby="flow-profile-header-meta"
+                          className="min-w-0 max-w-full rounded-md border border-flow-border/60 bg-flow-bg-primary/80 px-2 py-1 text-2xl font-extrabold tracking-tight text-flow-text-primary shadow-sm outline-none ring-flow-accent-blue/40 focus:ring-2 sm:text-3xl md:text-4xl md:py-1.5"
+                        />
+                      ) : (
+                        <FlowTooltip
+                          label={isEditMode ? undefined : "Click to rename"}
+                        >
+                          <button
+                            type="button"
+                            disabled={isEditMode}
+                            onClick={() => {
+                              if (isEditMode) return;
+                              skipNextHeaderRenameBlurCommitRef.current = false;
+                              setHeaderNameDraft(currentProfile.name);
+                              setHeaderNameEditOpen(true);
+                            }}
+                            aria-describedby="flow-profile-header-meta"
+                            className={`min-w-0 max-w-full text-left text-2xl font-extrabold tracking-tight text-flow-text-primary sm:text-3xl md:text-4xl ${
+                              isEditMode
+                                ? "cursor-default"
+                                : "cursor-text rounded-md hover:bg-white/[0.04] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/40"
+                            }`}
+                          >
+                            <span className="block break-words">
+                              {currentProfile.name}
+                            </span>
+                          </button>
+                        </FlowTooltip>
+                      )}
+                      {profileHeaderMeta ? (
+                        <>
+                          <span
+                            id="flow-profile-header-meta"
+                            className="sr-only"
+                          >
+                            {profileHeaderMeta.srSummary}
+                          </span>
+                          <div className="flex min-w-0 max-w-full items-center gap-1.5 overflow-hidden text-xs leading-none text-flow-text-muted/70 sm:text-[13px]">
+                            <div className="flex min-w-0 flex-1 items-center gap-2 overflow-hidden">
+                              <span className="min-w-0 truncate whitespace-nowrap">
+                                {profileHeaderMeta.lead}
+                              </span>
+                              <span
+                                className="h-3.5 w-px shrink-0 self-center bg-white/20"
+                                aria-hidden
+                              />
+                              <ProfileHeaderMetaChips
+                                launchOrder={profileHeaderMeta.launchOrder}
+                                outside={profileHeaderMeta.outside}
+                                inside={profileHeaderMeta.inside}
+                              />
+                            </div>
+                            {profileHeaderMeta.tail ? (
+                              <>
+                                <span
+                                  className="shrink-0 text-flow-text-muted/35"
+                                  aria-hidden
+                                >
+                                  ·
+                                </span>
+                                <span className="max-w-[min(40%,12rem)] shrink-0 truncate whitespace-nowrap">
+                                  {profileHeaderMeta.tail}
+                                </span>
+                              </>
+                            ) : null}
+                          </div>
+                        </>
+                      ) : null}
                     </div>
                   </div>
                 </div>
 
-                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:items-end lg:items-center">
-                  <div className="flex flex-wrap items-center justify-end gap-2 lg:gap-2.5">
-                    <ProfileHeaderOverflowMenu
+                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:ml-auto sm:flex-row sm:items-center sm:justify-end sm:gap-2.5">
+                  <div className="flex flex-wrap items-center justify-end gap-2">
+                    <ProfileHeaderSettingsButton
                       disabled={isEditMode}
-                      importInputId="flowswitch-import-profile"
-                      exportDisabled={!currentProfile}
-                      onExport={() =>
-                        currentProfile &&
-                        exportProfile(currentProfile.id)
-                      }
-                      onSettings={() =>
+                      onOpenProfileSettings={() =>
                         setProfileSettingsIntent({
                           profileId: currentProfile.id,
                         })
                       }
-                      onDuplicate={() => duplicateProfile(currentProfile.id)}
-                      onDelete={() => deleteProfile(currentProfile.id)}
-                      onNewEmptyProfile={() => void handleNewEmptyProfile()}
-                      onNewFromCapturedLayout={() => void handleNewFromCapturedLayout()}
                     />
                     <LaunchControl
                       isEditMode={isEditMode}
@@ -1560,7 +2007,7 @@ export default function App() {
                       onLaunch={handleLaunch}
                       onCancel={handleCancelLaunch}
                       showCancel={launchControlShowCancel}
-                      profileSummaryParts={profileLaunchSummaryParts}
+                      hotkey={currentProfile.hotkey?.trim() || null}
                     />
                   </div>
                   {showLaunchFeedbackStrip ? (
@@ -1812,7 +2259,7 @@ export default function App() {
                           )
                       : undefined
                   }
-                  large={!rightSidebarOpen}
+                  large
                 />
               </div>
             </main>
@@ -1822,25 +2269,21 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flex flex-col z-30 transform transition-transform duration-200 ease-out ${
-              rightSidebarOpen
-                ? "translate-x-0"
-                : "translate-x-full"
-            }`}
+            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30`}
           >
             {/* Sidebar Header - Close button only */}
             <div className="absolute top-3 right-3 z-10">
               <button
                 type="button"
                 onClick={handleCloseSidebar}
-                className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-all duration-150 ease-out"
+                className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-[color,background-color,transform] duration-200 ease-out active:scale-95 motion-reduce:active:scale-100"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {/* Sidebar Content - Now contains app header */}
-            <div className="flex-1 overflow-hidden">
+            <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               {librarySelection
               && contentInspectorSelection
               && currentProfile ? (
@@ -1907,35 +2350,14 @@ export default function App() {
                       ? handleSidebarInstalledAppPlaceOnMinimized
                       : undefined
                   }
+                  onSetInstalledAppLibraryCategory={
+                    handleSetInstalledAppLibraryCategory
+                  }
                 />
               ) : null}
             </div>
           </div>
         )}
-
-        {/* Right Sidebar Toggle Button (when closed) */}
-        {!rightSidebarOpen && (selectedApp || librarySelection) ? (
-          <FlowTooltip
-            label={
-              librarySelection
-                ? "Open library item details"
-                : "Open app details"
-            }
-            side="left"
-          >
-            <button
-              type="button"
-              onClick={() => setRightSidebarOpen(true)}
-              className="fixed right-0 bg-flow-surface/95 border border-flow-border/60 border-r-0 text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary rounded-l-lg transition-all duration-150 ease-out p-2 z-20 shadow-flow-shadow-md backdrop-blur-sm"
-              style={{
-                top: "calc(2.25rem + (100vh - 2.25rem) / 2)",
-                transform: "translateY(-50%)",
-              }}
-            >
-              <ChevronLeft className="w-4 h-4" />
-            </button>
-          </FlowTooltip>
-        ) : null}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
         {dragState.isDragging && dragState.dragData && (
@@ -2016,6 +2438,7 @@ export default function App() {
               setProfileSettingsIntent(null);
             }}
             allProfiles={profiles}
+            importProfileInputId="flowswitch-import-profile"
           />
         ) : null}
 

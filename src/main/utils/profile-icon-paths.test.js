@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 const {
   isSafeIconDataUrl,
   sanitizeProfileIconPathsDeep,
+  sanitizeProfileRootIcon,
 } = require('./profile-icon-paths');
 
 const tinyPngB64 = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==';
@@ -26,4 +27,16 @@ test('sanitizeProfileIconPathsDeep nulls unsafe iconPath', () => {
   });
   assert.equal(out.iconPath, null);
   assert.equal(out.child.iconPath?.startsWith('data:image/png'), true);
+});
+
+test('sanitizeProfileRootIcon keeps presets and safe data URLs', () => {
+  assert.equal(sanitizeProfileRootIcon('gaming'), 'gaming');
+  assert.equal(sanitizeProfileRootIcon('GAMING'), 'gaming');
+  const png = `data:image/png;base64,${tinyPngB64}`;
+  assert.equal(sanitizeProfileRootIcon(png), png);
+});
+
+test('sanitizeProfileRootIcon rejects unknown strings', () => {
+  assert.equal(sanitizeProfileRootIcon('not-a-preset'), 'work');
+  assert.equal(sanitizeProfileRootIcon('https://evil.com/x.png'), 'work');
 });

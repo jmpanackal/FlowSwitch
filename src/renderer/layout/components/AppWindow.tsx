@@ -108,7 +108,7 @@ export function AppWindow({
           <img
             src={iconSrc}
             alt={app.name}
-            className="app-icon w-8 h-8 object-contain rounded"
+            className="app-icon w-9 h-9 object-contain rounded"
             draggable={false}
             onError={(e) => {
               const target = e.currentTarget as HTMLImageElement;
@@ -123,7 +123,7 @@ export function AppWindow({
           <div
             data-icon-fallback="true"
             style={{ display: 'none' }}
-            className="app-icon-fallback bg-white/20 rounded w-8 h-8 flex items-center justify-center"
+            className="app-icon-fallback bg-white/20 rounded w-9 h-9 flex items-center justify-center"
           >
             <span className="text-white text-sm">📱</span>
           </div>
@@ -132,11 +132,11 @@ export function AppWindow({
     }
     if (isFallbackApp(app)) {
       const IconComponent = app.icon;
-      return <IconComponent className="app-icon text-white w-8 h-8" />;
+      return <IconComponent className="app-icon text-white w-9 h-9" />;
     }
     // Fallback: emoji
     return (
-      <div className="app-icon-fallback bg-white/20 rounded w-8 h-8 flex items-center justify-center">
+      <div className="app-icon-fallback bg-white/20 rounded w-9 h-9 flex items-center justify-center">
         <span className="text-white text-sm">📱</span>
       </div>
     );

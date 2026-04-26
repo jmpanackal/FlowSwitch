@@ -52,7 +52,7 @@ export function AppChromeModals({
     <>
       {preferencesOpen ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm flow-modal-backdrop-enter"
           role="dialog"
           aria-modal="true"
           aria-labelledby="app-prefs-title"
@@ -60,7 +60,7 @@ export function AppChromeModals({
             if (e.target === e.currentTarget) onClosePreferences();
           }}
         >
-          <div className="app-no-drag w-full max-w-md overflow-hidden rounded-xl border border-white/[0.1] bg-flow-bg-secondary shadow-2xl">
+          <div className="app-no-drag w-full max-w-md overflow-hidden rounded-xl border border-white/[0.1] bg-flow-bg-secondary shadow-2xl flow-modal-panel-enter">
             <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
               <h2
                 id="app-prefs-title"
@@ -115,7 +115,7 @@ export function AppChromeModals({
 
       {aboutOpen ? (
         <div
-          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm"
+          className="fixed inset-0 z-[200] flex items-center justify-center bg-black/55 p-4 backdrop-blur-sm flow-modal-backdrop-enter"
           role="dialog"
           aria-modal="true"
           aria-labelledby="about-title"
@@ -123,7 +123,7 @@ export function AppChromeModals({
             if (e.target === e.currentTarget) onCloseAbout();
           }}
         >
-          <div className="app-no-drag w-full max-w-md overflow-hidden rounded-xl border border-white/[0.1] bg-flow-bg-secondary shadow-2xl">
+          <div className="app-no-drag w-full max-w-md overflow-hidden rounded-xl border border-white/[0.1] bg-flow-bg-secondary shadow-2xl flow-modal-panel-enter">
             <div className="flex items-center justify-between border-b border-white/[0.08] px-4 py-3">
               <h2
                 id="about-title"
