@@ -428,7 +428,10 @@ export default function App() {
   const profileLaunchBreakdownLines = useMemo(() => {
     if (!currentProfile) return null;
     const p = currentProfile;
-    const lines: string[] = [`Apps: ${p.appCount ?? 0}`];
+    const lines: string[] = [];
+    const lead = profileHeaderMeta?.lead?.trim();
+    if (lead) lines.push(lead);
+    lines.push(`Apps: ${p.appCount ?? 0}`);
     if ((p.tabCount ?? 0) > 0) {
       lines.push(`Tabs: ${p.tabCount}`);
     }
@@ -437,7 +440,7 @@ export default function App() {
       lines.push(`Monitors: ${p.monitors.length}`);
     }
     return lines;
-  }, [currentProfile]);
+  }, [currentProfile, profileHeaderMeta?.lead]);
 
   const profileForSettings =
     profiles.find((p) => p.id === profileSettingsIntent?.profileId) || null;
@@ -2027,7 +2030,6 @@ export default function App() {
                       showCancel={launchControlShowCancel}
                       hotkey={currentProfile.hotkey?.trim() || null}
                       primaryLabel={`Launch ${currentProfile.name}`}
-                      summaryLine={profileHeaderMeta?.lead ?? null}
                       breakdownLines={profileLaunchBreakdownLines}
                     />
                   </div>

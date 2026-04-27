@@ -1,42 +1,69 @@
-/** Matches default OS-style names that users rarely memorize. */
-const GENERIC_MONITOR_NAME = /^monitor\s*\d+$/i;
-const GENERIC_DISPLAY_NAME = /^display\s*\d*$/i;
-
 export type MonitorChromeLabelInput = {
+  id: string;
   name: string;
   systemName?: string | null;
   primary?: boolean;
   orientation?: "landscape" | "portrait";
 };
 
+export type MonitorDisplayLabel = {
+  headline: string;
+  /** Optional second line (e.g. EDID / system display name). */
+  detail?: string;
+};
+
+const portraitSuffix = (m: MonitorChromeLabelInput) =>
+  m.orientation === "portrait" ? " · Portrait" : "";
+
 /**
- * Headline + optional detail for monitor cards (preview + edit chrome).
- * Prefers real display names when the stored label is generic.
+ * Build stable labels: **Primary** for the primary display, then **2**, **3**, **4**…
+ * for other displays in `monitors` array order. If none are marked primary, uses **1**, **2**, **3**…
  */
-export function getMonitorChromeHeading(
-  monitor: MonitorChromeLabelInput,
-): { headline: string; detail?: string } {
-  const name = monitor.name?.trim() || "Display";
-  const sys = monitor.systemName?.trim() || "";
-  const portrait = monitor.orientation === "portrait";
-  const oriSuffix = portrait ? " · Portrait" : "";
+export function buildMonitorDisplayLabelMap(
+  monitors: MonitorChromeLabelInput[],
+): Map<string, MonitorDisplayLabel> {
+  const map = new Map<string, MonitorDisplayLabel>();
+  if (!monitors.length) return map;
 
-  const generic =
-    GENERIC_MONITOR_NAME.test(name) || GENERIC_DISPLAY_NAME.test(name);
+  const hasPrimary = monitors.some((m) => m.primary);
+  let next = hasPrimary ? 2 : 1;
 
-  if (sys && generic) {
-    const role = monitor.primary ? "Primary display" : "Display";
-    return { headline: `${role}${oriSuffix}`, detail: sys };
+  for (const m of monitors) {
+    const sys = m.systemName?.trim() || undefined;
+    const suf = portraitSuffix(m);
+
+    if (hasPrimary && m.primary) {
+      map.set(m.id, {
+        headline: `Primary${suf}`,
+        detail: sys,
+      });
+    } else {
+      const n = next;
+      next += 1;
+      map.set(m.id, {
+        headline: `${n}${suf}`,
+        detail: sys,
+      });
+    }
   }
 
-  if (sys && sys !== name) {
-    return { headline: `${name}${oriSuffix}`, detail: sys };
-  }
-
-  return { headline: `${name}${oriSuffix}` };
+  return map;
 }
 
-export function monitorChromeAriaLabel(monitor: MonitorChromeLabelInput): string {
-  const { headline, detail } = getMonitorChromeHeading(monitor);
+export function monitorLabelFromMap(
+  monitor: Pick<MonitorChromeLabelInput, "id" | "name">,
+  map: Map<string, MonitorDisplayLabel>,
+): MonitorDisplayLabel {
+  return (
+    map.get(monitor.id) ?? {
+      headline: monitor.name?.trim() || "Display",
+    }
+  );
+}
+
+export function monitorChromeAriaLabelFromParts(
+  headline: string,
+  detail?: string,
+): string {
   return detail ? `${headline} — ${detail}` : headline;
 }

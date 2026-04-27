@@ -34,8 +34,9 @@ import {
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { countStackUnits, getSnapZonesForMonitor } from "../utils/monitorSnapZones";
 import {
-  getMonitorChromeHeading,
-  monitorChromeAriaLabel,
+  buildMonitorDisplayLabelMap,
+  monitorChromeAriaLabelFromParts,
+  monitorLabelFromMap,
 } from "../utils/monitorChromeLabels";
 import {
   MonitorAppStackCluster,
@@ -1989,6 +1990,20 @@ export function MonitorLayout({
     return groups;
   }, [defaultMinimizedMonitorId, minimizedApps, monitors]);
 
+  const monitorDisplayLabelMap = useMemo(
+    () =>
+      buildMonitorDisplayLabelMap(
+        monitors.map((m) => ({
+          id: m.id,
+          name: m.name,
+          systemName: m.systemName,
+          primary: m.primary,
+          orientation: m.orientation,
+        })),
+      ),
+    [monitors],
+  );
+
   const handleMiniTaskbarDragStart = useCallback(
     (
       app: MinimizedApp,
@@ -2205,7 +2220,7 @@ export function MonitorLayout({
               }`
         }`}
       >
-        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-2 sm:gap-3">
           <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden sm:gap-3">
             <Monitor
               className={`shrink-0 text-flow-accent-blue/90 ${densePreviewMode ? "h-4 w-4" : "h-5 w-5"}`}
@@ -2288,7 +2303,7 @@ export function MonitorLayout({
               const minimizedForMonitor = minimizedAppsByMonitor[monitor.id] || [];
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
               const clampedPreview = clampPreviewPosition(monitor, preview, displayPreviewScale);
-              const monitorHead = getMonitorChromeHeading(monitor);
+              const monitorHead = monitorLabelFromMap(monitor, monitorDisplayLabelMap);
 
               return (
                 <div
@@ -2321,7 +2336,12 @@ export function MonitorLayout({
                       useCompactMonitorEditChrome ? (
                         <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
                           <div className="flex min-w-0 items-center justify-center gap-1.5">
-                            <FlowTooltip label={monitorChromeAriaLabel(monitor)}>
+                            <FlowTooltip
+                              label={monitorChromeAriaLabelFromParts(
+                                monitorHead.headline,
+                                monitorHead.detail,
+                              )}
+                            >
                             <div
                               className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
                             >
@@ -2338,7 +2358,10 @@ export function MonitorLayout({
                                 <FlowTooltip label="Layout preset and tools">
                                 <button
                                   type="button"
-                                  aria-label={`Monitor actions for ${monitorChromeAriaLabel(monitor)}`}
+                                  aria-label={`Monitor actions for ${monitorChromeAriaLabelFromParts(
+                                    monitorHead.headline,
+                                    monitorHead.detail,
+                                  )}`}
                                   aria-expanded={monitorEditActionsOpenId === monitor.id}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/15"
                                   onMouseDown={(e) => e.stopPropagation()}
@@ -2763,21 +2786,17 @@ export function MonitorLayout({
                           : "border-white/10 bg-black/45"
                       }`}
                       onMouseDown={() => onClearAppSelection?.()}
-                      aria-label={`Minimized and tray apps for ${monitorChromeAriaLabel(monitor)}${monitor.primary ? ", primary display" : ""}. Drop here to assign launches to this monitor.`}
+                      aria-label={`Minimized and tray apps for ${monitorChromeAriaLabelFromParts(
+                        monitorHead.headline,
+                        monitorHead.detail,
+                      )}. Drop here to assign launches to this monitor.`}
                       data-drop-target="minimized"
                       data-minimized-drop-target="true"
                       data-target-id={monitor.id}
                     >
                       {minimizedForMonitor.length === 0 && !minimizedDropActive ? (
-                        <div className="flex w-full min-h-[3.25rem] flex-col items-center justify-center gap-1 px-2 py-1.5 text-center">
-                          <span className="text-[11px] font-medium leading-snug text-white/55">
-                            {monitor.primary ? "Primary display" : "This display"}
-                            <span className="text-white/40">
-                              {" · "}
-                              {monitorHead.headline || monitor.id}
-                            </span>
-                          </span>
-                          <span className="max-w-[16rem] text-[10px] leading-snug text-white/35">
+                        <div className="flex w-full min-h-[3.25rem] flex-col items-center justify-center px-2 py-1.5 text-center">
+                          <span className="max-w-[min(100%,22rem)] text-[11px] leading-snug text-white/45">
                             Drop apps from the library or layout here so they start minimized and stay tied to this monitor when you launch this profile.
                           </span>
                         </div>
