@@ -2103,9 +2103,7 @@ export default function App() {
                   minimizedFiles={[]} // REMOVED: No more standalone files
                   browserTabs={currentProfile.browserTabs}
                   isEditMode={isEditMode}
-                  onToggleLayoutEdit={() =>
-                    setIsEditMode((prev) => !prev)
-                  }
+                  onSetLayoutEditMode={setIsEditMode}
                   layoutToolbarConnected
                   dragState={dragState}
                   selectedApp={selectedApp}

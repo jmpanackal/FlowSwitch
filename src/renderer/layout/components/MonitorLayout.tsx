@@ -4,13 +4,12 @@ import {
   Grid3X3,
   Zap,
   ChevronDown,
-  PenLine,
-  Save,
   MoreHorizontal,
   Package,
 } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
+import { MonitorLayoutModeSegmented } from "./MonitorLayoutModeSegmented";
 import { FlowTooltip } from "./ui/tooltip";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
@@ -247,8 +246,8 @@ interface MonitorLayoutProps {
   /** Move an app to the front of its snap stack (same zone) for launch order. */
   onBringStackMemberToFront?: (monitorId: string, appIndex: number) => void;
   onUpdateMonitorPositions?: (positions: MonitorPositionDragRow[]) => void;
-  /** When set, shows Edit layout / Done in the preview toolbar (layout editing, not profile prefs). */
-  onToggleLayoutEdit?: () => void;
+  /** When set, shows Edit / Preview segmented control in the preview toolbar (layout editing, not profile prefs). */
+  onSetLayoutEditMode?: (edit: boolean) => void;
   /** Visually join the preview toolbar to the profile header above (shared column). */
   layoutToolbarConnected?: boolean;
 }
@@ -290,7 +289,7 @@ export function MonitorLayout({
   onAutoSnapApps,
   onBringStackMemberToFront,
   onUpdateMonitorPositions,
-  onToggleLayoutEdit,
+  onSetLayoutEditMode,
   layoutToolbarConnected = false,
 }: MonitorLayoutProps) {
   // Enhanced drag state with persistence
@@ -2214,68 +2213,45 @@ export function MonitorLayout({
               <FlowTooltip
                 label={
                   densePreviewMode
-                    ? "Drag apps on monitors. Use Edit layout to change positions."
+                    ? isEditMode
+                      ? "Drag tiles to reposition. Preview mode for a calmer canvas."
+                      : "Switch to Edit mode to move apps between monitors."
                     : undefined
                 }
               >
-                <p className="truncate text-[11px] text-flow-text-muted">
-                  {densePreviewMode
-                    ? "Drag apps. Edit layout for positions."
-                    : "Drag apps on monitors. Use Edit layout to change positions."}
-                </p>
-              </FlowTooltip>
-            </div>
-            {isEditMode ? (
-              <div className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
-                <div className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-lg bg-flow-accent-blue/15 px-2 py-1 sm:max-w-none sm:px-2.5">
-                  <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
-                  <span className="truncate text-xs font-medium text-flow-accent-blue">Editing layout</span>
-                  {dragState?.isDragging ? (
-                    <span className="hidden truncate text-xs font-medium text-flow-accent-blue/90 sm:inline">
-                      {" | "}
-                      {dragState.dragData?.name || "Item"}
-                    </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] text-flow-text-muted">
+                    {densePreviewMode
+                      ? isEditMode
+                        ? "Drag tiles. Preview for a calmer view."
+                        : "Edit mode moves tiles; Preview browses."
+                      : isEditMode
+                        ? "Drag apps between monitors. Preview mode hides snap guides."
+                        : "Browse the layout. Switch to Edit mode to rearrange."}
+                  </p>
+                  {isEditMode && !densePreviewMode ? (
+                    <p className="mt-0.5 hidden truncate text-[11px] text-flow-text-muted/85 md:block">
+                      Apps only; files become content.
+                    </p>
+                  ) : null}
+                  {isEditMode && dragState?.isDragging ? (
+                    <div className="mt-1 flex max-w-[min(100%,14rem)] min-w-0 items-center gap-1.5 sm:max-w-[min(100%,22rem)]">
+                      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
+                      <span className="truncate text-[11px] font-medium text-flow-accent-blue">
+                        {dragState.dragData?.name || "Dragging"}
+                      </span>
+                    </div>
                   ) : null}
                 </div>
-                <span className="hidden truncate text-[11px] text-flow-text-muted md:inline">
-                  Apps only; files become content.
-                </span>
-              </div>
-            ) : (
-              <span className="shrink-0 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
-                View mode
-              </span>
-            )}
+              </FlowTooltip>
+            </div>
           </div>
-          {onToggleLayoutEdit ? (
-            <FlowTooltip
-              label={
-                isEditMode
-                  ? "Save layout and exit edit mode"
-                  : "Edit monitor layout (drag apps between monitors)"
-              }
-            >
-              <button
-                type="button"
-                onClick={onToggleLayoutEdit}
-                aria-label={
-                  isEditMode
-                    ? "Save layout and exit edit mode"
-                    : "Edit monitor layout"
-                }
-                className={`inline-flex shrink-0 items-center justify-center rounded-lg p-2.5 transition-colors md:p-3 ${
-                  isEditMode
-                    ? "bg-flow-accent-blue text-flow-text-primary shadow-sm hover:bg-flow-accent-blue-hover"
-                    : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
-                }`}
-              >
-                {isEditMode ? (
-                  <Save className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-                ) : (
-                  <PenLine className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-                )}
-              </button>
-            </FlowTooltip>
+          {onSetLayoutEditMode ? (
+            <MonitorLayoutModeSegmented
+              isEditMode={isEditMode}
+              onChange={onSetLayoutEditMode}
+              dense={densePreviewMode}
+            />
           ) : null}
         </div>
       </div>
