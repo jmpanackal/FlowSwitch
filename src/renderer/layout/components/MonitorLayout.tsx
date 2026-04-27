@@ -365,8 +365,23 @@ export function MonitorLayout({
    */
   const frozenDragZonesRef = useRef<SnapZone[] | null>(null);
 
+  /** Coalesce high-frequency layout drags to one profile write per animation frame. */
+  const pendingItemDragRef = useRef<{
+    monitorId: string;
+    itemIndex: number;
+    itemType: "app";
+    newPosition: { x: number; y: number };
+    pointerMonitorPct?: { x: number; y: number } | null;
+  } | null>(null);
+  const itemDragRafRef = useRef<number | null>(null);
+
   useEffect(() => {
     const clearLocalMonitorDrag = () => {
+      if (itemDragRafRef.current !== null) {
+        cancelAnimationFrame(itemDragRafRef.current);
+        itemDragRafRef.current = null;
+      }
+      pendingItemDragRef.current = null;
       stackCoDragIndicesRef.current = null;
       dragOriginRef.current = null;
       dragSourceZoneIdRef.current = null;
@@ -394,6 +409,11 @@ export function MonitorLayout({
         "flowswitch:clear-monitor-layout-local-drag",
         clearLocalMonitorDrag,
       );
+      if (itemDragRafRef.current !== null) {
+        cancelAnimationFrame(itemDragRafRef.current);
+        itemDragRafRef.current = null;
+      }
+      pendingItemDragRef.current = null;
     };
   }, []);
 
@@ -1509,7 +1529,7 @@ export function MonitorLayout({
     lastDragPositionRef.current = null;
   };
 
-  const handleItemDrag = (
+  const applyMonitorItemDragSync = (
     monitorId: string,
     itemIndex: number,
     itemType: "app",
@@ -1629,7 +1649,58 @@ export function MonitorLayout({
     }
   };
 
+  const applyMonitorItemDragSyncRef = useRef(applyMonitorItemDragSync);
+  applyMonitorItemDragSyncRef.current = applyMonitorItemDragSync;
+
+  const flushPendingMonitorItemDrag = () => {
+    if (itemDragRafRef.current !== null) {
+      cancelAnimationFrame(itemDragRafRef.current);
+      itemDragRafRef.current = null;
+    }
+    const pending = pendingItemDragRef.current;
+    pendingItemDragRef.current = null;
+    if (!pending) return;
+    applyMonitorItemDragSyncRef.current(
+      pending.monitorId,
+      pending.itemIndex,
+      pending.itemType,
+      pending.newPosition,
+      pending.pointerMonitorPct,
+    );
+  };
+
+  const scheduleMonitorItemDrag = (
+    monitorId: string,
+    itemIndex: number,
+    itemType: "app",
+    newPosition: { x: number; y: number },
+    pointerMonitorPct?: { x: number; y: number } | null,
+  ) => {
+    pendingItemDragRef.current = {
+      monitorId,
+      itemIndex,
+      itemType,
+      newPosition,
+      pointerMonitorPct,
+    };
+    if (itemDragRafRef.current !== null) return;
+    itemDragRafRef.current = requestAnimationFrame(() => {
+      itemDragRafRef.current = null;
+      const pending = pendingItemDragRef.current;
+      pendingItemDragRef.current = null;
+      if (!pending) return;
+      applyMonitorItemDragSyncRef.current(
+        pending.monitorId,
+        pending.itemIndex,
+        pending.itemType,
+        pending.newPosition,
+        pending.pointerMonitorPct,
+      );
+    });
+  };
+
   const handleItemDragEnd = (monitorId: string, itemIndex: number, itemType: "app") => {
+    flushPendingMonitorItemDrag();
     const updateCallback = onUpdateApp;
     const monitor = monitors.find((m) => m.id === monitorId);
     const dragEndZones =
@@ -1771,8 +1842,8 @@ export function MonitorLayout({
 
   const handleItemDragStartRef = useRef(handleItemDragStart);
   handleItemDragStartRef.current = handleItemDragStart;
-  const handleItemDragRef = useRef(handleItemDrag);
-  handleItemDragRef.current = handleItemDrag;
+  const handleItemDragRef = useRef(scheduleMonitorItemDrag);
+  handleItemDragRef.current = scheduleMonitorItemDrag;
   const handleItemDragEndRef = useRef(handleItemDragEnd);
   handleItemDragEndRef.current = handleItemDragEnd;
 
@@ -2542,7 +2613,7 @@ export function MonitorLayout({
                                   handleItemDragStart(monitor.id, appIndex, "app")
                                 }
                                 onDrag={(newPosition, pointerPct) =>
-                                  handleItemDrag(
+                                  scheduleMonitorItemDrag(
                                     monitor.id,
                                     appIndex,
                                     "app",
@@ -2702,19 +2773,30 @@ export function MonitorLayout({
                         minimizedDropPreviewMonitorId === monitor.id;
                       return (
                     <div
-                      className={`relative mt-1.5 flex min-h-9 items-center gap-1 overflow-x-auto rounded-lg border px-1.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm scrollbar-elegant transition-colors ${
+                      className={`relative mt-2 flex min-h-[3.75rem] items-center gap-2 overflow-x-auto rounded-lg border px-2 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm scrollbar-elegant transition-colors ${
                         minimizedDropActive
                           ? "ring-1 ring-flow-accent-blue border-flow-accent-blue bg-flow-accent-blue/14 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]"
                           : "border-white/10 bg-black/45"
                       }`}
                       onMouseDown={() => onClearAppSelection?.()}
-                      aria-label={`${monitor.name} minimized apps`}
+                      aria-label={`Minimized and tray apps for ${monitor.name || monitor.id}${monitor.primary ? ", primary display" : ""}. Drop here to assign launches to this monitor.`}
                       data-drop-target="minimized"
                       data-minimized-drop-target="true"
                       data-target-id={monitor.id}
                     >
                       {minimizedForMonitor.length === 0 && !minimizedDropActive ? (
-                        <span className="px-1 text-[10px] text-white/35">Minimized Apps</span>
+                        <div className="flex w-full min-h-[3.25rem] flex-col items-center justify-center gap-1 px-2 py-1.5 text-center">
+                          <span className="text-[11px] font-medium leading-snug text-white/55">
+                            {monitor.primary ? "Primary display" : "This display"}
+                            <span className="text-white/40">
+                              {" · "}
+                              {monitor.name || monitor.id}
+                            </span>
+                          </span>
+                          <span className="max-w-[16rem] text-[10px] leading-snug text-white/35">
+                            Drop apps from the library or layout here so they start minimized and stay tied to this monitor when you launch this profile.
+                          </span>
+                        </div>
                       ) : minimizedForMonitor.map(({ app, appIndex }) => {
                         const iconSrc = safeIconSrc(app.iconPath ?? undefined);
                         const selected = matchesMinimizedAppSelection(selectedApp, appIndex, app);
@@ -2759,7 +2841,7 @@ export function MonitorLayout({
                       })}
                       {minimizedDropActive ? (
                         <div
-                          className="pointer-events-none h-10 w-10 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
+                          className="pointer-events-none h-11 w-11 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
                           aria-hidden
                         />
                       ) : null}

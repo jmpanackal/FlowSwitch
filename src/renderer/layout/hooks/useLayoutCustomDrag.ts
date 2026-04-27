@@ -475,14 +475,23 @@ export function useLayoutCustomDrag({
         updateMinimizedAppTargetMonitor,
       } = actions;
 
+      const monitors = currentProfile.monitors || [];
+      const primaryMonitorId =
+        monitors.find((m) => m.primary)?.id ?? monitors[0]?.id ?? "monitor-1";
+      const trimmedDropTarget = targetMonitorId?.trim() || null;
+      /** Monitor id from the strip that received the drop, when `data-target-id` is valid. */
+      const minimizedDropMonitorId =
+        trimmedDropTarget && monitors.some((m) => m.id === trimmedDropTarget)
+          ? trimmedDropTarget
+          : null;
+
       console.log("🎯 DROP ON MINIMIZED:", dragData);
 
       if (dragData.source === "monitor") {
         const targetMonitor =
-          targetMonitorId ||
-          dragData.sourceMonitorId ||
-          currentProfile.monitors.find((m) => m.primary)?.id ||
-          "monitor-1";
+          minimizedDropMonitorId
+          || dragData.sourceMonitorId
+          || primaryMonitorId;
         moveAppToMinimized(
           currentProfile.id,
           dragData.sourceMonitorId,
@@ -494,16 +503,15 @@ export function useLayoutCustomDrag({
         dragData.type === "app" &&
         typeof dragData.appIndex === "number"
       ) {
-        const targetMonitor =
-          targetMonitorId ||
-          currentProfile.monitors.find((m) => m.primary)?.id ||
-          "monitor-1";
+        const targetMonitor = minimizedDropMonitorId || primaryMonitorId;
         updateMinimizedAppTargetMonitor(
           currentProfile.id,
           dragData.appIndex,
           targetMonitor,
         );
       } else if (dragData.source === "sidebar") {
+        const sidebarMinimizedMonitorId =
+          minimizedDropMonitorId || primaryMonitorId;
         if (dragData.type === "content" || dragData.type === "file") {
           console.log(
             "🚀 CREATING MINIMIZED APP INSTANCE FOR CONTENT/FILE:",
@@ -527,9 +535,7 @@ export function useLayoutCustomDrag({
             ),
             volume: 50,
             launchBehavior: "minimize" as const,
-            targetMonitor:
-              currentProfile.monitors.find((m) => m.primary)
-                ?.id || "monitor-1",
+            targetMonitor: sidebarMinimizedMonitorId,
             associatedFiles:
               dragData.contentType === "file" || dragData.type === "file"
                 ? [
@@ -578,9 +584,7 @@ export function useLayoutCustomDrag({
             color: dragData.color,
             volume: 50,
             launchBehavior: "minimize" as const,
-            targetMonitor:
-              currentProfile.monitors.find((m) => m.primary)
-                ?.id || "monitor-1",
+            targetMonitor: sidebarMinimizedMonitorId,
           };
 
           addAppToMinimized(currentProfile.id, newApp);
@@ -623,8 +627,9 @@ export function useLayoutCustomDrag({
     [currentProfileRef, handleDropOnMonitor, handleDropOnMinimized],
   );
 
-  const handleGlobalMouseMove = useCallback((e: MouseEvent) => {
+  const handleGlobalPointerOrMouseMove = useCallback((e: MouseEvent | PointerEvent) => {
     if (!dragStateRef.current.isDragging) return;
+    if (e instanceof PointerEvent && !e.isPrimary) return;
 
     setDragState((prev) => ({
       ...prev,
@@ -632,8 +637,15 @@ export function useLayoutCustomDrag({
     }));
   }, [dragStateRef, setDragState]);
 
-  const handleGlobalMouseUp = useCallback(
-    (e: MouseEvent) => {
+  /**
+   * End custom drag on mouse *or* pointer release. Sidebar rows use Pointer Events
+   * with `preventDefault` on pointerdown (click-vs-drag), which suppresses the
+   * compatibility mouseup sequence — pointerup still fires.
+   */
+  const handleGlobalDragRelease = useCallback(
+    (e: MouseEvent | PointerEvent) => {
+      if (e instanceof PointerEvent && !e.isPrimary) return;
+
       const hadActiveLayoutDrag = dragStateRef.current.isDragging;
       const currentProfile = currentProfileRef.current;
 
@@ -681,15 +693,26 @@ export function useLayoutCustomDrag({
         });
       }
 
-      // `flowswitch:dragend` may clear layout drag before this `mouseup` runs; still
-      // detach so we never leave orphaned document listeners.
+      // `flowswitch:dragend` may clear layout drag before this runs; still detach.
       document.removeEventListener(
         "mousemove",
-        handleGlobalMouseMove,
+        handleGlobalPointerOrMouseMove,
+      );
+      document.removeEventListener(
+        "pointermove",
+        handleGlobalPointerOrMouseMove,
       );
       document.removeEventListener(
         "mouseup",
-        handleGlobalMouseUp,
+        handleGlobalDragRelease,
+      );
+      document.removeEventListener(
+        "pointerup",
+        handleGlobalDragRelease,
+      );
+      document.removeEventListener(
+        "pointercancel",
+        handleGlobalDragRelease,
       );
       restoreDocumentTextSelection();
       document.body.style.cursor = "";
@@ -698,7 +721,7 @@ export function useLayoutCustomDrag({
       currentProfileRef,
       dragStateRef,
       handleCustomDrop,
-      handleGlobalMouseMove,
+      handleGlobalPointerOrMouseMove,
       setDragState,
     ],
   );
@@ -734,15 +757,21 @@ export function useLayoutCustomDrag({
 
       document.addEventListener(
         "mousemove",
-        handleGlobalMouseMove,
+        handleGlobalPointerOrMouseMove,
       );
-      document.addEventListener("mouseup", handleGlobalMouseUp);
+      document.addEventListener(
+        "pointermove",
+        handleGlobalPointerOrMouseMove,
+      );
+      document.addEventListener("mouseup", handleGlobalDragRelease);
+      document.addEventListener("pointerup", handleGlobalDragRelease);
+      document.addEventListener("pointercancel", handleGlobalDragRelease);
       suspendDocumentTextSelection();
       document.body.style.cursor = "grabbing";
     },
     [
-      handleGlobalMouseMove,
-      handleGlobalMouseUp,
+      handleGlobalPointerOrMouseMove,
+      handleGlobalDragRelease,
       isEditModeRef,
       setDragState,
       setIsEditMode,

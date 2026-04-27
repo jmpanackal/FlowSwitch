@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
   Settings,
@@ -22,6 +22,10 @@ import {
   FlowLibraryToolbar,
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 
 type AppType = {
   name: string;
@@ -63,6 +67,9 @@ const getStableColor = (name: string) => {
 
 const APPS_SIDEBAR_HELP =
   "Open ⋯ on a row to add to a monitor or minimized row, or change catalog visibility.";
+
+/** Pixels of pointer movement before a catalog row counts as a drag (not a click). */
+const SIDEBAR_APP_DRAG_THRESHOLD_PX = 6;
 
 export function AppManager({
   profiles,
@@ -236,45 +243,99 @@ export function AppManager({
     return { runAsAdmin, forceCloseOnExit, smartSave };
   };
 
-  // CUSTOM DRAG SYSTEM - Mouse-based dragging
-  const handleMouseDown = (e: React.MouseEvent, app: any) => {
-    e.preventDefault();
+  const onCustomDragStartRef = useRef(onCustomDragStart);
+  onCustomDragStartRef.current = onCustomDragStart;
+  const onDragStartRef = useRef(onDragStart);
+  onDragStartRef.current = onDragStart;
+  const onInspectInstalledAppRef = useRef(onInspectInstalledApp);
+  onInspectInstalledAppRef.current = onInspectInstalledApp;
 
-    const dragData = {
-      source: 'sidebar',
-      type: 'app',
-      name: app.name,
-      iconPath: app.iconPath ?? null,
-      executablePath: app.executablePath ?? null,
-      color: app.color,
-      category: app.category,
-    };
-    const previewIconSrc = safeIconSrc(app.iconPath);
+  const beginInstalledAppSidebarDrag = useCallback(
+    (clientX: number, clientY: number, app: AppType) => {
+      const dragData = {
+        source: "sidebar" as const,
+        type: "app" as const,
+        name: app.name,
+        iconPath: app.iconPath ?? null,
+        executablePath: app.executablePath ?? null,
+        color: app.color,
+        category: app.category,
+      };
+      const previewIconSrc = safeIconSrc(app.iconPath);
+      const preview = (
+        <div className="flex items-center gap-2">
+          {previewIconSrc ? (
+            <img src={previewIconSrc} alt={app.name} className="w-4 h-4 rounded" />
+          ) : (
+            <Settings className="w-4 h-4 text-white" />
+          )}
+          <span>{app.name}</span>
+        </div>
+      );
+      onCustomDragStartRef.current(
+        dragData,
+        "sidebar",
+        "apps",
+        { x: clientX, y: clientY },
+        preview,
+      );
+      onDragStartRef.current?.();
+    },
+    [],
+  );
 
-    const preview = (
-      <div className="flex items-center gap-2">
-        {previewIconSrc ? (
-          <img src={previewIconSrc} alt={app.name} className="w-4 h-4 rounded" />
-        ) : (
-          <Settings className="w-4 h-4 text-white" />
-        )}
-        <span>{app.name}</span>
-      </div>
-    );
-    
-    onCustomDragStart(
-      dragData,
-      'sidebar',
-      'apps',
-      { x: e.clientX, y: e.clientY },
-      preview
-    );
-    
-    // Call parent's onDragStart to enable edit mode
-    if (onDragStart) {
-      onDragStart();
-    }
-  };
+  /** Full-row drag handle: move past threshold to drag; simple click opens inspector. */
+  const handleAppRowPointerDown = useCallback(
+    (e: React.PointerEvent, app: AppType) => {
+      if (!compact) return;
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("button") || target.closest("[data-app-row-menu]")) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let moved = false;
+      let dragStarted = false;
+
+      suspendDocumentTextSelection();
+
+      function cleanup() {
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+        document.removeEventListener("pointercancel", onPointerUp);
+        restoreDocumentTextSelection();
+      }
+
+      function onPointerMove(ev: PointerEvent) {
+        if (dragStarted) return;
+        if (
+          Math.abs(ev.clientX - startX) > SIDEBAR_APP_DRAG_THRESHOLD_PX
+          || Math.abs(ev.clientY - startY) > SIDEBAR_APP_DRAG_THRESHOLD_PX
+        ) {
+          moved = true;
+          dragStarted = true;
+          beginInstalledAppSidebarDrag(ev.clientX, ev.clientY, app);
+          cleanup();
+        }
+      }
+
+      function onPointerUp() {
+        if (!dragStarted && !moved && onInspectInstalledAppRef.current) {
+          onInspectInstalledAppRef.current(app);
+        }
+        cleanup();
+      }
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("pointercancel", onPointerUp);
+    },
+    [beginInstalledAppSidebarDrag, compact],
+  );
 
   const stopRowPointerForDrag = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -401,11 +462,31 @@ export function AppManager({
             const layoutFlags = getAppLayoutAggregateFlags(app.name);
             const iconSrc = safeIconSrc(app.iconPath);
             return (
-              <div
+              <FlowTooltip
                 key={catalogKey}
+                label="Drag from anywhere on the row to place on layout. Click without dragging to inspect."
+              >
+              <div
                 className={`flow-card-quiet rounded-lg min-w-0 ${
                   appsLibraryView === "grid" ? "min-w-0" : ""
+                } ${
+                  compact && onInspectInstalledApp
+                    ? "cursor-grab active:cursor-grabbing outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-flow-accent-blue/35"
+                    : ""
                 }`}
+                role={compact && onInspectInstalledApp ? "button" : undefined}
+                tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
+                onPointerDown={(e) => handleAppRowPointerDown(e, app)}
+                onKeyDown={
+                  compact && onInspectInstalledApp
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onInspectInstalledApp(app);
+                        }
+                      }
+                    : undefined
+                }
               >
                 <div
                   className={`flex gap-3 ${rowPad} ${
@@ -414,18 +495,16 @@ export function AppManager({
                       : "items-center"
                   }`}
                 >
-                  <FlowTooltip label="Drag to add to monitor or minimized apps">
-                  <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
+                  <div
+                    className="pointer-events-none w-8 h-8 shrink-0 rounded-lg flex items-center justify-center transition-transform duration-150 ease-out select-none relative"
                     style={{ backgroundColor: `${app.color ?? '#888'}20` }}
-                    onMouseDown={(e) => handleMouseDown(e, app)}
-                    onClick={(e) => e.stopPropagation()}
+                    aria-hidden
                   >
                     {iconSrc ? (
                       <>
                         <img
                           src={iconSrc}
-                          alt={app.name}
+                          alt=""
                           className="w-6 h-6 object-contain rounded"
                           draggable={false}
                           onError={e => {
@@ -447,28 +526,10 @@ export function AppManager({
                       <Settings className="w-4 h-4 text-white opacity-90" aria-hidden />
                     )}
                   </div>
-                  </FlowTooltip>
                   <div
                     className={`min-w-0 ${
                       appsLibraryView === "grid" ? "w-full" : "flex-1"
-                    }${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
-                    onClick={
-                      compact && onInspectInstalledApp
-                        ? () => onInspectInstalledApp(app)
-                        : undefined
-                    }
-                    onKeyDown={
-                      compact && onInspectInstalledApp
-                        ? (e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onInspectInstalledApp(app);
-                          }
-                        }
-                        : undefined
-                    }
-                    role={compact && onInspectInstalledApp ? "button" : undefined}
-                    tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
+                    }`}
                   >
                     <div
                       className={`flex items-center gap-2 ${
@@ -503,6 +564,7 @@ export function AppManager({
                     )}
                   </div>
                   <div
+                    data-app-row-menu
                     className={`flex shrink-0 items-center gap-0 ${
                       appsLibraryView === "grid"
                         ? "justify-center self-center"
@@ -637,6 +699,7 @@ export function AppManager({
                   </div>
                 </div>
               </div>
+              </FlowTooltip>
             );
           })}
           </div>
