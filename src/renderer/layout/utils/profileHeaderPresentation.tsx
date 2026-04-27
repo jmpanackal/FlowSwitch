@@ -75,7 +75,7 @@ export function ProfileIconGlyph({
   return <Icon className={className} />;
 }
 
-const frameSize: Record<"default" | "hero", { box: string; glyph: string }> = {
+const frameSize: Record<"default" | "hero" | "sidebar", { box: string; glyph: string }> = {
   default: {
     box: "h-10 w-10 rounded-[11px]",
     glyph: "h-5 w-5",
@@ -83,6 +83,11 @@ const frameSize: Record<"default" | "hero", { box: string; glyph: string }> = {
   hero: {
     box: "h-14 w-14 rounded-2xl sm:h-[4.25rem] sm:w-[4.25rem] md:h-[4.5rem] md:w-[4.5rem]",
     glyph: "h-7 w-7 sm:h-8 sm:w-8",
+  },
+  /** Library list / compact rows — same tint frames as default, smaller footprint. */
+  sidebar: {
+    box: "h-9 w-9 rounded-[10px]",
+    glyph: "h-4 w-4",
   },
 };
 
@@ -96,8 +101,8 @@ export function ProfileIconFrame({
 }: {
   icon: string;
   className?: string;
-  /** `hero` — larger tile (e.g. profile header). */
-  variant?: "default" | "hero";
+  /** `hero` — profile header. `sidebar` — library list / compact cards. */
+  variant?: "default" | "hero" | "sidebar";
 }) {
   const raster = safeIconSrc(icon);
   const { box, glyph } = frameSize[variant];

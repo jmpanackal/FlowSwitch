@@ -34,6 +34,10 @@ import {
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { countStackUnits, getSnapZonesForMonitor } from "../utils/monitorSnapZones";
 import {
+  getMonitorChromeHeading,
+  monitorChromeAriaLabel,
+} from "../utils/monitorChromeLabels";
+import {
   MonitorAppStackCluster,
   isHiddenStackMember,
 } from "./MonitorAppStackCluster";
@@ -728,11 +732,14 @@ export function MonitorLayout({
       const marginFrac = 2.1 / 100;
       const maxW = pb.width * (1 - 2 * marginFrac);
       const maxH = pb.height * (1 - 2 * marginFrac);
-      setLayoutPreviewScale(
-        clampPreviewScaleValue(
-          Math.min(1, maxW / Math.max(1, fp.widthPx), maxH / Math.max(1, fp.heightPx)),
-        ),
+      const rawFit = Math.min(
+        1,
+        maxW / Math.max(1, fp.widthPx),
+        maxH / Math.max(1, fp.heightPx),
       );
+      /* Slightly larger single-monitor canvas when geometry allows (~12–14% zoom). */
+      const boosted = Math.min(1, rawFit * 1.14);
+      setLayoutPreviewScale(clampPreviewScaleValue(boosted));
       return;
     }
 
@@ -2261,7 +2268,7 @@ export function MonitorLayout({
         <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(16rem,42vh,28rem)] ${large ? 'md:min-h-[clamp(20rem,48vh,34rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 p-[clamp(4px,0.75vmin,10px)] min-h-[clamp(18rem,46vh,32rem)] ${large ? 'md:min-h-[clamp(22rem,50vh,36rem)]' : ''}`}
           >
             <div
               ref={monitorPreviewInnerRef}
@@ -2281,7 +2288,8 @@ export function MonitorLayout({
               const minimizedForMonitor = minimizedAppsByMonitor[monitor.id] || [];
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
               const clampedPreview = clampPreviewPosition(monitor, preview, displayPreviewScale);
-              
+              const monitorHead = getMonitorChromeHeading(monitor);
+
               return (
                 <div
                   key={monitor.id}
@@ -2313,7 +2321,7 @@ export function MonitorLayout({
                       useCompactMonitorEditChrome ? (
                         <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
                           <div className="flex min-w-0 items-center justify-center gap-1.5">
-                            <FlowTooltip label={monitor.name}>
+                            <FlowTooltip label={monitorChromeAriaLabel(monitor)}>
                             <div
                               className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
                             >
@@ -2322,7 +2330,7 @@ export function MonitorLayout({
                                 <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
                                 <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
                               </span>
-                              <span className="truncate">{monitor.name}</span>
+                              <span className="truncate">{monitorHead.headline}</span>
                             </div>
                             </FlowTooltip>
                             {(onUpdateMonitorLayout || (totalItems > 0 && onAutoSnapApps)) ? (
@@ -2330,7 +2338,7 @@ export function MonitorLayout({
                                 <FlowTooltip label="Layout preset and tools">
                                 <button
                                   type="button"
-                                  aria-label={`Monitor actions for ${monitor.name}`}
+                                  aria-label={`Monitor actions for ${monitorChromeAriaLabel(monitor)}`}
                                   aria-expanded={monitorEditActionsOpenId === monitor.id}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/15"
                                   onMouseDown={(e) => e.stopPropagation()}
@@ -2401,11 +2409,11 @@ export function MonitorLayout({
                               <span className="block h-[2px] w-3 rounded-full bg-white/45" />
                               <span className="block h-[2px] w-3 rounded-full bg-white/45" />
                             </span>
-                            <span className="whitespace-nowrap">{monitor.name}</span>
+                            <span className="whitespace-nowrap">{monitorHead.headline}</span>
                           </div>
-                          {monitor.systemName ? (
+                          {monitorHead.detail ? (
                             <span className="whitespace-nowrap text-[11px] text-white/55">
-                              ({monitor.systemName})
+                              ({monitorHead.detail})
                             </span>
                           ) : null}
                           {onUpdateMonitorLayout ? (
@@ -2446,12 +2454,12 @@ export function MonitorLayout({
                         <div className="flex flex-col items-center justify-center gap-1 text-center">
                           <div className={`inline-flex items-center justify-center whitespace-nowrap rounded-full border border-white/15 bg-white/10 backdrop-blur-md ${densePreviewMode ? 'px-2 py-1' : 'px-3 py-1.5'} shadow-[0_6px_20px_rgba(0,0,0,0.35)]`}>
                             <span className={`text-white ${densePreviewMode ? 'text-xs' : 'text-sm'} font-semibold leading-none tracking-[0.01em] whitespace-nowrap`}>
-                              {monitor.name}
+                              {monitorHead.headline}
                             </span>
                           </div>
-                          {monitor.systemName && !compactPreviewMode && (
+                          {monitorHead.detail && !compactPreviewMode && (
                             <div className="text-[11px] leading-tight text-white/60 whitespace-nowrap truncate max-w-full">
-                              {monitor.systemName}
+                              {monitorHead.detail}
                             </div>
                           )}
                         </div>
@@ -2483,7 +2491,7 @@ export function MonitorLayout({
                   
                   {/* Monitor display - Enhanced sizing */}
                   <div 
-                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-0 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 ${
+                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-1 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 ${
                       appDragZonesActive
                         ? 'border-flow-accent-blue/40 ring-1 ring-flow-accent-blue/20 shadow-[inset_0_0_20px_rgba(56,189,248,0.06)]'
                         : 'border-white/20'
@@ -2755,7 +2763,7 @@ export function MonitorLayout({
                           : "border-white/10 bg-black/45"
                       }`}
                       onMouseDown={() => onClearAppSelection?.()}
-                      aria-label={`Minimized and tray apps for ${monitor.name || monitor.id}${monitor.primary ? ", primary display" : ""}. Drop here to assign launches to this monitor.`}
+                      aria-label={`Minimized and tray apps for ${monitorChromeAriaLabel(monitor)}${monitor.primary ? ", primary display" : ""}. Drop here to assign launches to this monitor.`}
                       data-drop-target="minimized"
                       data-minimized-drop-target="true"
                       data-target-id={monitor.id}
@@ -2766,7 +2774,7 @@ export function MonitorLayout({
                             {monitor.primary ? "Primary display" : "This display"}
                             <span className="text-white/40">
                               {" · "}
-                              {monitor.name || monitor.id}
+                              {monitorHead.headline || monitor.id}
                             </span>
                           </span>
                           <span className="max-w-[16rem] text-[10px] leading-snug text-white/35">
@@ -2798,7 +2806,7 @@ export function MonitorLayout({
                                 ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
                                 : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
                             }`}
-                            aria-label={`Restore ${app.name} to ${monitor.name}`}
+                            aria-label={`Restore ${app.name} to ${monitorHead.headline}`}
                           >
                             {iconSrc ? (
                               <img

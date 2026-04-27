@@ -425,6 +425,20 @@ export default function App() {
     };
   }, [currentProfile, profileLaunchSummaryParts]);
 
+  const profileLaunchBreakdownLines = useMemo(() => {
+    if (!currentProfile) return null;
+    const p = currentProfile;
+    const lines: string[] = [`Apps: ${p.appCount ?? 0}`];
+    if ((p.tabCount ?? 0) > 0) {
+      lines.push(`Tabs: ${p.tabCount}`);
+    }
+    lines.push(`Estimated startup: ~${p.estimatedStartupTime ?? 0}s`);
+    if (p.monitors?.length) {
+      lines.push(`Monitors: ${p.monitors.length}`);
+    }
+    return lines;
+  }, [currentProfile]);
+
   const profileForSettings =
     profiles.find((p) => p.id === profileSettingsIntent?.profileId) || null;
 
@@ -1522,7 +1536,11 @@ export default function App() {
               : "w-0 min-w-0"
           }`}
         >
-        <div className="flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden">
+        <div
+          className={`flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden transition-opacity duration-200 ${
+            isEditMode ? "opacity-[0.78] saturate-[0.92]" : ""
+          }`}
+        >
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
               <div className="flow-library-tablist-rail">
@@ -1583,7 +1601,7 @@ export default function App() {
           </div>
 
           {/* List region: three panels on one row; slide via translate3d (no width animation). */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-flow-border/30 bg-flow-bg-primary/15 pt-1">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-flow-border/25 bg-flow-bg-primary/[0.06] pt-1">
             <div
               className="flow-tab-slide-track flex h-full min-h-0 w-[300%] flex-shrink-0"
               style={{
@@ -2008,6 +2026,9 @@ export default function App() {
                       onCancel={handleCancelLaunch}
                       showCancel={launchControlShowCancel}
                       hotkey={currentProfile.hotkey?.trim() || null}
+                      primaryLabel={`Launch ${currentProfile.name}`}
+                      summaryLine={profileHeaderMeta?.lead ?? null}
+                      breakdownLines={profileLaunchBreakdownLines}
                     />
                   </div>
                   {showLaunchFeedbackStrip ? (
@@ -2267,7 +2288,9 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30`}
+            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30 transition-opacity duration-200 ${
+              isEditMode ? "opacity-[0.82] saturate-[0.94]" : ""
+            }`}
           >
             {/* Sidebar Header - Close button only */}
             <div className="absolute top-3 right-3 z-10">
