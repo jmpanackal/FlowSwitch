@@ -2514,7 +2514,7 @@ export function MonitorLayout({
                   
                   {/* Monitor display - Enhanced sizing */}
                   <div 
-                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-1 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 ${
+                    className={`monitor-container relative bg-black/40 backdrop-blur-sm border-2 rounded-xl p-0 ${baseWidth} ${baseHeight} overflow-hidden transition-all duration-200 ${
                       appDragZonesActive
                         ? 'border-flow-accent-blue/40 ring-1 ring-flow-accent-blue/20 shadow-[inset_0_0_20px_rgba(56,189,248,0.06)]'
                         : 'border-white/20'
@@ -2523,7 +2523,7 @@ export function MonitorLayout({
                     data-target-id={monitor.id}
                     data-monitor-id={monitor.id}
                   >
-                    <div className="relative h-full w-full min-h-0 bg-black/60 overflow-hidden rounded-xl ring-1 ring-inset ring-white/10">
+                    <div className="relative h-full w-full min-h-0 bg-black/60 overflow-hidden rounded-[10px] ring-1 ring-inset ring-white/10">
                       
                       {/* Monitor-Specific Snap Zones */}
                       {renderSnapZones(monitor)}
