@@ -5,6 +5,37 @@ const normalizePendingStatus = (value) => {
   return 'waiting';
 };
 
+const normalizeAppLaunchStep = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = new Set([
+    'pending',
+    'launching',
+    'placing',
+    'awaiting-confirmation',
+    'done',
+    'failed',
+    'skipped',
+  ]);
+  return allowed.has(normalized) ? normalized : 'pending';
+};
+
+const cloneLaunchRowIconDataUrl = (value) => {
+  const s = String(value || '').trim();
+  if (!s.startsWith('data:image/')) return null;
+  if (s.length > 2_200_000) return null;
+  if (!/^data:image\/(png|jpeg|jpg|webp|gif|bmp);base64,/i.test(s)) return null;
+  return s;
+};
+
+const cloneAppLaunchProgress = (rows) => (
+  (Array.isArray(rows) ? rows : []).map((item, index) => ({
+    key: String(item?.key || '').trim() || `app-${index}`,
+    name: String(item?.name || '').trim() || 'App',
+    step: normalizeAppLaunchStep(item?.step),
+    iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
+  }))
+);
+
 const clonePendingConfirmations = (pendingConfirmations) => (
   (Array.isArray(pendingConfirmations) ? pendingConfirmations : []).map((item) => ({
     name: String(item?.name || ''),
@@ -76,6 +107,11 @@ const createLaunchStatusStore = (options = {}) => {
     const unresolvedPendingConfirmationCount = pendingConfirmations
       .filter((item) => item.status !== 'resolved')
       .length;
+    const rawPhase = status.activePhase != null ? String(status.activePhase).trim().toLowerCase() : '';
+    const activePhase = rawPhase === 'launching' || rawPhase === 'placing' || rawPhase === 'tabs'
+      ? rawPhase
+      : null;
+    const activeAppName = status.activeAppName != null ? String(status.activeAppName).trim() : '';
     const nextStatus = {
       profileId: safeProfileId,
       runId: safeRunId,
@@ -87,6 +123,10 @@ const createLaunchStatusStore = (options = {}) => {
       pendingConfirmationCount: pendingConfirmations.length,
       unresolvedPendingConfirmationCount,
       requestedAppCount: Number(status.requestedAppCount || 0),
+      requestedBrowserTabCount: Math.max(0, Number(status.requestedBrowserTabCount || 0)),
+      activePhase,
+      activeAppName: activeAppName || null,
+      appLaunchProgress: cloneAppLaunchProgress(status.appLaunchProgress),
       pendingConfirmations,
       updatedAt: now(),
     };

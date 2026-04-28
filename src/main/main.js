@@ -59,7 +59,6 @@ const {
   registerTrustedRendererIpc,
   scheduleInstalledAppsCatalogWarmup,
 } = require('./ipc/trusted-renderer-ipc');
-const { readAppPreferences } = require('./services/app-preferences-store');
 const {
   createProfileAccessShell,
   parseProfileLaunchIdFromArgv,
@@ -767,9 +766,49 @@ const launchExecutable = (executablePath, args = []) => (
   })
 );
 
-const publishLaunchProfileStatus = (profileId, runId, status) => (
-  launchStatusStore.publishStatus(profileId, runId, status)
-);
+const clearMainWindowLaunchTaskbarProgress = () => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || typeof win.setProgressBar !== 'function') return;
+  try {
+    win.setProgressBar(-1);
+  } catch (err) {
+    console.warn('[launch-taskbar] clear failed:', String(err?.message || err));
+  }
+};
+
+const syncMainWindowTaskbarLaunchProgress = (status) => {
+  const win = mainWindow;
+  if (!win || win.isDestroyed() || typeof win.setProgressBar !== 'function') return;
+  try {
+    if (!status || typeof status !== 'object') {
+      win.setProgressBar(-1);
+      return;
+    }
+    const state = String(status.state || '').toLowerCase();
+    if (state === 'complete' || state === 'failed' || state === 'cancelled') {
+      win.setProgressBar(-1);
+      return;
+    }
+    const requested = Math.max(1, Number(status.requestedAppCount || 0));
+    const launched = Math.max(0, Number(status.launchedAppCount || 0));
+    const frac = Math.min(1, Math.max(0, launched / requested));
+    if (state === 'awaiting-confirmations' && frac <= 0) {
+      win.setProgressBar(2);
+      return;
+    }
+    win.setProgressBar(frac);
+  } catch (err) {
+    console.warn('[launch-taskbar] sync failed:', String(err?.message || err));
+  }
+};
+
+const publishLaunchProfileStatus = (profileId, runId, status) => {
+  const result = launchStatusStore.publishStatus(profileId, runId, status);
+  if (result?.published && result.status) {
+    syncMainWindowTaskbarLaunchProgress(result.status);
+  }
+  return result;
+};
 
 const { createProfileLaunchRunner } = require('./services/profile-launch-runner');
 const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
@@ -823,24 +862,8 @@ let profileAccessShell = null;
 let profileScheduleRunner = null;
 
 const applyLaunchVisibilityBegin = () => {
-  const win = mainWindow;
-  if (!win || win.isDestroyed()) return;
-  try {
-    const prefs = readAppPreferences();
-    if (prefs.pinMainWindowDuringProfileLaunch === false) {
-      if (win.isMinimized()) win.restore();
-      win.show();
-      win.focus();
-      return;
-    }
-    if (win.isMinimized()) win.restore();
-    win.show();
-    win.focus();
-    if (typeof win.moveTop === 'function') win.moveTop();
-    win.setAlwaysOnTop(true, 'floating');
-  } catch (err) {
-    console.warn('[launch-surface] begin failed:', String(err?.message || err));
-  }
+  // Intentionally do not focus, move to top, or set always-on-top during launch so other apps
+  // can remain in front; progress is shown in the renderer instead.
 };
 
 const applyLaunchVisibilityEnd = () => {
@@ -851,48 +874,278 @@ const applyLaunchVisibilityEnd = () => {
   } catch (err) {
     console.warn('[launch-surface] end failed:', String(err?.message || err));
   }
+  clearMainWindowLaunchTaskbarProgress();
 };
 
-const LAUNCH_ORIGINS_NOTIFY_RENDERER = new Set([
-  'global-shortcut',
-  'taskbar-jump-list',
-  'dock-menu',
-]);
+let launchProgressWindow = null;
+let launchProgressTerminalWaitTimer = null;
+let launchProgressSurfaceStartedAtMs = null;
+let launchProgressProgrammaticClose = false;
+
+const buildLaunchProgressPageUrl = (profileId, runId) => {
+  const base = getAppEntryUrl();
+  const u = new URL(base);
+  u.searchParams.set('launchOverlay', '1');
+  u.searchParams.set('profileId', String(profileId || '').trim());
+  u.searchParams.set('runId', String(runId || '').trim());
+  return u.href;
+};
+
+const clearLaunchProgressTerminalWait = () => {
+  if (launchProgressTerminalWaitTimer) {
+    try {
+      clearInterval(launchProgressTerminalWaitTimer);
+    } catch {
+      // ignore
+    }
+    launchProgressTerminalWaitTimer = null;
+  }
+};
+
+const isLaunchOverlayStatusTerminal = (status, runId) => {
+  if (!status) return false;
+  if (String(status.runId || '') !== String(runId || '')) return true;
+  const st = String(status.state || '').toLowerCase();
+  if (st === 'complete' || st === 'failed' || st === 'cancelled') return true;
+  if (st === 'awaiting-confirmations') {
+    return Number(status.unresolvedPendingConfirmationCount || 0) === 0;
+  }
+  return false;
+};
+
+const waitForLaunchTerminalThenFinalize = (profileId, runId, finalize) => {
+  clearLaunchProgressTerminalWait();
+  const tick = () => {
+    const status = launchStatusStore.getStatus(profileId);
+    if (isLaunchOverlayStatusTerminal(status, runId)) {
+      clearLaunchProgressTerminalWait();
+      finalize();
+    }
+  };
+  tick();
+  launchProgressTerminalWaitTimer = setInterval(tick, 1000);
+};
+
+const closeLaunchProgressWindow = () => {
+  clearLaunchProgressTerminalWait();
+  const win = launchProgressWindow;
+  launchProgressWindow = null;
+  if (!win || win.isDestroyed()) return;
+  launchProgressProgrammaticClose = true;
+  try {
+    win.close();
+  } catch (err) {
+    console.warn('[launch-progress-window] close failed:', String(err?.message || err));
+  }
+  launchProgressProgrammaticClose = false;
+};
+
+const summarizeLaunchStatusLine = (status) => {
+  if (!status || typeof status !== 'object') return '';
+  const launchedApps = Number(status.launchedAppCount || 0);
+  const launchedTabs = Number(status.launchedTabCount || 0);
+  const failedCount = Number(status.failedAppCount || 0);
+  const skippedCount = Number(status.skippedAppCount || 0);
+  const parts = [
+    `${launchedApps} app${launchedApps === 1 ? '' : 's'}`,
+    `${launchedTabs} tab${launchedTabs === 1 ? '' : 's'}`,
+  ];
+  if (failedCount > 0) parts.push(`${failedCount} failed`);
+  if (skippedCount > 0) parts.push(`${skippedCount} skipped`);
+  return parts.join(', ');
+};
+
+const notifyMainWindowLaunchStarted = (profileId, runId) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('profile-launch-started', { profileId, runId });
+  } catch (err) {
+    console.warn('[profile-launch-started] send failed:', String(err?.message || err));
+  }
+};
+
+const notifyMainWindowLaunchFinishedFromStore = (profileId, runId) => {
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  const status = launchStatusStore.getStatus(profileId);
+  const durationSeconds = launchProgressSurfaceStartedAtMs
+    ? Math.max(1, Math.round((Date.now() - launchProgressSurfaceStartedAtMs) / 1000))
+    : undefined;
+  launchProgressSurfaceStartedAtMs = null;
+
+  let outcome = 'error';
+  let message = 'Launch finished.';
+  if (!status || String(status.runId || '') !== String(runId || '')) {
+    outcome = 'idle';
+    message = '';
+  } else {
+    const st = String(status.state || '').toLowerCase();
+    const summaryText = summarizeLaunchStatusLine(status);
+    if (st === 'cancelled') {
+      outcome = 'warning';
+      message = 'Launch cancelled.';
+    } else if (st === 'failed') {
+      outcome = 'error';
+      message = summaryText
+        ? `Launch finished with failures (${summaryText}).`
+        : 'Launch finished with failures.';
+    } else if (st === 'complete') {
+      outcome = 'success';
+      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+    } else if (
+      st === 'awaiting-confirmations'
+      && Number(status.unresolvedPendingConfirmationCount || 0) === 0
+    ) {
+      outcome = 'success';
+      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+    } else {
+      outcome = 'success';
+      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+    }
+  }
+
+  try {
+    mainWindow.webContents.send('profile-launch-finished', {
+      profileId,
+      runId,
+      outcome,
+      message,
+      durationSeconds: outcome === 'success' ? durationSeconds : undefined,
+    });
+  } catch (err) {
+    console.warn('[profile-launch-finished] send failed:', String(err?.message || err));
+  }
+};
+
+const notifyMainWindowLaunchFinishedWithError = (profileId, runId) => {
+  launchProgressSurfaceStartedAtMs = null;
+  if (!mainWindow || mainWindow.isDestroyed()) return;
+  try {
+    mainWindow.webContents.send('profile-launch-finished', {
+      profileId,
+      runId,
+      outcome: 'error',
+      message: 'Launch failed unexpectedly.',
+    });
+  } catch (err) {
+    console.warn('[profile-launch-finished] send failed:', String(err?.message || err));
+  }
+};
+
+const openLaunchProgressWindow = (profileId, runId) => {
+  closeLaunchProgressWindow();
+  launchProgressSurfaceStartedAtMs = Date.now();
+  const icon = getWindowIconPath();
+  const win = new BrowserWindow({
+    width: 460,
+    height: 560,
+    minWidth: 380,
+    minHeight: 440,
+    center: true,
+    show: false,
+    frame: false,
+    alwaysOnTop: true,
+    icon,
+    title: 'Launching…',
+    autoHideMenuBar: true,
+    backgroundColor: '#0b1020',
+    webPreferences: {
+      preload: path.join(__dirname, '../preload.js'),
+      contextIsolation: true,
+      sandbox: true,
+      nodeIntegration: false,
+    },
+  });
+  win.__flowLaunchMeta = { profileId, runId };
+  win.webContents.on('will-navigate', (event, url) => {
+    if (isTrustedRendererUrl(url)) return;
+    event.preventDefault();
+    console.warn('[electron] blocked launch overlay navigation:', url);
+  });
+  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
+  win.on('closed', () => {
+    clearLaunchProgressTerminalWait();
+    if (launchProgressWindow === win) launchProgressWindow = null;
+  });
+  win.on('close', () => {
+    if (launchProgressProgrammaticClose) return;
+    const meta = win.__flowLaunchMeta;
+    if (meta && launchStatusStore.isActiveRun(meta.profileId, meta.runId)) {
+      try {
+        launchStatusStore.cancelRun(meta.profileId, meta.runId);
+      } catch {
+        // ignore
+      }
+      try {
+        clearMainWindowLaunchTaskbarProgress();
+      } catch {
+        // ignore
+      }
+    }
+  });
+  launchProgressWindow = win;
+  const url = buildLaunchProgressPageUrl(profileId, runId);
+  void win.loadURL(url);
+  win.once('ready-to-show', () => {
+    if (win.isDestroyed()) return;
+    win.show();
+    try {
+      win.setAlwaysOnTop(true);
+      win.moveTop();
+    } catch {
+      // ignore
+    }
+  });
+};
 
 const launchProfileById = (profileId, options = {}) => {
   const userOnStarted = options?.onStarted;
   let surfaceActive = false;
+  let surfaceProfileId = '';
+  let surfaceRunId = '';
+
+  const settleLaunchSurface = (result, err) => {
+    if (!surfaceActive) return;
+    const needsWait = Boolean(
+      result
+      && !result.cancelled
+      && !result.superseded
+      && Number(result.unresolvedPendingConfirmationCount || 0) > 0,
+    );
+    const finalize = () => {
+      if (!surfaceActive) return;
+      surfaceActive = false;
+      closeLaunchProgressWindow();
+      applyLaunchVisibilityEnd();
+      if (err) {
+        notifyMainWindowLaunchFinishedWithError(surfaceProfileId, surfaceRunId);
+      } else {
+        notifyMainWindowLaunchFinishedFromStore(surfaceProfileId, surfaceRunId);
+      }
+    };
+    if (needsWait) {
+      waitForLaunchTerminalThenFinalize(surfaceProfileId, surfaceRunId, finalize);
+      return;
+    }
+    finalize();
+  };
+
   const job = launchProfileByIdCore(profileId, {
     ...options,
     onStarted: (payload) => {
       surfaceActive = true;
+      surfaceProfileId = payload.profileId;
+      surfaceRunId = payload.runId;
       applyLaunchVisibilityBegin();
       profileAccessShell?.onProfileLaunchStarted(payload.profileId);
-      const origin = options?.launchOrigin;
-      if (
-        origin
-        && LAUNCH_ORIGINS_NOTIFY_RENDERER.has(String(origin))
-        && mainWindow
-        && !mainWindow.isDestroyed()
-      ) {
-        try {
-          mainWindow.webContents.send('profile-launch-external', {
-            profileId: payload.profileId,
-            runId: payload.runId,
-          });
-        } catch (err) {
-          console.warn('[profile-launch-external] send failed:', String(err?.message || err));
-        }
-      }
+      openLaunchProgressWindow(surfaceProfileId, surfaceRunId);
+      notifyMainWindowLaunchStarted(surfaceProfileId, surfaceRunId);
       if (typeof userOnStarted === 'function') userOnStarted(payload);
     },
   });
-  const releaseSurface = () => {
-    if (!surfaceActive) return;
-    applyLaunchVisibilityEnd();
-    surfaceActive = false;
-  };
-  void Promise.resolve(job).then(releaseSurface, releaseSurface);
+  void Promise.resolve(job).then(
+    (res) => settleLaunchSurface(res, null),
+    (e) => settleLaunchSurface(null, e),
+  );
   return job;
 };
 
@@ -1039,11 +1292,13 @@ if (shouldBootstrapElectronMain) {
     safeLimitedString,
     MAX_PROFILE_ID_LENGTH,
     launchProfileById,
+    publishLaunchProfileStatus,
     onProfilesAfterSave: () => {
       profileAccessShell?.refreshFromDisk();
       profileScheduleRunner?.refreshFromDisk();
     },
     launchStatusStore,
+    clearLaunchTaskbarProgress: clearMainWindowLaunchTaskbarProgress,
     isLikelyUserApp,
     getCanonicalAppKey,
     extractExecutablePath,
@@ -1070,6 +1325,20 @@ if (shouldBootstrapElectronMain) {
   }
 
   // Dedicated handler so reveal-in-folder always registers with main ipcMain (avoids ordering issues).
+  ipcMain.handle('close-launch-progress-window', async (event) => {
+    if (!isTrustedIpcSender(event)) {
+      throw new Error('Untrusted renderer origin');
+    }
+    if (!launchProgressWindow || launchProgressWindow.isDestroyed()) {
+      return { ok: false };
+    }
+    if (event.sender !== launchProgressWindow.webContents) {
+      return { ok: false };
+    }
+    launchProgressWindow.close();
+    return { ok: true };
+  });
+
   ipcMain.handle('show-item-in-folder', async (event, rawPath) => {
     if (!isTrustedIpcSender(event)) {
       const senderUrl = String(event?.senderFrame?.url || '');

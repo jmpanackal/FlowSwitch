@@ -116,8 +116,6 @@ import {
   validateMemoryCapture,
 } from "./utils/buildNewProfile";
 
-const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
-
 /**
  * Application shell: profile grid, monitor layout editor, app/content managers, and the custom
  * cross-monitor drag system. Persistence is delegated to `useProfilesPersistence`; launch UX to `useLaunchFeedback`.
@@ -447,17 +445,7 @@ export default function App() {
 
   const showLaunchFeedbackStrip =
     launchFeedback.status !== "idle"
-    && !(
-      launchFeedback.status === "in-progress"
-      && launchFeedback.message === GENERIC_LAUNCH_PROFILE_MESSAGE
-    );
-
-  const launchControlShowCancel = Boolean(
-    (isLaunching
-      || launchFeedback.status === "in-progress"
-      || launchFeedback.status === "warning")
-    && window.electron?.cancelProfileLaunch,
-  );
+    && launchFeedback.status !== "in-progress";
 
   const currentProfileRef = useRef<FlowProfile | null>(null);
   currentProfileRef.current = currentProfile;
@@ -516,6 +504,7 @@ export default function App() {
       setLaunchFeedback({
         status: "idle",
         message: "",
+        progress: null,
       });
       launchFeedbackTimeoutRef.current = null;
     }, 7000);
@@ -549,6 +538,7 @@ export default function App() {
       setLaunchFeedback({
         status: "error",
         message: "Layout capture is not available in this build.",
+        progress: null,
       });
       scheduleLaunchFeedbackClear();
       return;
@@ -562,6 +552,7 @@ export default function App() {
         setLaunchFeedback({
           status: "error",
           message: "Failed to capture running app layout.",
+          progress: null,
         });
         scheduleLaunchFeedbackClear();
         return;
@@ -571,6 +562,7 @@ export default function App() {
         setLaunchFeedback({
           status: "error",
           message: validationError,
+          progress: null,
         });
         scheduleLaunchFeedbackClear();
         return;
@@ -699,7 +691,7 @@ export default function App() {
     [selectedProfile],
   );
 
-  const { handleLaunch, handleCancelLaunch } = useProfileLaunch({
+  const { handleLaunch } = useProfileLaunch({
     profiles,
     buildSavePayload,
     selectedProfileId: selectedProfile,
@@ -2012,7 +2004,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:ml-auto sm:flex-row sm:items-center sm:justify-end sm:gap-2.5">
+                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:ml-auto sm:items-end sm:gap-2.5">
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <ProfileHeaderSettingsButton
                       disabled={isEditMode}
@@ -2026,8 +2018,6 @@ export default function App() {
                       isEditMode={isEditMode}
                       isLaunching={isLaunching}
                       onLaunch={handleLaunch}
-                      onCancel={handleCancelLaunch}
-                      showCancel={launchControlShowCancel}
                       hotkey={currentProfile.hotkey?.trim() || null}
                       primaryLabel={`Launch ${currentProfile.name}`}
                       breakdownLines={profileLaunchBreakdownLines}

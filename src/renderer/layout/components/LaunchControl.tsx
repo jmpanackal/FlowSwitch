@@ -6,9 +6,6 @@ type LaunchControlProps = {
   isEditMode: boolean;
   isLaunching: boolean;
   onLaunch: () => void;
-  onCancel: () => void;
-  /** When true, show inline Cancel (requires IPC support from parent). */
-  showCancel: boolean;
   /** Trimmed global shortcut — surfaced in tooltip only (keeps the button compact). */
   hotkey?: string | null;
   /** Main CTA (e.g. `Launch Work`). Defaults to "Launch profile". */
@@ -35,8 +32,6 @@ export function LaunchControl({
   isEditMode,
   isLaunching,
   onLaunch,
-  onCancel,
-  showCancel,
   hotkey,
   primaryLabel = "Launch profile",
   breakdownLines = null,
@@ -104,38 +99,25 @@ export function LaunchControl({
   }
 
   const launchingShellClass =
-    "inline-flex min-h-[2.75rem] min-w-[12.5rem] max-w-[20rem] flex-col justify-center gap-1 rounded-lg border border-flow-accent-blue/50 bg-flow-accent-blue px-4 py-2 text-flow-text-primary shadow-md shadow-flow-accent-blue/18 box-border";
+    "inline-flex min-h-[2.5rem] min-w-[12.5rem] max-w-[20rem] flex-row items-center justify-center gap-2 rounded-lg border border-flow-accent-blue/45 bg-flow-accent-blue/90 px-4 py-2 text-flow-text-primary shadow-md shadow-flow-accent-blue/15 box-border";
 
   return (
     <div
       className={launchingShellClass}
-      role="group"
-      aria-label="Profile launch"
+      role="status"
+      aria-live="polite"
+      aria-label="Profile launch in progress"
     >
-      <div className="flex w-full flex-col justify-center gap-1">
-        <div className="flex items-center justify-center gap-2">
-          <div
-            className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-flow-text-primary/30 border-t-flow-text-primary"
-            aria-hidden
-          />
-          <span className="text-sm font-semibold leading-none tracking-tight">
-            Launching
-          </span>
-          <span className="tabular-nums text-sm font-normal text-flow-text-primary/80">
-            ({elapsedSec}s)
-          </span>
-        </div>
-        {showCancel ? (
-          <button
-            type="button"
-            onClick={() => void onCancel()}
-            disabled={isEditMode}
-            className="w-full rounded-lg border border-flow-text-primary/15 bg-flow-text-primary/5 py-2 text-sm font-medium text-flow-text-primary transition-colors hover:bg-flow-text-primary/10 disabled:opacity-50"
-          >
-            Cancel
-          </button>
-        ) : null}
-      </div>
+      <div
+        className="h-4 w-4 shrink-0 animate-spin rounded-full border-2 border-flow-text-primary/30 border-t-flow-text-primary"
+        aria-hidden
+      />
+      <span className="text-sm font-semibold leading-none tracking-tight">
+        Launching
+      </span>
+      <span className="tabular-nums text-sm font-normal text-flow-text-primary/80">
+        ({elapsedSec}s)
+      </span>
     </div>
   );
 }

@@ -49,13 +49,23 @@ declare global {
         pendingConfirmationCount?: number;
         unresolvedPendingConfirmationCount?: number;
       }>;
-      subscribeProfileLaunchExternal?: (
+      subscribeProfileLaunchStarted?: (
         callback: (payload: { profileId: string; runId: string }) => void,
+      ) => () => void;
+      subscribeProfileLaunchFinished?: (
+        callback: (payload: {
+          profileId: string;
+          runId: string;
+          outcome: 'success' | 'warning' | 'error' | 'idle';
+          message: string;
+          durationSeconds?: number;
+        }) => void,
       ) => () => void;
       cancelProfileLaunch?: (
         profileId: string,
         runId: string,
       ) => Promise<{ ok: boolean; error?: string; reason?: string }>;
+      closeLaunchProgressWindow?: () => Promise<{ ok: boolean }>;
       getLaunchProfileStatus: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;
@@ -70,6 +80,22 @@ declare global {
           pendingConfirmationCount: number;
           unresolvedPendingConfirmationCount: number;
           requestedAppCount: number;
+          requestedBrowserTabCount?: number;
+          activePhase?: "launching" | "placing" | "tabs" | null;
+          activeAppName?: string | null;
+          appLaunchProgress?: Array<{
+            key: string;
+            name: string;
+            step:
+              | "pending"
+              | "launching"
+              | "placing"
+              | "awaiting-confirmation"
+              | "done"
+              | "failed"
+              | "skipped";
+            iconDataUrl?: string | null;
+          }>;
           pendingConfirmations: Array<{
             name: string;
             path: string;
