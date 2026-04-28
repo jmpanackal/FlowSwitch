@@ -447,6 +447,14 @@ export function MonitorLayout({
   const prevIsEditModeForLayoutSyncRef = useRef(isEditMode);
   const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
   const [monitorEditActionsOpenId, setMonitorEditActionsOpenId] = useState<string | null>(null);
+  /**
+   * At very small shell widths, showing drag chrome can cause ResizeObserver-bound
+   * micro-jitter in the preview bounds, which then feeds back into scale recalcs.
+   * Freeze scale during global drags to prevent the "big-small-big-small" loop.
+   */
+  const [frozenLayoutPreviewScale, setFrozenLayoutPreviewScale] = useState<number | null>(
+    null,
+  );
 
   const setPreviewPositions = (
     updater:
@@ -493,11 +501,13 @@ export function MonitorLayout({
       }
       return { width: w, height: h };
     });
-    queueMicrotask(() => {
-      recalculateLayoutPreviewScaleRef.current();
-    });
+    if (frozenLayoutPreviewScale == null) {
+      queueMicrotask(() => {
+        recalculateLayoutPreviewScaleRef.current();
+      });
+    }
     return true;
-  }, []);
+  }, [frozenLayoutPreviewScale]);
 
   const scheduleRemeasurePreviewInnerWithRetries = useCallback(() => {
     if (remeasurePreviewInnerBounds()) return;
@@ -712,6 +722,7 @@ export function MonitorLayout({
   );
 
   const recalculateLayoutPreviewScale = useCallback(() => {
+    if (frozenLayoutPreviewScale != null) return;
     const clampPreviewScaleValue = (raw: number) => {
       const v = Number.isFinite(raw) && raw > 0 ? raw : MIN_MONITOR_PREVIEW_SCALE;
       return Math.min(1, Math.max(MIN_MONITOR_PREVIEW_SCALE, v));
@@ -745,22 +756,63 @@ export function MonitorLayout({
     }
 
     setLayoutPreviewScale(computeMultiMonitorPreviewScale(positions));
-  }, [monitors, large, isEditMode, computeMultiMonitorPreviewScale]);
+  }, [
+    monitors,
+    large,
+    isEditMode,
+    computeMultiMonitorPreviewScale,
+    frozenLayoutPreviewScale,
+  ]);
 
   recalculateLayoutPreviewScaleRef.current = recalculateLayoutPreviewScale;
 
   previewPositionsRef.current = monitorPreviewPositions;
   previewScaleRef.current = layoutPreviewScale;
   const displayPreviewScale =
-    draggingMonitor?.frozenScale ?? layoutPreviewScale;
+    draggingMonitor?.frozenScale ?? frozenLayoutPreviewScale ?? layoutPreviewScale;
+
+  const lastStableCompactPreviewModeRef = useRef<boolean>(false);
+  const lastStableDensePreviewModeRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const isGlobalDragActive = Boolean(dragState?.isDragging && dragState.dragData);
+    if (isGlobalDragActive) {
+      setFrozenLayoutPreviewScale((prev) => prev ?? previewScaleRef.current);
+      return;
+    }
+
+    // Drag chrome is gone; allow scale to update again and remeasure after the layout settles.
+    setFrozenLayoutPreviewScale(null);
+    queueMicrotask(() => {
+      scheduleRemeasurePreviewInnerWithRetries();
+    });
+  }, [dragState?.isDragging, dragState?.dragData, scheduleRemeasurePreviewInnerWithRetries]);
 
   /** UI chrome only (toolbar copy, meta text) â€” cards use fixed Tailwind + transform scale only. */
   const livePreviewChromeBounds = readLivePreviewMeasure(
     monitorPreviewInnerRef.current,
     previewBounds,
   );
-  const compactPreviewMode = layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
-  const densePreviewMode = layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
+  const computedCompactPreviewMode =
+    layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
+  const computedDensePreviewMode =
+    layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
+
+  const isGlobalDragActive = Boolean(dragState?.isDragging && dragState.dragData);
+  if (!isGlobalDragActive) {
+    lastStableCompactPreviewModeRef.current = computedCompactPreviewMode;
+    lastStableDensePreviewModeRef.current = computedDensePreviewMode;
+  }
+
+  // During a drag, keep the preview chrome mode stable to avoid a feedback loop:
+  // toggling dense/compact changes toolbar height, which can re-trigger the threshold.
+  const compactPreviewMode = isGlobalDragActive
+    ? lastStableCompactPreviewModeRef.current
+    : computedCompactPreviewMode;
+  const densePreviewMode = isGlobalDragActive
+    ? lastStableDensePreviewModeRef.current
+    : computedDensePreviewMode;
+
   const useCompactMonitorEditChrome = !large || layoutPreviewScale < 0.9;
 
   useEffect(() => {
