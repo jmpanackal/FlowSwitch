@@ -12,12 +12,9 @@ export type MonitorDisplayLabel = {
   detail?: string;
 };
 
-const portraitSuffix = (m: MonitorChromeLabelInput) =>
-  m.orientation === "portrait" ? " · Portrait" : "";
-
 /**
- * Build stable labels: **Primary** for the primary display, then **2**, **3**, **4**…
- * for other displays in `monitors` array order. If none are marked primary, uses **1**, **2**, **3**…
+ * Build stable labels: **Primary Display** for the primary display, then **Display 2**, **Display 3**…
+ * for other displays in `monitors` array order. If none are marked primary, uses **Display 1**, **Display 2**…
  */
 export function buildMonitorDisplayLabelMap(
   monitors: MonitorChromeLabelInput[],
@@ -30,18 +27,17 @@ export function buildMonitorDisplayLabelMap(
 
   for (const m of monitors) {
     const sys = m.systemName?.trim() || undefined;
-    const suf = portraitSuffix(m);
 
     if (hasPrimary && m.primary) {
       map.set(m.id, {
-        headline: `Primary${suf}`,
+        headline: "Primary Display",
         detail: sys,
       });
     } else {
       const n = next;
       next += 1;
       map.set(m.id, {
-        headline: `${n}${suf}`,
+        headline: `Display ${n}`,
         detail: sys,
       });
     }

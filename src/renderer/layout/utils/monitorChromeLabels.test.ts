@@ -26,11 +26,11 @@ test("buildMonitorDisplayLabelMap labels primary as Primary and others 2, 3 in a
       primary: false,
     },
   ]);
-  assert.equal(map.get("a")?.headline, "Primary");
+  assert.equal(map.get("a")?.headline, "Primary Display");
   assert.equal(map.get("a")?.detail, "LG");
-  assert.equal(map.get("b")?.headline, "2");
+  assert.equal(map.get("b")?.headline, "Display 2");
   assert.equal(map.get("b")?.detail, "DELL");
-  assert.equal(map.get("c")?.headline, "3");
+  assert.equal(map.get("c")?.headline, "Display 3");
 });
 
 test("buildMonitorDisplayLabelMap uses 1, 2, 3 when no display is primary", () => {
@@ -38,15 +38,8 @@ test("buildMonitorDisplayLabelMap uses 1, 2, 3 when no display is primary", () =
     { id: "x", name: "A", primary: false },
     { id: "y", name: "B", primary: false },
   ]);
-  assert.equal(map.get("x")?.headline, "1");
-  assert.equal(map.get("y")?.headline, "2");
-});
-
-test("buildMonitorDisplayLabelMap appends portrait suffix", () => {
-  const map = buildMonitorDisplayLabelMap([
-    { id: "p", name: "M1", primary: true, orientation: "portrait" },
-  ]);
-  assert.ok(String(map.get("p")?.headline).includes("Portrait"));
+  assert.equal(map.get("x")?.headline, "Display 1");
+  assert.equal(map.get("y")?.headline, "Display 2");
 });
 
 test("monitorLabelFromMap falls back to monitor name when id missing from map", () => {
@@ -59,7 +52,7 @@ test("monitorLabelFromMap falls back to monitor name when id missing from map", 
 
 test("monitorChromeAriaLabelFromParts joins headline and detail", () => {
   assert.equal(
-    monitorChromeAriaLabelFromParts("Primary", "LG"),
-    "Primary — LG",
+    monitorChromeAriaLabelFromParts("Primary Display", "LG"),
+    "Primary Display — LG",
   );
 });

@@ -15,6 +15,7 @@ import {
   placeInstalledSidebarAppOnMinimized,
   placeInstalledSidebarAppOnMonitor,
 } from "../utils/sidebarExplicitPlacement";
+import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 import { FlowTooltip } from "./ui/tooltip";
@@ -100,6 +101,11 @@ export function AppManager({
     catalogKey: string;
     anchor: HTMLElement;
   } | null>(null);
+  const [addToSubmenuOpen, setAddToSubmenuOpen] = useState<{
+    catalogKey: string;
+    anchor: HTMLElement;
+  } | null>(null);
+  const addToSubmenuCloseTimerRef = useRef<number | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
   const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps();
   const {
@@ -204,6 +210,7 @@ export function AppManager({
     const list = [...(currentProfile?.monitors ?? [])] as {
       id: string;
       name?: string;
+      systemName?: string | null;
       primary?: boolean;
     }[];
     list.sort((a, b) => {
@@ -213,9 +220,34 @@ export function AppManager({
     return list;
   }, [currentProfile?.monitors]);
 
+  const monitorDisplayLabelMap = useMemo(
+    () =>
+      buildMonitorDisplayLabelMap(
+        monitorsSortedForMenu.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          systemName: m.systemName ?? null,
+          primary: m.primary,
+        })),
+      ),
+    [monitorsSortedForMenu],
+  );
+
   useEffect(() => {
     setOverflowMenuOpen(null);
+    setAddToSubmenuOpen(null);
   }, [currentProfile?.id]);
+
+  useEffect(() => {
+    if (addToSubmenuCloseTimerRef.current != null) {
+      window.clearTimeout(addToSubmenuCloseTimerRef.current);
+      addToSubmenuCloseTimerRef.current = null;
+    }
+    // If the parent menu closes or switches rows, always close the submenu.
+    if (!overflowMenuOpen || overflowMenuOpen.catalogKey !== addToSubmenuOpen?.catalogKey) {
+      setAddToSubmenuOpen(null);
+    }
+  }, [overflowMenuOpen, addToSubmenuOpen?.catalogKey]);
 
   /** Icons for any profile layout slot using this app name (not tied to expansion UI). */
   const getAppLayoutAggregateFlags = (appName: string) => {
@@ -606,59 +638,140 @@ export function AppManager({
                         <SidebarOverlayMenu
                           open
                           anchorEl={overflowMenuOpen.anchor}
-                          onClose={() => setOverflowMenuOpen(null)}
+                          onClose={() => {
+                            setAddToSubmenuOpen(null);
+                            setOverflowMenuOpen(null);
+                          }}
                         >
                           <div className="px-1 py-0.5">
-                            {monitorsSortedForMenu.length ? (
-                              monitorsSortedForMenu.map((m) => (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  role="menuitem"
-                                  disabled={!currentProfile || !onAddApp}
-                                  className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                                  onClick={(e) => {
-                                    stopRowPointerForDrag(e);
-                                    handleAddInstalledToMonitor(app, m.id);
-                                  }}
-                                >
-                                  <span className="truncate">
-                                    {(m.name || m.id) +
-                                      (m.primary ? " (primary)" : "")}
-                                  </span>
-                                </button>
-                              ))
-                            ) : (
-                              <div className="px-3 py-2 text-[11px] text-flow-text-muted">
-                                No monitors in this profile.
-                              </div>
-                            )}
-                            <div
-                              className="my-0.5 h-px bg-flow-border/50"
-                              role="separator"
-                              aria-hidden
-                            />
-                            <FlowTooltip
-                              label={
-                                !currentProfile ? "Select a profile first" : undefined
-                              }
+                            <button
+                              type="button"
+                              role="menuitem"
+                              aria-haspopup="menu"
+                              aria-expanded={addToSubmenuOpen?.catalogKey === catalogKey}
+                              className="flow-menu-item w-full text-left text-xs"
+                              onClick={(e) => {
+                                stopRowPointerForDrag(e);
+                                setAddToSubmenuOpen({
+                                  catalogKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                });
+                              }}
+                              onMouseEnter={(e) => {
+                                if (addToSubmenuCloseTimerRef.current != null) {
+                                  window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                  addToSubmenuCloseTimerRef.current = null;
+                                }
+                                setAddToSubmenuOpen({
+                                  catalogKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                });
+                              }}
+                              onMouseLeave={() => {
+                                if (addToSubmenuCloseTimerRef.current != null) {
+                                  window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                }
+                                addToSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                                  setAddToSubmenuOpen(null);
+                                }, 120);
+                              }}
                             >
-                              <span className="flex w-full">
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  disabled={!currentProfile || !onAddAppToMinimized}
-                                  className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                                  onClick={(e) => {
-                                    stopRowPointerForDrag(e);
-                                    handleAddInstalledToMinimized(app);
-                                  }}
-                                >
-                                  Minimized row
-                                </button>
+                              <span className="flex items-center justify-between gap-2">
+                                <span>Add to</span>
+                                <span aria-hidden className="text-flow-text-muted">
+                                  ▸
+                                </span>
                               </span>
-                            </FlowTooltip>
+                            </button>
                           </div>
+                          {addToSubmenuOpen?.catalogKey === catalogKey ? (
+                            <SidebarOverlayMenu
+                              open
+                              anchorEl={addToSubmenuOpen.anchor}
+                              onClose={() => setAddToSubmenuOpen(null)}
+                              unconstrainedHeight
+                              placement="right-start"
+                            >
+                              <div
+                                className="px-1 py-0.5"
+                                onMouseEnter={() => {
+                                  if (addToSubmenuCloseTimerRef.current != null) {
+                                    window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                    addToSubmenuCloseTimerRef.current = null;
+                                  }
+                                }}
+                                onMouseLeave={() => {
+                                  if (addToSubmenuCloseTimerRef.current != null) {
+                                    window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                  }
+                                  addToSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                                    setAddToSubmenuOpen(null);
+                                  }, 120);
+                                }}
+                              >
+                                {monitorsSortedForMenu.length ? (
+                                  monitorsSortedForMenu.map((m) => (
+                                    <button
+                                      key={m.id}
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={!currentProfile || !onAddApp}
+                                      className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                      onClick={(e) => {
+                                        stopRowPointerForDrag(e);
+                                        handleAddInstalledToMonitor(app, m.id);
+                                        setAddToSubmenuOpen(null);
+                                        setOverflowMenuOpen(null);
+                                      }}
+                                    >
+                                      <span className="flex min-w-0 flex-col">
+                                        <span className="truncate">
+                                          {monitorDisplayLabelMap.get(m.id)?.headline ??
+                                            (m.name || m.id)}
+                                        </span>
+                                        <span className="truncate text-[10px] leading-snug text-flow-text-muted">
+                                          {monitorDisplayLabelMap.get(m.id)?.detail ??
+                                            m.name ??
+                                            m.id}
+                                        </span>
+                                      </span>
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                                    No monitors in this profile.
+                                  </div>
+                                )}
+                                <div
+                                  className="my-0.5 h-px bg-flow-border/50"
+                                  role="separator"
+                                  aria-hidden
+                                />
+                                <FlowTooltip
+                                  label={
+                                    !currentProfile ? "Select a profile first" : undefined
+                                  }
+                                >
+                                  <span className="flex w-full">
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={!currentProfile || !onAddAppToMinimized}
+                                      className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                      onClick={(e) => {
+                                        stopRowPointerForDrag(e);
+                                        handleAddInstalledToMinimized(app);
+                                        setAddToSubmenuOpen(null);
+                                        setOverflowMenuOpen(null);
+                                      }}
+                                    >
+                                      Minimized row
+                                    </button>
+                                  </span>
+                                </FlowTooltip>
+                              </div>
+                            </SidebarOverlayMenu>
+                          ) : null}
                           <div
                             className="my-1 h-px bg-flow-border/60"
                             role="separator"
@@ -673,6 +786,7 @@ export function AppManager({
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
                                   includeInCatalog(catalogKey);
+                                  setAddToSubmenuOpen(null);
                                   setOverflowMenuOpen(null);
                                 }}
                               >
@@ -682,10 +796,11 @@ export function AppManager({
                               <button
                                 type="button"
                                 role="menuitem"
-                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                className="flow-menu-item w-full text-left text-xs text-flow-accent-red hover:text-flow-accent-red"
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
                                   excludeFromCatalog(catalogKey);
+                                  setAddToSubmenuOpen(null);
                                   setOverflowMenuOpen(null);
                                 }}
                               >
