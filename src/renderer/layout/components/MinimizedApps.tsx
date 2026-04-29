@@ -88,6 +88,13 @@ export function MinimizedApps({
   /** Fixed-position popovers use viewport coords so they are not clipped by overflow ancestors. */
   const [tooltipAnchor, setTooltipAnchor] = useState<{ x: number; y: number } | null>(null);
   
+  /** Hold before pick-up drag in layout edit mode (ms). */
+  const EDIT_MODE_DRAG_HOLD_MS = 400;
+  /** Max pointer movement from mousedown for a tap to count as inspect (edit mode). */
+  const EDIT_MODE_CLICK_SLOP_PX = 12;
+  /** Movement beyond this cancels the hold-to-drag timer (edit mode). */
+  const EDIT_MODE_CANCEL_HOLD_MOVE_PX = 28;
+
   // Timer and state for click vs drag detection
   const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mouseStateRef = useRef({
@@ -173,12 +180,11 @@ export function MinimizedApps({
     };
     
     if (isEditMode) {
-      // In edit mode, set up timer for drag initiation (500ms)
       dragTimerRef.current = setTimeout(() => {
         if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
           initiateDrag(e.clientX, e.clientY);
         }
-      }, 500);
+      }, EDIT_MODE_DRAG_HOLD_MS);
     }
     
     // Add global mouse event listeners for tracking
@@ -220,12 +226,11 @@ export function MinimizedApps({
     };
     
     if (isEditMode) {
-      // In edit mode, set up timer for drag initiation (500ms)
       dragTimerRef.current = setTimeout(() => {
         if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
           initiateDrag(e.clientX, e.clientY);
         }
-      }, 500);
+      }, EDIT_MODE_DRAG_HOLD_MS);
     }
     
     // Add global mouse event listeners for tracking
@@ -236,64 +241,65 @@ export function MinimizedApps({
 
   const handleMouseMoveForClickDetection = (e: MouseEvent) => {
     if (!mouseStateRef.current.isMouseDown || mouseStateRef.current.dragInitiated) return;
-    
+
+    if (isEditMode) {
+      const d = Math.hypot(
+        e.clientX - mouseStateRef.current.startX,
+        e.clientY - mouseStateRef.current.startY,
+      );
+      if (d > EDIT_MODE_CANCEL_HOLD_MOVE_PX && dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+      return;
+    }
+
     const deltaX = Math.abs(e.clientX - mouseStateRef.current.startX);
     const deltaY = Math.abs(e.clientY - mouseStateRef.current.startY);
-    const moveThreshold = 5; // pixels
-    
+    const moveThreshold = 5;
     if (deltaX > moveThreshold || deltaY > moveThreshold) {
       mouseStateRef.current.hasMoved = true;
-      
-      if (isEditMode) {
-        console.log('🖱️ MOUSE MOVED BEYOND THRESHOLD (MINIMIZED) - Initiating drag');
-        initiateDrag(e.clientX, e.clientY);
-      }
     }
   };
 
   const handleMouseUpForClickDetection = (e: MouseEvent) => {
     if (!mouseStateRef.current.isMouseDown) return;
-    
-    console.log('🖱️ MOUSE UP (MINIMIZED) - Processing click/drag result', {
-      dragInitiated: mouseStateRef.current.dragInitiated,
-      hasMoved: mouseStateRef.current.hasMoved,
-      isEditMode,
-      itemType: mouseStateRef.current.itemType
-    });
-    
-    // Clear the drag timer
+
     if (dragTimerRef.current) {
       clearTimeout(dragTimerRef.current);
       dragTimerRef.current = null;
     }
-    
-    // If drag wasn't initiated and mouse didn't move much, it's a click
-    if (!mouseStateRef.current.dragInitiated && !mouseStateRef.current.hasMoved) {
-      console.log('🎯 CLICK DETECTED (MINIMIZED) - Triggering selection');
-      
-      if (mouseStateRef.current.itemType === 'app' && onAppSelect) {
-        console.log('🎯 SELECTING MINIMIZED APP:', mouseStateRef.current.itemData.name);
-        onAppSelect(mouseStateRef.current.itemData, 'minimized', undefined, mouseStateRef.current.itemIndex);
-      } else if (mouseStateRef.current.itemType === 'file' && onFileSelect) {
-        console.log('🎯 SELECTING MINIMIZED FILE:', mouseStateRef.current.itemData.name);
-        onFileSelect(mouseStateRef.current.itemData, 'minimized', undefined, mouseStateRef.current.itemIndex);
+
+    const { dragInitiated, startX, startY, itemType, itemIndex, itemData, hasMoved } =
+      mouseStateRef.current;
+    const releaseDist = Math.hypot(e.clientX - startX, e.clientY - startY);
+
+    const shouldOpenInspector = !dragInitiated
+      && (
+        isEditMode
+          ? releaseDist <= EDIT_MODE_CLICK_SLOP_PX
+          : !hasMoved
+      );
+
+    if (shouldOpenInspector) {
+      if (itemType === "app" && onAppSelect) {
+        onAppSelect(itemData, "minimized", undefined, itemIndex);
+      } else if (itemType === "file" && onFileSelect) {
+        onFileSelect(itemData, "minimized", undefined, itemIndex);
       }
     }
-    
-    // Clean up mouse state
+
     mouseStateRef.current.isMouseDown = false;
     mouseStateRef.current.dragInitiated = false;
-    
-    // Remove global listeners
-    document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
-    document.removeEventListener('mouseup', handleMouseUpForClickDetection);
+    mouseStateRef.current.hasMoved = false;
+
+    document.removeEventListener("mousemove", handleMouseMoveForClickDetection);
+    document.removeEventListener("mouseup", handleMouseUpForClickDetection);
     restoreDocumentTextSelection();
   };
 
   const initiateDrag = (clientX: number, clientY: number) => {
     if (mouseStateRef.current.dragInitiated || !mouseStateRef.current.itemData) return;
-    
-    console.log('🚀 INITIATING DRAG MODE (MINIMIZED)');
     mouseStateRef.current.dragInitiated = true;
     
     if (mouseStateRef.current.itemType === 'app') {
@@ -469,7 +475,7 @@ export function MinimizedApps({
               <span className="text-xs text-flow-text-muted">({totalItems})</span>
               {isEditMode && (
                 <span className="text-xs text-flow-accent-blue bg-flow-accent-blue/10 px-2 py-0.5 rounded-full border border-flow-accent-blue/20">
-                  Drag to move
+                  Click to inspect · hold to drag
                 </span>
               )}
             </div>
@@ -522,7 +528,7 @@ export function MinimizedApps({
                         : "border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent"
                     }`}
                     style={{
-                      cursor: isEditMode ? "grab" : "pointer",
+                      cursor: "pointer",
                     }}
                     onMouseDown={(e) => handleMouseDown(e, app, index)}
                   >
@@ -673,7 +679,7 @@ export function MinimizedApps({
                         : "border-flow-border/50 bg-flow-surface/50 hover:bg-flow-surface hover:border-flow-border-accent"
                     }`}
                     style={{
-                      cursor: isEditMode ? "grab" : "pointer",
+                      cursor: "pointer",
                     }}
                     onMouseDown={(e) => handleFileMouseDown(e, file, index)}
                   >

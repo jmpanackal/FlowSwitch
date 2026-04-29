@@ -192,6 +192,7 @@ export default function App() {
   const [lastLaunchProfileId, setLastLaunchProfileId] = useState<string | null>(
     null,
   );
+  const [launchCancelPending, setLaunchCancelPending] = useState(false);
   const expectedLaunchRunIdRef = useRef<string | null>(null);
   const expectedLaunchProfileIdRef = useRef<string | null>(null);
 
@@ -216,7 +217,8 @@ export default function App() {
       )
     );
   const launchCancelEnabled = Boolean(
-    window.electron?.cancelProfileLaunch
+    !launchCancelPending
+    && window.electron?.cancelProfileLaunch
     && lastLaunchProfileId
     && lastLaunchRunId
     && (
@@ -1596,11 +1598,44 @@ export default function App() {
       && lastLaunchRunId
       && window.electron?.cancelProfileLaunch
     ) {
-      await window.electron.cancelProfileLaunch(lastLaunchProfileId, lastLaunchRunId);
+      setLaunchCancelPending(true);
+      try {
+        await window.electron.cancelProfileLaunch(lastLaunchProfileId, lastLaunchRunId);
+      } catch {
+        setLaunchCancelPending(false);
+      }
       return;
     }
     abortPendingLaunch();
   }, [abortPendingLaunch, lastLaunchProfileId, lastLaunchRunId]);
+
+  /** Keep "Cancelling…" until the run is actually idle (IPC returns before main finishes winding down). */
+  useEffect(() => {
+    if (!launchCancelPending) return;
+    const progressRunId = lastLaunchProgress?.runId?.trim() ?? "";
+    const progressMatchesRun =
+      !progressRunId
+      || progressRunId === String(lastLaunchRunId || "").trim();
+    const progressState = String(lastLaunchProgress?.runState || "").trim().toLowerCase();
+    const progressNonTerminal =
+      progressState === "in-progress"
+      || progressState === "awaiting-confirmations";
+    const stillBusy =
+      isLaunching
+      || Boolean(
+        lastLaunchProgress
+        && progressMatchesRun
+        && progressNonTerminal,
+      );
+    if (!stillBusy) {
+      setLaunchCancelPending(false);
+    }
+  }, [
+    isLaunching,
+    launchCancelPending,
+    lastLaunchProgress,
+    lastLaunchRunId,
+  ]);
 
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
@@ -2543,6 +2578,7 @@ export default function App() {
                       isLaunching={isLaunching}
                       onCancel={handleCancelLatestLaunch}
                       cancelDisabled={!launchCancelEnabled}
+                      cancelPending={launchCancelPending}
                     />
                   </div>
                 ) : (

@@ -16,6 +16,10 @@ import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
 import { matchesMinimizedAppSelection, matchesMonitorAppSelection } from "../utils/appSelection";
 import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
+import {
   buildMonitorLayoutHardwareKey,
   sortMonitorsForLayoutSync,
   type MonitorPositionDragRow,
@@ -184,6 +188,145 @@ interface MinimizedApp {
   sourcePosition?: { x: number; y: number };
   sourceSize?: { width: number; height: number };
   browserTabs?: { name: string; url: string; isActive: boolean }[];
+}
+
+const MINI_STRIP_HOLD_MS = 400;
+const MINI_STRIP_CLICK_SLOP_PX = 12;
+const MINI_STRIP_CANCEL_HOLD_MOVE_PX = 28;
+
+/** Per-monitor minimized row: in layout edit mode, tap opens inspector; hold starts drag. */
+function MinimizedMonitorStripButton({
+  app,
+  isEditMode,
+  ariaLabel,
+  className,
+  onSelect,
+  onDragStart,
+}: {
+  app: MinimizedApp;
+  isEditMode: boolean;
+  ariaLabel: string;
+  className: string;
+  onSelect: () => void;
+  onDragStart: (startPos: { x: number; y: number }) => void;
+}) {
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseStateRef = useRef({
+    isMouseDown: false,
+    startX: 0,
+    startY: 0,
+    dragInitiated: false,
+  });
+
+  useEffect(
+    () => () => {
+      if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+    },
+    [],
+  );
+
+  const iconSrc = safeIconSrc(app.iconPath ?? undefined);
+
+  if (!isEditMode) {
+    return (
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+        className={className}
+        aria-label={ariaLabel}
+      >
+        {iconSrc ? (
+          <img src={iconSrc} alt="" className="h-7 w-7 object-contain" draggable={false} />
+        ) : app.icon ? (
+          <app.icon className="h-7 w-7 text-white/90" />
+        ) : (
+          <Package className="h-7 w-7 text-white/60" />
+        )}
+      </button>
+    );
+  }
+
+  const handleEditMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    mouseStateRef.current = {
+      isMouseDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      dragInitiated: false,
+    };
+
+    const onDocMove = (ev: MouseEvent) => {
+      if (!mouseStateRef.current.isMouseDown || mouseStateRef.current.dragInitiated) return;
+      const d = Math.hypot(
+        ev.clientX - mouseStateRef.current.startX,
+        ev.clientY - mouseStateRef.current.startY,
+      );
+      if (d > MINI_STRIP_CANCEL_HOLD_MOVE_PX && dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+    };
+
+    const onDocUp = (ev: MouseEvent) => {
+      if (!mouseStateRef.current.isMouseDown) return;
+      if (dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+      const { dragInitiated, startX, startY } = mouseStateRef.current;
+      const releaseDist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+      if (!dragInitiated && releaseDist <= MINI_STRIP_CLICK_SLOP_PX) {
+        onSelect();
+      }
+      mouseStateRef.current.isMouseDown = false;
+      mouseStateRef.current.dragInitiated = false;
+      document.removeEventListener("mousemove", onDocMove);
+      document.removeEventListener("mouseup", onDocUp);
+      restoreDocumentTextSelection();
+    };
+
+    document.addEventListener("mousemove", onDocMove);
+    document.addEventListener("mouseup", onDocUp);
+    suspendDocumentTextSelection();
+
+    dragTimerRef.current = setTimeout(() => {
+      if (!mouseStateRef.current.isMouseDown || mouseStateRef.current.dragInitiated) return;
+      mouseStateRef.current.dragInitiated = true;
+      if (dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+      document.removeEventListener("mousemove", onDocMove);
+      document.removeEventListener("mouseup", onDocUp);
+      restoreDocumentTextSelection();
+      onDragStart({
+        x: mouseStateRef.current.startX,
+        y: mouseStateRef.current.startY,
+      });
+    }, MINI_STRIP_HOLD_MS);
+  };
+
+  return (
+    <button
+      type="button"
+      onMouseDown={handleEditMouseDown}
+      className={className}
+      aria-label={ariaLabel}
+    >
+      {iconSrc ? (
+        <img src={iconSrc} alt="" className="h-7 w-7 object-contain" draggable={false} />
+      ) : app.icon ? (
+        <app.icon className="h-7 w-7 text-white/90" />
+      ) : (
+        <Package className="h-7 w-7 text-white/60" />
+      )}
+    </button>
+  );
 }
 
 interface BrowserTab {
@@ -2853,45 +2996,21 @@ export function MonitorLayout({
                           </span>
                         </div>
                       ) : minimizedForMonitor.map(({ app, appIndex }) => {
-                        const iconSrc = safeIconSrc(app.iconPath ?? undefined);
                         const selected = matchesMinimizedAppSelection(selectedApp, appIndex, app);
                         return (
-                          <button
+                          <MinimizedMonitorStripButton
                             key={`${monitor.id}-min-${app.instanceId || appIndex}`}
-                            type="button"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              if (!isEditMode) return;
-                              e.preventDefault();
-                              handleMiniTaskbarDragStart(app, appIndex, {
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            }}
-                            onClick={() => {
-                              if (isEditMode) return;
-                              onAppSelect?.(app, "minimized", undefined, appIndex);
-                            }}
-                            className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                            app={app}
+                            isEditMode={isEditMode}
+                            ariaLabel={`Restore ${app.name} to ${monitorHead.headline}`}
+                            className={`group relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md border transition-colors ${
                               selected
                                 ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
                                 : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
                             }`}
-                            aria-label={`Restore ${app.name} to ${monitorHead.headline}`}
-                          >
-                            {iconSrc ? (
-                              <img
-                                src={iconSrc}
-                                alt=""
-                                className="h-7 w-7 object-contain"
-                                draggable={false}
-                              />
-                            ) : app.icon ? (
-                              <app.icon className="h-7 w-7 text-white/90" />
-                            ) : (
-                              <Package className="h-7 w-7 text-white/60" />
-                            )}
-                          </button>
+                            onSelect={() => onAppSelect?.(app, "minimized", undefined, appIndex)}
+                            onDragStart={(startPos) => handleMiniTaskbarDragStart(app, appIndex, startPos)}
+                          />
                         );
                       })}
                       {minimizedDropActive ? (
