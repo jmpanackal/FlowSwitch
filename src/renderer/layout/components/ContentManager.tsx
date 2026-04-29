@@ -1995,7 +1995,7 @@ export function ContentManager({
       <div
         className={
           compact
-            ? "scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pl-3 pb-3 pr-0"
+            ? "scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pl-3 pr-0 pt-3 pb-3"
             : "scrollbar-elegant max-h-[60vh] overflow-x-hidden overflow-y-auto"
         }
       >

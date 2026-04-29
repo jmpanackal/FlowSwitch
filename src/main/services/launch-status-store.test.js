@@ -88,6 +88,34 @@ test('cancelRun marks cancelled state and clears active run', () => {
     state: 'in-progress',
     launchedAppCount: 0,
     pendingConfirmations: [],
+    activePhase: 'launching',
+    activeAppName: 'Notepad',
+    activeActionId: 'app:notepad',
+    appLaunchProgress: [
+      { key: 'app-1', name: 'Notepad', step: 'launching', outcomes: ['Reused'] },
+      { key: 'app-2', name: 'Notion', step: 'pending' },
+    ],
+    actions: [
+      {
+        id: 'app:notepad',
+        kind: 'app',
+        title: 'Notepad',
+        state: 'running',
+        substeps: [
+          { id: 'sub-launch', label: 'Launching', state: 'running' },
+          { id: 'sub-place', label: 'Positioning window', state: 'queued' },
+        ],
+      },
+      {
+        id: 'app:notion',
+        kind: 'app',
+        title: 'Notion',
+        state: 'queued',
+        substeps: [
+          { id: 'sub-launch', label: 'Launching', state: 'queued' },
+        ],
+      },
+    ],
   });
   const cancel = store.cancelRun('profile-1', run.runId);
   assert.equal(cancel.ok, true);
@@ -95,6 +123,14 @@ test('cancelRun marks cancelled state and clears active run', () => {
   const status = store.getStatus('profile-1');
   assert.equal(status?.state, 'cancelled');
   assert.equal(status?.runId, run.runId);
+  assert.equal(status?.activePhase, null);
+  assert.equal(status?.activeAppName, null);
+  assert.equal(status?.activeActionId, null);
+  assert.equal(status?.appLaunchProgress?.[0]?.step, 'launching');
+  assert.equal(status?.appLaunchProgress?.[1]?.step, 'pending');
+  assert.equal(status?.actions?.[0]?.state, 'running');
+  assert.equal(status?.actions?.[0]?.substeps?.[0]?.state, 'running');
+  assert.equal(status?.actions?.[1]?.state, 'queued');
 });
 
 test('cancelRun rejects non-active run id', () => {

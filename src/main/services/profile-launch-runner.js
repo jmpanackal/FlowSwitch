@@ -1695,7 +1695,7 @@ const launchProfileById = async (profileId, options = {}) => {
             if (tact) {
               appendUniquePill(tact, 'New');
               if (shouldPreferReuseExisting) {
-                appendSmartDecision(tact, 'Launched new instance after reuse check');
+                appendSmartDecision(tact, 'Launched new instance');
               }
             }
           }

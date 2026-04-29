@@ -318,15 +318,17 @@
     border-color: color-mix(in oklch, var(--flow-border-accent) 42%, transparent);
   }
 
-  /** Inactive profile cards in the library — lower contrast than generic quiet cards. */
+  /** Inactive profile cards in the library — clear card edge vs app background; selected uses accent ring. */
   .flow-card-quiet-library {
-    background-color: color-mix(in oklch, var(--flow-bg-primary) 58%, var(--flow-surface) 42%);
-    border-color: color-mix(in oklch, var(--flow-border) 44%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface) 94%, var(--flow-bg-primary) 6%);
+    border-color: color-mix(in oklch, var(--flow-border) 78%, transparent);
+    box-shadow: var(--flow-shadow-sm);
   }
 
   .flow-card-quiet-library:hover {
-    background-color: color-mix(in oklch, var(--flow-surface) 82%, var(--flow-bg-primary) 18%);
-    border-color: color-mix(in oklch, var(--flow-border-accent) 36%, transparent);
+    background-color: color-mix(in oklch, var(--flow-surface-elevated) 88%, var(--flow-bg-primary) 12%);
+    border-color: color-mix(in oklch, var(--flow-border-accent) 52%, transparent);
+    box-shadow: var(--flow-shadow-md);
   }
 
   .flow-segment-track {

@@ -8,6 +8,7 @@ import {
   Globe,
   Loader2,
   Sparkles,
+  X,
   XCircle,
 } from "lucide-react";
 import type { FlowProfile } from "../../../types/flow-profile";
@@ -17,7 +18,7 @@ import type {
   LaunchProgressSnapshot,
 } from "../hooks/useLaunchFeedback";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
+import { ProfileIconFrame } from "../utils/profileHeaderPresentation";
 import {
   computeEta,
   computeSubstepWeightedProgress,
@@ -32,11 +33,41 @@ type LaunchCenterInspectorProps = {
   isLaunching: boolean;
   onCancel: () => void;
   cancelDisabled?: boolean;
+  /** True while the main process is still applying cancel for the active run. */
+  cancelPending?: boolean;
 };
 
 type Row = NonNullable<LaunchProgressSnapshot["appLaunchProgress"]>[number];
 
 const COMPLETED_CAP = 5;
+
+function LaunchInspectorCancelButton({
+  disabled,
+  pending,
+  onCancel,
+}: {
+  disabled: boolean;
+  pending: boolean;
+  onCancel: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={() => void onCancel()}
+      disabled={disabled || pending}
+      className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-rose-400/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-100 transition-colors hover:bg-rose-500/20 disabled:pointer-events-none disabled:opacity-45"
+    >
+      {pending ? (
+        <>
+          <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin" aria-hidden />
+          <span>Cancelling…</span>
+        </>
+      ) : (
+        "Cancel"
+      )}
+    </button>
+  );
+}
 
 const LAUNCH_LEAD_SURFACE_CLASS =
   "flex min-w-0 w-full cursor-default items-stretch rounded-lg border border-white/[0.09] bg-black/28 py-1.5 pl-2 pr-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
@@ -45,12 +76,6 @@ const LAUNCH_LEAD_SURFACE_CLASS =
 const LAUNCH_LEAD_LAYOUT_SHELL_CLASS = `${LAUNCH_LEAD_SURFACE_CLASS} transform-gpu`;
 
 const LAUNCH_LEAD_LAYOUT_SHELL_STYLE = { borderRadius: 10 } as const;
-
-function formatCompletedUnits(n: number): string {
-  const rounded = Math.round(n * 10) / 10;
-  if (Math.abs(rounded - Math.round(rounded)) < 0.001) return String(Math.round(rounded));
-  return rounded.toFixed(1);
-}
 
 function isTerminalActionState(state: LaunchAction["state"]): boolean {
   return (
@@ -123,6 +148,47 @@ function stepLabel(row: Row): string {
     default:
       return "Queued";
   }
+}
+
+function actionLooksLaunched(
+  action: LaunchAction,
+  progress: LaunchProgressSnapshot | null,
+  runState: string | null | undefined,
+): boolean {
+  if (action.kind !== "app") return false;
+  if (action.state === "completed" || action.state === "warning") return true;
+
+  const appKey = String(action.id || "").startsWith("app:")
+    ? String(action.id).slice(4)
+    : "";
+  const row = appKey
+    ? (progress?.appLaunchProgress ?? []).find((r) => String(r.key) === appKey) ?? null
+    : null;
+  const step = String(row?.step || "").trim().toLowerCase();
+  const outcomes = Array.isArray(row?.outcomes) ? row!.outcomes : [];
+  if (
+    step === "placing"
+    || step === "verifying"
+    || step === "awaiting-confirmation"
+    || step === "done"
+  ) {
+    return true;
+  }
+  if (
+    outcomes.includes("New")
+    || outcomes.includes("Reused")
+    || outcomes.includes("Placed")
+  ) {
+    return true;
+  }
+
+  const subLaunch = (action.substeps ?? []).find((s) => s.id === "sub-launch");
+  if (subLaunch?.state === "completed") return true;
+  if (String(runState || "").trim().toLowerCase() === "cancelled" && subLaunch?.state === "running") {
+    return true;
+  }
+
+  return false;
 }
 
 function stepBadgeClasses(step: Row["step"]): string {
@@ -374,6 +440,49 @@ function substepDisplayLabel(s: LaunchActionSubstep): string {
   return s.label;
 }
 
+function actionStateLabel(
+  action: LaunchAction,
+  runState: string | null | undefined,
+): string {
+  const rs = String(runState || "").trim().toLowerCase();
+  if (rs === "cancelled" && !isTerminalActionState(action.state)) {
+    return "cancelled";
+  }
+  return action.state;
+}
+
+function displaySubstepsForAction(
+  action: LaunchAction,
+  runState: string | null | undefined,
+): NonNullable<LaunchAction["substeps"]> {
+  const subs = Array.isArray(action.substeps) ? action.substeps : [];
+  if (!subs.length) return [];
+  const rs = String(runState || "").trim().toLowerCase();
+  if (rs !== "cancelled" || isTerminalActionState(action.state)) return subs;
+
+  const next = subs.map((s) => ({ ...s }));
+  const runningIndex = next.findIndex((s) => s.state === "running");
+  if (runningIndex >= 0) {
+    // Show where cancellation interrupted progress:
+    // complete the in-flight launch step and fail the next pending step.
+    next[runningIndex].state = "completed";
+    for (let i = runningIndex + 1; i < next.length; i += 1) {
+      if (next[i].state === "queued") {
+        next[i].state = "failed";
+        break;
+      }
+    }
+    return next;
+  }
+
+  const firstQueued = next.findIndex((s) => s.state === "queued");
+  const hadStartedWork = next.some(
+    (s) => s.state === "completed" || s.state === "failed",
+  );
+  if (hadStartedWork && firstQueued >= 0) next[firstQueued].state = "failed";
+  return next;
+}
+
 function SubstepList({ subs, reducedMotion }: { subs: NonNullable<LaunchAction["substeps"]>; reducedMotion: boolean }) {
   return (
     <ul className="mt-2 space-y-1 border-t border-white/[0.08] pt-2">
@@ -384,7 +493,7 @@ function SubstepList({ subs, reducedMotion }: { subs: NonNullable<LaunchAction["
           ) : s.state === "completed" ? (
             <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300/90" strokeWidth={2.5} aria-hidden />
           ) : s.state === "failed" ? (
-            <span className="h-3.5 w-3.5 shrink-0 rounded-full bg-rose-400/80" aria-hidden />
+            <X className="h-3.5 w-3.5 shrink-0 text-rose-300/95" strokeWidth={2.5} aria-hidden />
           ) : (
             <span className="h-3.5 w-3.5 shrink-0 rounded-full bg-white/15" aria-hidden />
           )}
@@ -404,11 +513,14 @@ function smartDecisionExtraCount(action: LaunchAction | null): number {
 function CurrentActionExpandedBody({
   action,
   reducedMotion,
+  runState,
 }: {
   action: LaunchAction;
   reducedMotion: boolean;
+  runState: string | null | undefined;
 }) {
   const extra = smartDecisionExtraCount(action);
+  const displaySubsteps = displaySubstepsForAction(action, runState);
   return (
     <div className="border-t border-white/[0.08] pt-2">
       <div className="min-h-[2.5rem]">
@@ -454,8 +566,8 @@ function CurrentActionExpandedBody({
           {action.errorMessage || "Something went wrong."}
         </p>
       ) : null}
-      {action.substeps?.length ? (
-        <SubstepList subs={action.substeps} reducedMotion={reducedMotion} />
+      {displaySubsteps.length ? (
+        <SubstepList subs={displaySubsteps} reducedMotion={reducedMotion} />
       ) : null}
     </div>
   );
@@ -465,11 +577,13 @@ function ActionDetailsList({
   actions,
   reducedMotion,
   progress,
+  runState,
   className = "",
 }: {
   actions: LaunchAction[];
   reducedMotion: boolean;
   progress: LaunchProgressSnapshot | null;
+  runState: string | null | undefined;
   className?: string;
 }) {
   return (
@@ -481,7 +595,7 @@ function ActionDetailsList({
             <div className="min-w-0 flex-1">
               <p className="text-base font-semibold leading-snug text-flow-text-primary">{a.title}</p>
               <p className="text-[11px] text-flow-text-muted">
-                {a.state}
+                {actionStateLabel(a, runState)}
                 {actionDurationLabel(a) ? ` · ${actionDurationLabel(a)}` : ""}
               </p>
               <ActionPlacementSummary action={a} progress={progress} />
@@ -500,7 +614,14 @@ function ActionDetailsList({
                   ))}
                 </ul>
               ) : null}
-              {a.substeps?.length ? <SubstepList subs={a.substeps} reducedMotion={reducedMotion} /> : null}
+              {displaySubstepsForAction(a, runState).length
+                ? (
+                  <SubstepList
+                    subs={displaySubstepsForAction(a, runState)}
+                    reducedMotion={reducedMotion}
+                  />
+                )
+                : null}
             </div>
           </div>
         </li>
@@ -517,6 +638,7 @@ export function LaunchCenterInspector({
   isLaunching,
   onCancel,
   cancelDisabled = false,
+  cancelPending = false,
 }: LaunchCenterInspectorProps) {
   const rows = useMemo(() => (progress?.appLaunchProgress ?? []).slice(), [progress]);
   const actions = progress?.actions;
@@ -635,13 +757,11 @@ export function LaunchCenterInspector({
     return "success";
   }, [actions, progress?.failedAppCount, progress?.skippedAppCount, runState]);
 
-  /** App actions that finished as launched (completed or completed-with-warning), in launch order. */
+  /** App actions that were actually launched (including cancelled runs that started launch). */
   const launchedAppIcons = useMemo(() => {
     if (!actions?.length) return [];
-    return actions.filter(
-      (a) => a.kind === "app" && (a.state === "completed" || a.state === "warning"),
-    );
-  }, [actions]);
+    return actions.filter((a) => actionLooksLaunched(a, progress, runState));
+  }, [actions, progress, runState]);
 
   const completedAllList = useMemo(() => {
     if (!actions) return [];
@@ -678,14 +798,11 @@ export function LaunchCenterInspector({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => void onCancel()}
+          <LaunchInspectorCancelButton
             disabled={cancelDisabled}
-            className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-100 transition-colors hover:bg-rose-500/20 disabled:pointer-events-none disabled:opacity-45"
-          >
-            Cancel
-          </button>
+            pending={cancelPending}
+            onCancel={onCancel}
+          />
         </div>
 
         <div className="mt-3">
@@ -762,20 +879,18 @@ export function LaunchCenterInspector({
               </p>
             ) : null}
           </div>
-          <button
-            type="button"
-            onClick={() => void onCancel()}
+          <LaunchInspectorCancelButton
             disabled={cancelDisabled}
-            className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-100 transition-colors hover:bg-rose-500/20 disabled:pointer-events-none disabled:opacity-45"
-          >
-            Cancel
-          </button>
+            pending={cancelPending}
+            onCancel={onCancel}
+          />
         </div>
 
         <ActionDetailsList
           actions={actions}
           reducedMotion={reducedMotion}
           progress={progress}
+          runState={runState}
           className="scrollbar-elegant mt-3 min-h-0 flex-1 overflow-y-auto pr-0.5"
         />
       </div>
@@ -817,81 +932,84 @@ export function LaunchCenterInspector({
             </span>
           </div>
           <div className="mt-1.5 flex min-w-0 items-center gap-2.5">
-            <div
-              className="flex h-8 w-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-white/[0.06]"
-              aria-hidden
-            >
-              <ProfileIconGlyph icon={profile.icon} className="h-4 w-4" />
-            </div>
+            <ProfileIconFrame
+              icon={profile.icon}
+              variant="sidebar"
+              className="h-8 w-8 rounded-lg"
+            />
             <p className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-flow-text-primary">
               {profile.name}
             </p>
           </div>
           {elapsedSec != null ? (
-            <p className="mt-2 text-xs text-flow-text-muted tabular-nums">
-              Launch time: {elapsedSec}s
+            <p className="mt-2 text-sm font-medium text-flow-text-secondary tabular-nums">
+              Launch time: <span className="text-flow-text-primary">{elapsedSec}s</span>
             </p>
           ) : null}
-          <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-flow-text-secondary">
-            {(progress?.requestedAppCount ?? 0) > 0 ? (
-              <>
-                <dt>Apps launched</dt>
-                <dd className="text-right tabular-nums text-flow-text-primary">
-                  {progress?.launchedAppCount ?? 0}
-                  {" / "}
-                  {progress?.requestedAppCount ?? 0}
-                </dd>
-              </>
-            ) : null}
-            {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
-              <>
-                <dt>Tabs</dt>
-                <dd className="text-right tabular-nums text-flow-text-primary">
-                  {progress?.launchedTabCount ?? 0}
-                  {" / "}
-                  {progress?.requestedBrowserTabCount ?? 0}
-                </dd>
-              </>
-            ) : null}
-            {(progress?.failedAppCount ?? 0) > 0 ? (
-              <>
-                <dt>Failed</dt>
-                <dd className="text-right tabular-nums text-rose-200">{progress?.failedAppCount}</dd>
-              </>
-            ) : null}
-            {(progress?.skippedAppCount ?? 0) > 0 ? (
-              <>
-                <dt>Skipped</dt>
-                <dd className="text-right tabular-nums text-flow-text-muted">{progress?.skippedAppCount}</dd>
-              </>
-            ) : null}
-          </dl>
-          {launchedAppIcons.length > 0 ? (
-            <div className="mt-2">
-              <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-flow-text-muted">
-                Launched apps
-              </p>
-              <ul className="flex flex-wrap gap-1" aria-label="Launched application icons">
-                {launchedAppIcons.map((a) => {
-                  const src = safeIconSrc(a.iconDataUrl ?? undefined);
-                  return (
-                    <li key={a.id} title={a.title}>
-                      <div className="flex h-6 w-6 items-center justify-center overflow-hidden rounded-md bg-white/[0.06]">
-                        {src ? (
-                          <img
-                            src={src}
-                            alt=""
-                            className="h-full w-full object-cover"
-                            draggable={false}
-                          />
-                        ) : (
-                          <Globe className="h-3.5 w-3.5 text-flow-text-muted" strokeWidth={1.5} aria-hidden />
-                        )}
-                      </div>
-                    </li>
-                  );
-                })}
-              </ul>
+          {(progress?.requestedAppCount ?? 0) > 0 || launchedAppIcons.length > 0 ? (
+            <div className="mt-2.5 border-t border-white/10 pt-2">
+              <div className="mb-1.5 flex items-end justify-between gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-wide text-flow-text-muted">
+                  Apps launched
+                </p>
+                <p className="tabular-nums text-sm font-semibold text-flow-text-primary">
+                  {progress?.launchedAppCount ?? launchedAppIcons.length}
+                  {(progress?.requestedAppCount ?? 0) > 0
+                    ? ` / ${progress?.requestedAppCount ?? 0}`
+                    : ""}
+                </p>
+              </div>
+              {launchedAppIcons.length > 0 ? (
+                <ul className="flex flex-wrap gap-1.5" aria-label="Launched application icons">
+                  {launchedAppIcons.map((a) => {
+                    const src = safeIconSrc(a.iconDataUrl ?? undefined);
+                    return (
+                      <li key={a.id} title={a.title}>
+                        <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-md bg-white/[0.06]">
+                          {src ? (
+                            <img
+                              src={src}
+                              alt=""
+                              className="h-full w-full object-cover"
+                              draggable={false}
+                            />
+                          ) : (
+                            <Globe className="h-3.5 w-3.5 text-flow-text-muted" strokeWidth={1.5} aria-hidden />
+                          )}
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
+              {(progress?.requestedBrowserTabCount ?? 0) > 0
+              || (progress?.failedAppCount ?? 0) > 0
+              || (progress?.skippedAppCount ?? 0) > 0 ? (
+                <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-flow-text-secondary">
+                  {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
+                    <>
+                      <dt>Tabs</dt>
+                      <dd className="text-right tabular-nums text-flow-text-primary">
+                        {progress?.launchedTabCount ?? 0}
+                        {" / "}
+                        {progress?.requestedBrowserTabCount ?? 0}
+                      </dd>
+                    </>
+                  ) : null}
+                  {(progress?.failedAppCount ?? 0) > 0 ? (
+                    <>
+                      <dt>Failed</dt>
+                      <dd className="text-right tabular-nums text-rose-200">{progress?.failedAppCount}</dd>
+                    </>
+                  ) : null}
+                  {(progress?.skippedAppCount ?? 0) > 0 ? (
+                    <>
+                      <dt>Skipped</dt>
+                      <dd className="text-right tabular-nums text-flow-text-muted">{progress?.skippedAppCount}</dd>
+                    </>
+                  ) : null}
+                </dl>
+              ) : null}
             </div>
           ) : null}
           </div>
@@ -923,6 +1041,7 @@ export function LaunchCenterInspector({
                       actions={actions}
                       reducedMotion={reducedMotion}
                       progress={progress}
+                      runState={runState}
                       className="min-h-0"
                     />
                   </div>
@@ -947,21 +1066,18 @@ export function LaunchCenterInspector({
                 </p>
               ) : null}
             </div>
-            <button
-              type="button"
-              onClick={() => void onCancel()}
+            <LaunchInspectorCancelButton
               disabled={cancelDisabled}
-              className="rounded-lg border border-rose-400/40 bg-rose-500/10 px-2.5 py-1.5 text-xs font-semibold text-rose-100 transition-colors hover:bg-rose-500/20 disabled:pointer-events-none disabled:opacity-45"
-            >
-              Cancel
-            </button>
+              pending={cancelPending}
+              onCancel={onCancel}
+            />
           </div>
 
           <div className="mt-3">
             <div className="mb-1 flex flex-wrap items-center justify-between gap-x-2 gap-y-1 text-[11px] text-flow-text-secondary">
               <span>
                 {progressModel
-                  ? `${formatCompletedUnits(progressModel.completed)} of ${progressModel.total} ${progressLabelUnit} completed`
+                  ? `${Math.floor(progressModel.completed)} of ${Math.floor(progressModel.total)} ${progressLabelUnit} completed`
                   : "Progress"}
               </span>
               <span className="tabular-nums text-flow-text-primary/90">
@@ -1020,6 +1136,7 @@ export function LaunchCenterInspector({
                     <CurrentActionExpandedBody
                       action={renderBuckets.current}
                       reducedMotion={reducedMotion}
+                      runState={runState}
                     />
                   </div>
                 </div>

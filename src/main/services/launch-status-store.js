@@ -302,6 +302,9 @@ const createLaunchStatusStore = (options = {}) => {
       statusByProfileId.set(safeProfileId, {
         ...currentStatus,
         state: 'cancelled',
+        activePhase: null,
+        activeAppName: null,
+        activeActionId: null,
         updatedAt: now(),
       });
     }
