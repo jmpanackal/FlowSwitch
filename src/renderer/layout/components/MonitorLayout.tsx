@@ -4,18 +4,21 @@ import {
   Grid3X3,
   Zap,
   ChevronDown,
-  PenLine,
-  Save,
   MoreHorizontal,
   Package,
 } from "lucide-react";
 import { AppFileWindow } from "./AppFileWindow";
 import { MonitorLayoutConfig } from "./MonitorLayoutConfig";
+import { MonitorLayoutModeSegmented } from "./MonitorLayoutModeSegmented";
 import { FlowTooltip } from "./ui/tooltip";
 import { SelectedAppDetails } from "./SelectedAppDetails";
 import { LucideIcon } from "lucide-react";
 import { DragState } from "../types/dragTypes";
 import { matchesMinimizedAppSelection, matchesMonitorAppSelection } from "../utils/appSelection";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 import {
   buildMonitorLayoutHardwareKey,
   sortMonitorsForLayoutSync,
@@ -34,6 +37,11 @@ import {
 } from "../utils/monitorLayoutStacking";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { countStackUnits, getSnapZonesForMonitor } from "../utils/monitorSnapZones";
+import {
+  buildMonitorDisplayLabelMap,
+  monitorChromeAriaLabelFromParts,
+  monitorLabelFromMap,
+} from "../utils/monitorChromeLabels";
 import {
   MonitorAppStackCluster,
   isHiddenStackMember,
@@ -182,6 +190,145 @@ interface MinimizedApp {
   browserTabs?: { name: string; url: string; isActive: boolean }[];
 }
 
+const MINI_STRIP_HOLD_MS = 400;
+const MINI_STRIP_CLICK_SLOP_PX = 12;
+const MINI_STRIP_CANCEL_HOLD_MOVE_PX = 28;
+
+/** Per-monitor minimized row: in layout edit mode, tap opens inspector; hold starts drag. */
+function MinimizedMonitorStripButton({
+  app,
+  isEditMode,
+  ariaLabel,
+  className,
+  onSelect,
+  onDragStart,
+}: {
+  app: MinimizedApp;
+  isEditMode: boolean;
+  ariaLabel: string;
+  className: string;
+  onSelect: () => void;
+  onDragStart: (startPos: { x: number; y: number }) => void;
+}) {
+  const dragTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mouseStateRef = useRef({
+    isMouseDown: false,
+    startX: 0,
+    startY: 0,
+    dragInitiated: false,
+  });
+
+  useEffect(
+    () => () => {
+      if (dragTimerRef.current) clearTimeout(dragTimerRef.current);
+    },
+    [],
+  );
+
+  const iconSrc = safeIconSrc(app.iconPath ?? undefined);
+
+  if (!isEditMode) {
+    return (
+      <button
+        type="button"
+        onMouseDown={(e) => e.stopPropagation()}
+        onClick={(e) => {
+          e.stopPropagation();
+          onSelect();
+        }}
+        className={className}
+        aria-label={ariaLabel}
+      >
+        {iconSrc ? (
+          <img src={iconSrc} alt="" className="h-7 w-7 object-contain" draggable={false} />
+        ) : app.icon ? (
+          <app.icon className="h-7 w-7 text-white/90" />
+        ) : (
+          <Package className="h-7 w-7 text-white/60" />
+        )}
+      </button>
+    );
+  }
+
+  const handleEditMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    mouseStateRef.current = {
+      isMouseDown: true,
+      startX: e.clientX,
+      startY: e.clientY,
+      dragInitiated: false,
+    };
+
+    const onDocMove = (ev: MouseEvent) => {
+      if (!mouseStateRef.current.isMouseDown || mouseStateRef.current.dragInitiated) return;
+      const d = Math.hypot(
+        ev.clientX - mouseStateRef.current.startX,
+        ev.clientY - mouseStateRef.current.startY,
+      );
+      if (d > MINI_STRIP_CANCEL_HOLD_MOVE_PX && dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+    };
+
+    const onDocUp = (ev: MouseEvent) => {
+      if (!mouseStateRef.current.isMouseDown) return;
+      if (dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+      const { dragInitiated, startX, startY } = mouseStateRef.current;
+      const releaseDist = Math.hypot(ev.clientX - startX, ev.clientY - startY);
+      if (!dragInitiated && releaseDist <= MINI_STRIP_CLICK_SLOP_PX) {
+        onSelect();
+      }
+      mouseStateRef.current.isMouseDown = false;
+      mouseStateRef.current.dragInitiated = false;
+      document.removeEventListener("mousemove", onDocMove);
+      document.removeEventListener("mouseup", onDocUp);
+      restoreDocumentTextSelection();
+    };
+
+    document.addEventListener("mousemove", onDocMove);
+    document.addEventListener("mouseup", onDocUp);
+    suspendDocumentTextSelection();
+
+    dragTimerRef.current = setTimeout(() => {
+      if (!mouseStateRef.current.isMouseDown || mouseStateRef.current.dragInitiated) return;
+      mouseStateRef.current.dragInitiated = true;
+      if (dragTimerRef.current) {
+        clearTimeout(dragTimerRef.current);
+        dragTimerRef.current = null;
+      }
+      document.removeEventListener("mousemove", onDocMove);
+      document.removeEventListener("mouseup", onDocUp);
+      restoreDocumentTextSelection();
+      onDragStart({
+        x: mouseStateRef.current.startX,
+        y: mouseStateRef.current.startY,
+      });
+    }, MINI_STRIP_HOLD_MS);
+  };
+
+  return (
+    <button
+      type="button"
+      onMouseDown={handleEditMouseDown}
+      className={className}
+      aria-label={ariaLabel}
+    >
+      {iconSrc ? (
+        <img src={iconSrc} alt="" className="h-7 w-7 object-contain" draggable={false} />
+      ) : app.icon ? (
+        <app.icon className="h-7 w-7 text-white/90" />
+      ) : (
+        <Package className="h-7 w-7 text-white/60" />
+      )}
+    </button>
+  );
+}
+
 interface BrowserTab {
   name: string;
   url: string;
@@ -247,8 +394,8 @@ interface MonitorLayoutProps {
   /** Move an app to the front of its snap stack (same zone) for launch order. */
   onBringStackMemberToFront?: (monitorId: string, appIndex: number) => void;
   onUpdateMonitorPositions?: (positions: MonitorPositionDragRow[]) => void;
-  /** When set, shows Edit layout / Done in the preview toolbar (layout editing, not profile prefs). */
-  onToggleLayoutEdit?: () => void;
+  /** When set, shows Edit / Preview segmented control in the preview toolbar (layout editing, not profile prefs). */
+  onSetLayoutEditMode?: (edit: boolean) => void;
   /** Visually join the preview toolbar to the profile header above (shared column). */
   layoutToolbarConnected?: boolean;
 }
@@ -290,7 +437,7 @@ export function MonitorLayout({
   onAutoSnapApps,
   onBringStackMemberToFront,
   onUpdateMonitorPositions,
-  onToggleLayoutEdit,
+  onSetLayoutEditMode,
   layoutToolbarConnected = false,
 }: MonitorLayoutProps) {
   // Enhanced drag state with persistence
@@ -365,8 +512,23 @@ export function MonitorLayout({
    */
   const frozenDragZonesRef = useRef<SnapZone[] | null>(null);
 
+  /** Coalesce high-frequency layout drags to one profile write per animation frame. */
+  const pendingItemDragRef = useRef<{
+    monitorId: string;
+    itemIndex: number;
+    itemType: "app";
+    newPosition: { x: number; y: number };
+    pointerMonitorPct?: { x: number; y: number } | null;
+  } | null>(null);
+  const itemDragRafRef = useRef<number | null>(null);
+
   useEffect(() => {
     const clearLocalMonitorDrag = () => {
+      if (itemDragRafRef.current !== null) {
+        cancelAnimationFrame(itemDragRafRef.current);
+        itemDragRafRef.current = null;
+      }
+      pendingItemDragRef.current = null;
       stackCoDragIndicesRef.current = null;
       dragOriginRef.current = null;
       dragSourceZoneIdRef.current = null;
@@ -394,6 +556,11 @@ export function MonitorLayout({
         "flowswitch:clear-monitor-layout-local-drag",
         clearLocalMonitorDrag,
       );
+      if (itemDragRafRef.current !== null) {
+        cancelAnimationFrame(itemDragRafRef.current);
+        itemDragRafRef.current = null;
+      }
+      pendingItemDragRef.current = null;
     };
   }, []);
 
@@ -423,6 +590,14 @@ export function MonitorLayout({
   const prevIsEditModeForLayoutSyncRef = useRef(isEditMode);
   const [layoutColumnHeight, setLayoutColumnHeight] = useState(0);
   const [monitorEditActionsOpenId, setMonitorEditActionsOpenId] = useState<string | null>(null);
+  /**
+   * At very small shell widths, showing drag chrome can cause ResizeObserver-bound
+   * micro-jitter in the preview bounds, which then feeds back into scale recalcs.
+   * Freeze scale during global drags to prevent the "big-small-big-small" loop.
+   */
+  const [frozenLayoutPreviewScale, setFrozenLayoutPreviewScale] = useState<number | null>(
+    null,
+  );
 
   const setPreviewPositions = (
     updater:
@@ -469,11 +644,13 @@ export function MonitorLayout({
       }
       return { width: w, height: h };
     });
-    queueMicrotask(() => {
-      recalculateLayoutPreviewScaleRef.current();
-    });
+    if (frozenLayoutPreviewScale == null) {
+      queueMicrotask(() => {
+        recalculateLayoutPreviewScaleRef.current();
+      });
+    }
     return true;
-  }, []);
+  }, [frozenLayoutPreviewScale]);
 
   const scheduleRemeasurePreviewInnerWithRetries = useCallback(() => {
     if (remeasurePreviewInnerBounds()) return;
@@ -688,6 +865,7 @@ export function MonitorLayout({
   );
 
   const recalculateLayoutPreviewScale = useCallback(() => {
+    if (frozenLayoutPreviewScale != null) return;
     const clampPreviewScaleValue = (raw: number) => {
       const v = Number.isFinite(raw) && raw > 0 ? raw : MIN_MONITOR_PREVIEW_SCALE;
       return Math.min(1, Math.max(MIN_MONITOR_PREVIEW_SCALE, v));
@@ -709,31 +887,75 @@ export function MonitorLayout({
       const marginFrac = 2.1 / 100;
       const maxW = pb.width * (1 - 2 * marginFrac);
       const maxH = pb.height * (1 - 2 * marginFrac);
-      setLayoutPreviewScale(
-        clampPreviewScaleValue(
-          Math.min(1, maxW / Math.max(1, fp.widthPx), maxH / Math.max(1, fp.heightPx)),
-        ),
+      const rawFit = Math.min(
+        1,
+        maxW / Math.max(1, fp.widthPx),
+        maxH / Math.max(1, fp.heightPx),
       );
+      /* Slightly larger single-monitor canvas when geometry allows (~12–14% zoom). */
+      const boosted = Math.min(1, rawFit * 1.14);
+      setLayoutPreviewScale(clampPreviewScaleValue(boosted));
       return;
     }
 
     setLayoutPreviewScale(computeMultiMonitorPreviewScale(positions));
-  }, [monitors, large, isEditMode, computeMultiMonitorPreviewScale]);
+  }, [
+    monitors,
+    large,
+    isEditMode,
+    computeMultiMonitorPreviewScale,
+    frozenLayoutPreviewScale,
+  ]);
 
   recalculateLayoutPreviewScaleRef.current = recalculateLayoutPreviewScale;
 
   previewPositionsRef.current = monitorPreviewPositions;
   previewScaleRef.current = layoutPreviewScale;
   const displayPreviewScale =
-    draggingMonitor?.frozenScale ?? layoutPreviewScale;
+    draggingMonitor?.frozenScale ?? frozenLayoutPreviewScale ?? layoutPreviewScale;
+
+  const lastStableCompactPreviewModeRef = useRef<boolean>(false);
+  const lastStableDensePreviewModeRef = useRef<boolean>(false);
+
+  useEffect(() => {
+    const isGlobalDragActive = Boolean(dragState?.isDragging && dragState.dragData);
+    if (isGlobalDragActive) {
+      setFrozenLayoutPreviewScale((prev) => prev ?? previewScaleRef.current);
+      return;
+    }
+
+    // Drag chrome is gone; allow scale to update again and remeasure after the layout settles.
+    setFrozenLayoutPreviewScale(null);
+    queueMicrotask(() => {
+      scheduleRemeasurePreviewInnerWithRetries();
+    });
+  }, [dragState?.isDragging, dragState?.dragData, scheduleRemeasurePreviewInnerWithRetries]);
 
   /** UI chrome only (toolbar copy, meta text) â€” cards use fixed Tailwind + transform scale only. */
   const livePreviewChromeBounds = readLivePreviewMeasure(
     monitorPreviewInnerRef.current,
     previewBounds,
   );
-  const compactPreviewMode = layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
-  const densePreviewMode = layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
+  const computedCompactPreviewMode =
+    layoutPreviewScale < 0.84 || livePreviewChromeBounds.height < 600;
+  const computedDensePreviewMode =
+    layoutPreviewScale < 0.62 || livePreviewChromeBounds.height < 500;
+
+  const isGlobalDragActive = Boolean(dragState?.isDragging && dragState.dragData);
+  if (!isGlobalDragActive) {
+    lastStableCompactPreviewModeRef.current = computedCompactPreviewMode;
+    lastStableDensePreviewModeRef.current = computedDensePreviewMode;
+  }
+
+  // During a drag, keep the preview chrome mode stable to avoid a feedback loop:
+  // toggling dense/compact changes toolbar height, which can re-trigger the threshold.
+  const compactPreviewMode = isGlobalDragActive
+    ? lastStableCompactPreviewModeRef.current
+    : computedCompactPreviewMode;
+  const densePreviewMode = isGlobalDragActive
+    ? lastStableDensePreviewModeRef.current
+    : computedDensePreviewMode;
+
   const useCompactMonitorEditChrome = !large || layoutPreviewScale < 0.9;
 
   useEffect(() => {
@@ -1509,7 +1731,7 @@ export function MonitorLayout({
     lastDragPositionRef.current = null;
   };
 
-  const handleItemDrag = (
+  const applyMonitorItemDragSync = (
     monitorId: string,
     itemIndex: number,
     itemType: "app",
@@ -1629,7 +1851,58 @@ export function MonitorLayout({
     }
   };
 
+  const applyMonitorItemDragSyncRef = useRef(applyMonitorItemDragSync);
+  applyMonitorItemDragSyncRef.current = applyMonitorItemDragSync;
+
+  const flushPendingMonitorItemDrag = () => {
+    if (itemDragRafRef.current !== null) {
+      cancelAnimationFrame(itemDragRafRef.current);
+      itemDragRafRef.current = null;
+    }
+    const pending = pendingItemDragRef.current;
+    pendingItemDragRef.current = null;
+    if (!pending) return;
+    applyMonitorItemDragSyncRef.current(
+      pending.monitorId,
+      pending.itemIndex,
+      pending.itemType,
+      pending.newPosition,
+      pending.pointerMonitorPct,
+    );
+  };
+
+  const scheduleMonitorItemDrag = (
+    monitorId: string,
+    itemIndex: number,
+    itemType: "app",
+    newPosition: { x: number; y: number },
+    pointerMonitorPct?: { x: number; y: number } | null,
+  ) => {
+    pendingItemDragRef.current = {
+      monitorId,
+      itemIndex,
+      itemType,
+      newPosition,
+      pointerMonitorPct,
+    };
+    if (itemDragRafRef.current !== null) return;
+    itemDragRafRef.current = requestAnimationFrame(() => {
+      itemDragRafRef.current = null;
+      const pending = pendingItemDragRef.current;
+      pendingItemDragRef.current = null;
+      if (!pending) return;
+      applyMonitorItemDragSyncRef.current(
+        pending.monitorId,
+        pending.itemIndex,
+        pending.itemType,
+        pending.newPosition,
+        pending.pointerMonitorPct,
+      );
+    });
+  };
+
   const handleItemDragEnd = (monitorId: string, itemIndex: number, itemType: "app") => {
+    flushPendingMonitorItemDrag();
     const updateCallback = onUpdateApp;
     const monitor = monitors.find((m) => m.id === monitorId);
     const dragEndZones =
@@ -1771,8 +2044,8 @@ export function MonitorLayout({
 
   const handleItemDragStartRef = useRef(handleItemDragStart);
   handleItemDragStartRef.current = handleItemDragStart;
-  const handleItemDragRef = useRef(handleItemDrag);
-  handleItemDragRef.current = handleItemDrag;
+  const handleItemDragRef = useRef(scheduleMonitorItemDrag);
+  handleItemDragRef.current = scheduleMonitorItemDrag;
   const handleItemDragEndRef = useRef(handleItemDragEnd);
   handleItemDragEndRef.current = handleItemDragEnd;
 
@@ -1911,6 +2184,20 @@ export function MonitorLayout({
     });
     return groups;
   }, [defaultMinimizedMonitorId, minimizedApps, monitors]);
+
+  const monitorDisplayLabelMap = useMemo(
+    () =>
+      buildMonitorDisplayLabelMap(
+        monitors.map((m) => ({
+          id: m.id,
+          name: m.name,
+          systemName: m.systemName,
+          primary: m.primary,
+          orientation: m.orientation,
+        })),
+      ),
+    [monitors],
+  );
 
   const handleMiniTaskbarDragStart = useCallback(
     (
@@ -2128,7 +2415,7 @@ export function MonitorLayout({
               }`
         }`}
       >
-        <div className="flex min-w-0 flex-nowrap items-center justify-between gap-2 sm:gap-3">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-x-2 gap-y-2 sm:gap-3">
           <div className="flex min-w-0 flex-1 flex-nowrap items-center gap-2 overflow-hidden sm:gap-3">
             <Monitor
               className={`shrink-0 text-flow-accent-blue/90 ${densePreviewMode ? "h-4 w-4" : "h-5 w-5"}`}
@@ -2143,68 +2430,45 @@ export function MonitorLayout({
               <FlowTooltip
                 label={
                   densePreviewMode
-                    ? "Drag apps on monitors. Use Edit layout to change positions."
+                    ? isEditMode
+                      ? "Drag tiles to reposition. Preview mode for a calmer canvas."
+                      : "Switch to Edit mode to move apps between monitors."
                     : undefined
                 }
               >
-                <p className="truncate text-[11px] text-flow-text-muted">
-                  {densePreviewMode
-                    ? "Drag apps. Edit layout for positions."
-                    : "Drag apps on monitors. Use Edit layout to change positions."}
-                </p>
-              </FlowTooltip>
-            </div>
-            {isEditMode ? (
-              <div className="flex min-w-0 shrink items-center gap-1.5 sm:gap-2">
-                <div className="flex max-w-[11rem] min-w-0 items-center gap-1.5 rounded-lg bg-flow-accent-blue/15 px-2 py-1 sm:max-w-none sm:px-2.5">
-                  <div className="h-2 w-2 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
-                  <span className="truncate text-xs font-medium text-flow-accent-blue">Editing layout</span>
-                  {dragState?.isDragging ? (
-                    <span className="hidden truncate text-xs font-medium text-flow-accent-blue/90 sm:inline">
-                      {" | "}
-                      {dragState.dragData?.name || "Item"}
-                    </span>
+                <div className="min-w-0">
+                  <p className="truncate text-[11px] text-flow-text-muted">
+                    {densePreviewMode
+                      ? isEditMode
+                        ? "Drag tiles. Preview for a calmer view."
+                        : "Edit mode moves tiles; Preview browses."
+                      : isEditMode
+                        ? "Drag apps between monitors. Preview mode hides snap guides."
+                        : "Browse the layout. Switch to Edit mode to rearrange."}
+                  </p>
+                  {isEditMode && !densePreviewMode ? (
+                    <p className="mt-0.5 hidden truncate text-[11px] text-flow-text-muted/85 md:block">
+                      Apps only; files become content.
+                    </p>
+                  ) : null}
+                  {isEditMode && dragState?.isDragging ? (
+                    <div className="mt-1 flex max-w-[min(100%,14rem)] min-w-0 items-center gap-1.5 sm:max-w-[min(100%,22rem)]">
+                      <span className="h-1.5 w-1.5 shrink-0 animate-pulse rounded-full bg-flow-accent-blue" />
+                      <span className="truncate text-[11px] font-medium text-flow-accent-blue">
+                        {dragState.dragData?.name || "Dragging"}
+                      </span>
+                    </div>
                   ) : null}
                 </div>
-                <span className="hidden truncate text-[11px] text-flow-text-muted md:inline">
-                  Apps only; files become content.
-                </span>
-              </div>
-            ) : (
-              <span className="shrink-0 rounded-md bg-white/[0.06] px-2 py-1 text-[11px] font-medium text-flow-text-muted">
-                View mode
-              </span>
-            )}
+              </FlowTooltip>
+            </div>
           </div>
-          {onToggleLayoutEdit ? (
-            <FlowTooltip
-              label={
-                isEditMode
-                  ? "Save layout and exit edit mode"
-                  : "Edit monitor layout (drag apps between monitors)"
-              }
-            >
-              <button
-                type="button"
-                onClick={onToggleLayoutEdit}
-                aria-label={
-                  isEditMode
-                    ? "Save layout and exit edit mode"
-                    : "Edit monitor layout"
-                }
-                className={`inline-flex shrink-0 items-center justify-center rounded-lg p-2.5 transition-colors md:p-3 ${
-                  isEditMode
-                    ? "bg-flow-accent-blue text-flow-text-primary shadow-sm hover:bg-flow-accent-blue-hover"
-                    : "text-flow-text-secondary hover:bg-white/[0.06] hover:text-flow-text-primary"
-                }`}
-              >
-                {isEditMode ? (
-                  <Save className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-                ) : (
-                  <PenLine className="h-4 w-4 shrink-0 md:h-[1.125rem] md:w-[1.125rem]" strokeWidth={1.75} />
-                )}
-              </button>
-            </FlowTooltip>
+          {onSetLayoutEditMode ? (
+            <MonitorLayoutModeSegmented
+              isEditMode={isEditMode}
+              onChange={onSetLayoutEditMode}
+              dense={densePreviewMode}
+            />
           ) : null}
         </div>
       </div>
@@ -2214,7 +2478,7 @@ export function MonitorLayout({
         <div className={`h-full min-h-0 min-w-0 ${densePreviewMode ? 'pb-1' : 'pb-2'}`}>
           <div
             ref={monitorPreviewRef}
-            className={`relative box-border h-full min-w-0 p-[clamp(5px,0.9vmin,12px)] min-h-[clamp(16rem,42vh,28rem)] ${large ? 'md:min-h-[clamp(20rem,48vh,34rem)]' : ''}`}
+            className={`relative box-border h-full min-w-0 p-[clamp(4px,0.75vmin,10px)] min-h-[clamp(18rem,46vh,32rem)] ${large ? 'md:min-h-[clamp(22rem,50vh,36rem)]' : ''}`}
           >
             <div
               ref={monitorPreviewInnerRef}
@@ -2234,7 +2498,8 @@ export function MonitorLayout({
               const minimizedForMonitor = minimizedAppsByMonitor[monitor.id] || [];
               const preview = monitorPreviewPositions[monitor.id] || { x: 50, y: 50 };
               const clampedPreview = clampPreviewPosition(monitor, preview, displayPreviewScale);
-              
+              const monitorHead = monitorLabelFromMap(monitor, monitorDisplayLabelMap);
+
               return (
                 <div
                   key={monitor.id}
@@ -2266,7 +2531,12 @@ export function MonitorLayout({
                       useCompactMonitorEditChrome ? (
                         <div className={`mb-1 mx-auto flex max-w-full flex-col items-stretch gap-1.5 ${baseWidth}`}>
                           <div className="flex min-w-0 items-center justify-center gap-1.5">
-                            <FlowTooltip label={monitor.name}>
+                            <FlowTooltip
+                              label={monitorChromeAriaLabelFromParts(
+                                monitorHead.headline,
+                                monitorHead.detail,
+                              )}
+                            >
                             <div
                               className="inline-flex min-w-0 max-w-[min(100%,14rem)] cursor-grab items-center gap-2 rounded-lg border border-white/12 bg-gradient-to-b from-white/[0.09] to-white/[0.04] px-2 py-1 text-sm font-medium text-white/90 shadow-[inset_0_1px_0_rgba(255,255,255,0.08)] backdrop-blur-sm transition-[border-color,box-shadow,background-color] hover:border-white/22 hover:from-white/[0.12] hover:to-white/[0.07] active:cursor-grabbing"
                             >
@@ -2275,7 +2545,7 @@ export function MonitorLayout({
                                 <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
                                 <span className="block h-[2px] w-2.5 rounded-full bg-white/45" />
                               </span>
-                              <span className="truncate">{monitor.name}</span>
+                              <span className="truncate">{monitorHead.headline}</span>
                             </div>
                             </FlowTooltip>
                             {(onUpdateMonitorLayout || (totalItems > 0 && onAutoSnapApps)) ? (
@@ -2283,7 +2553,10 @@ export function MonitorLayout({
                                 <FlowTooltip label="Layout preset and tools">
                                 <button
                                   type="button"
-                                  aria-label={`Monitor actions for ${monitor.name}`}
+                                  aria-label={`Monitor actions for ${monitorChromeAriaLabelFromParts(
+                                    monitorHead.headline,
+                                    monitorHead.detail,
+                                  )}`}
                                   aria-expanded={monitorEditActionsOpenId === monitor.id}
                                   className="inline-flex h-8 w-8 items-center justify-center rounded-lg border border-white/15 bg-white/10 text-white transition-colors hover:bg-white/15"
                                   onMouseDown={(e) => e.stopPropagation()}
@@ -2354,11 +2627,11 @@ export function MonitorLayout({
                               <span className="block h-[2px] w-3 rounded-full bg-white/45" />
                               <span className="block h-[2px] w-3 rounded-full bg-white/45" />
                             </span>
-                            <span className="whitespace-nowrap">{monitor.name}</span>
+                            <span className="whitespace-nowrap">{monitorHead.headline}</span>
                           </div>
-                          {monitor.systemName ? (
+                          {monitorHead.detail ? (
                             <span className="whitespace-nowrap text-[11px] text-white/55">
-                              ({monitor.systemName})
+                              ({monitorHead.detail})
                             </span>
                           ) : null}
                           {onUpdateMonitorLayout ? (
@@ -2399,12 +2672,12 @@ export function MonitorLayout({
                         <div className="flex flex-col items-center justify-center gap-1 text-center">
                           <div className={`inline-flex items-center justify-center whitespace-nowrap rounded-full border border-white/15 bg-white/10 backdrop-blur-md ${densePreviewMode ? 'px-2 py-1' : 'px-3 py-1.5'} shadow-[0_6px_20px_rgba(0,0,0,0.35)]`}>
                             <span className={`text-white ${densePreviewMode ? 'text-xs' : 'text-sm'} font-semibold leading-none tracking-[0.01em] whitespace-nowrap`}>
-                              {monitor.name}
+                              {monitorHead.headline}
                             </span>
                           </div>
-                          {monitor.systemName && !compactPreviewMode && (
+                          {monitorHead.detail && !compactPreviewMode && (
                             <div className="text-[11px] leading-tight text-white/60 whitespace-nowrap truncate max-w-full">
-                              {monitor.systemName}
+                              {monitorHead.detail}
                             </div>
                           )}
                         </div>
@@ -2445,7 +2718,7 @@ export function MonitorLayout({
                     data-target-id={monitor.id}
                     data-monitor-id={monitor.id}
                   >
-                    <div className="relative h-full w-full min-h-0 bg-black/60 overflow-hidden rounded-xl ring-1 ring-inset ring-white/10">
+                    <div className="relative h-full w-full min-h-0 bg-black/60 overflow-hidden rounded-[10px] ring-1 ring-inset ring-white/10">
                       
                       {/* Monitor-Specific Snap Zones */}
                       {renderSnapZones(monitor)}
@@ -2542,7 +2815,7 @@ export function MonitorLayout({
                                   handleItemDragStart(monitor.id, appIndex, "app")
                                 }
                                 onDrag={(newPosition, pointerPct) =>
-                                  handleItemDrag(
+                                  scheduleMonitorItemDrag(
                                     monitor.id,
                                     appIndex,
                                     "app",
@@ -2702,64 +2975,47 @@ export function MonitorLayout({
                         minimizedDropPreviewMonitorId === monitor.id;
                       return (
                     <div
-                      className={`relative mt-1.5 flex min-h-9 items-center gap-1 overflow-x-auto rounded-lg border px-1.5 py-1 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm scrollbar-elegant transition-colors ${
+                      className={`relative mt-2 flex min-h-[3.75rem] items-center gap-2 overflow-x-auto rounded-lg border px-2 py-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)] backdrop-blur-sm scrollbar-elegant transition-colors ${
                         minimizedDropActive
                           ? "ring-1 ring-flow-accent-blue border-flow-accent-blue bg-flow-accent-blue/14 shadow-[0_0_0_1px_rgba(56,189,248,0.4)]"
                           : "border-white/10 bg-black/45"
                       }`}
                       onMouseDown={() => onClearAppSelection?.()}
-                      aria-label={`${monitor.name} minimized apps`}
+                      aria-label={`Minimized and tray apps for ${monitorChromeAriaLabelFromParts(
+                        monitorHead.headline,
+                        monitorHead.detail,
+                      )}. Drop here to assign launches to this monitor.`}
                       data-drop-target="minimized"
                       data-minimized-drop-target="true"
                       data-target-id={monitor.id}
                     >
                       {minimizedForMonitor.length === 0 && !minimizedDropActive ? (
-                        <span className="px-1 text-[10px] text-white/35">Minimized Apps</span>
+                        <div className="flex w-full min-h-[3.25rem] flex-col items-center justify-center px-2 py-1.5 text-center">
+                          <span className="max-w-[min(100%,22rem)] text-[11px] leading-snug text-white/45">
+                            Drop apps from the library or layout here so they start minimized and stay tied to this monitor when you launch this profile.
+                          </span>
+                        </div>
                       ) : minimizedForMonitor.map(({ app, appIndex }) => {
-                        const iconSrc = safeIconSrc(app.iconPath ?? undefined);
                         const selected = matchesMinimizedAppSelection(selectedApp, appIndex, app);
                         return (
-                          <button
+                          <MinimizedMonitorStripButton
                             key={`${monitor.id}-min-${app.instanceId || appIndex}`}
-                            type="button"
-                            onMouseDown={(e) => {
-                              e.stopPropagation();
-                              if (!isEditMode) return;
-                              e.preventDefault();
-                              handleMiniTaskbarDragStart(app, appIndex, {
-                                x: e.clientX,
-                                y: e.clientY,
-                              });
-                            }}
-                            onClick={() => {
-                              if (isEditMode) return;
-                              onAppSelect?.(app, "minimized", undefined, appIndex);
-                            }}
-                            className={`group relative flex h-10 w-10 shrink-0 items-center justify-center rounded-md border transition-colors ${
+                            app={app}
+                            isEditMode={isEditMode}
+                            ariaLabel={`Restore ${app.name} to ${monitorHead.headline}`}
+                            className={`group relative flex h-10 w-10 shrink-0 cursor-pointer items-center justify-center rounded-md border transition-colors ${
                               selected
                                 ? "border-flow-accent-blue/70 bg-flow-accent-blue/20 ring-1 ring-flow-accent-blue/50"
                                 : "border-white/12 bg-white/[0.04] hover:border-flow-accent-blue/45 hover:bg-white/[0.08]"
                             }`}
-                            aria-label={`Restore ${app.name} to ${monitor.name}`}
-                          >
-                            {iconSrc ? (
-                              <img
-                                src={iconSrc}
-                                alt=""
-                                className="h-7 w-7 object-contain"
-                                draggable={false}
-                              />
-                            ) : app.icon ? (
-                              <app.icon className="h-7 w-7 text-white/90" />
-                            ) : (
-                              <Package className="h-7 w-7 text-white/60" />
-                            )}
-                          </button>
+                            onSelect={() => onAppSelect?.(app, "minimized", undefined, appIndex)}
+                            onDragStart={(startPos) => handleMiniTaskbarDragStart(app, appIndex, startPos)}
+                          />
                         );
                       })}
                       {minimizedDropActive ? (
                         <div
-                          className="pointer-events-none h-10 w-10 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
+                          className="pointer-events-none h-11 w-11 shrink-0 rounded-md border-2 border-dashed border-flow-accent-blue/75 bg-flow-accent-blue/10 shadow-[inset_0_0_10px_rgba(56,189,248,0.2)]"
                           aria-hidden
                         />
                       ) : null}

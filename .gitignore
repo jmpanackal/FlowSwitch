@@ -25,6 +25,11 @@ npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
 artifacts/
+.worktrees/
+worktrees/
+
+# Local debug / scratch logs (do not commit)
+logs/
 
 # Cursor AI local workspace (do not commit)
 .cursorrules

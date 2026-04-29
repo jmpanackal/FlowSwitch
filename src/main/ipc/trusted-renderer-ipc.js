@@ -39,6 +39,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     launchProfileById,
     onProfilesAfterSave = () => {},
     launchStatusStore,
+    publishLaunchProfileStatus = (profileId, runId, status) =>
+      launchStatusStore.publishStatus(profileId, runId, status),
+    clearLaunchTaskbarProgress = () => {},
     isLikelyUserApp,
     getCanonicalAppKey,
     extractExecutablePath,
@@ -300,7 +303,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       console.error('[launch-profile] background launch failed:', err);
       if (!startedPayload?.runId) return;
       try {
-        launchStatusStore.publishStatus(startedPayload.profileId, startedPayload.runId, {
+        publishLaunchProfileStatus(startedPayload.profileId, startedPayload.runId, {
           state: 'failed',
           launchedAppCount: 0,
           launchedTabCount: 0,
@@ -336,6 +339,11 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
   if (!profileId || !runId) return { ok: false, error: 'Invalid arguments' };
   const result = launchStatusStore.cancelRun(profileId, runId);
   if (!result.ok) return { ok: false, reason: result.reason || 'cancel-failed' };
+  try {
+    clearLaunchTaskbarProgress();
+  } catch {
+    // ignore
+  }
   return { ok: true };
 });
 

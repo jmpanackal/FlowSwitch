@@ -1,6 +1,6 @@
 import { Settings, Zap, Clock, Layers, Keyboard } from "lucide-react";
 import { LucideIcon } from "lucide-react";
-import { ProfileIconGlyph } from "../utils/profileHeaderPresentation";
+import { ProfileIconFrame } from "../utils/profileHeaderPresentation";
 import { formatUnit } from "../../utils/pluralize";
 import { FlowTooltip } from "./ui/tooltip";
 import type { ProfileSettingsInitialSection } from "./ProfileSettings";
@@ -55,7 +55,7 @@ const cardSurfaceClass = (profile: Profile, disabled: boolean) =>
     ? "bg-flow-surface/80 border-flow-border/50 opacity-60 cursor-not-allowed"
     : profile.isActive
       ? "border-flow-border-accent/35 bg-flow-surface-elevated ring-1 ring-flow-accent-blue/35 shadow-flow-shadow-md cursor-pointer"
-      : "flow-card-quiet cursor-pointer";
+      : "flow-card-quiet flow-card-quiet-library cursor-pointer";
 
 export function ProfileCard({
   profile,
@@ -123,13 +123,13 @@ export function ProfileCard({
           {statusBadges}
           <div className="flex w-full min-w-0 flex-col items-center gap-2 pt-1">
             <div
-              className={`rounded-xl p-2.5 transition-colors duration-150 ${
+              className={`rounded-[12px] p-0.5 transition-[box-shadow,transform] duration-150 ${
                 profile.isActive
-                  ? "bg-flow-accent-blue/15"
-                  : "bg-flow-bg-tertiary/80 group-hover:bg-flow-surface"
+                  ? "shadow-[0_0_0_2px_color-mix(in_oklch,var(--flow-accent-blue)_42%,transparent)]"
+                  : "group-hover:scale-[1.02]"
               }`}
             >
-              <ProfileIconGlyph icon={profile.icon} className="h-5 w-5" />
+              <ProfileIconFrame icon={profile.icon} variant="default" />
             </div>
             <h3
               className={`w-full min-w-0 truncate font-semibold tracking-tight ${titleCls} ${
@@ -191,13 +191,13 @@ export function ProfileCard({
         >
           <div className="flex min-w-0 items-center gap-2">
             <div
-              className={`shrink-0 rounded-lg p-1.5 transition-colors duration-150 ${
+              className={`shrink-0 rounded-[10px] p-0.5 transition-[box-shadow,transform] duration-150 ${
                 profile.isActive
-                  ? "bg-flow-accent-blue/15"
-                  : "bg-flow-bg-tertiary/80 group-hover:bg-flow-surface"
+                  ? "shadow-[0_0_0_2px_color-mix(in_oklch,var(--flow-accent-blue)_42%,transparent)]"
+                  : "group-hover:scale-[1.02]"
               }`}
             >
-              <ProfileIconGlyph icon={profile.icon} className="h-4 w-4" />
+              <ProfileIconFrame icon={profile.icon} variant="sidebar" />
             </div>
             <h3
               className={`min-w-0 flex-1 truncate font-semibold tracking-tight ${titleCls} ${
@@ -229,13 +229,13 @@ export function ProfileCard({
 
         <div className="flex items-start gap-3">
           <div
-            className={`rounded-lg p-2 transition-colors duration-150 ${
+            className={`shrink-0 rounded-[10px] p-0.5 transition-[box-shadow,transform] duration-150 ${
               profile.isActive
-                ? "bg-flow-accent-blue/15"
-                : "bg-flow-bg-tertiary/80 group-hover:bg-flow-surface"
+                ? "shadow-[0_0_0_2px_color-mix(in_oklch,var(--flow-accent-blue)_42%,transparent)]"
+                : "group-hover:scale-[1.02]"
             }`}
           >
-            <ProfileIconGlyph icon={profile.icon} className="h-4 w-4" />
+            <ProfileIconFrame icon={profile.icon} variant="sidebar" />
           </div>
 
           <div className="min-w-0 flex-1">

@@ -188,8 +188,10 @@
   }
 
   .flow-shell-nav {
-    @apply bg-flow-bg-secondary border-r;
-    border-right-color: color-mix(in oklch, var(--flow-border) 55%, transparent);
+    @apply border-r;
+    border-right-color: color-mix(in oklch, var(--flow-border) 48%, transparent);
+    /* Slightly deeper than main canvas so the monitor preview reads as primary focus. */
+    background-color: color-mix(in oklch, var(--flow-bg-primary) 78%, var(--flow-bg-secondary) 22%);
   }
 
   .flow-shell-canvas {
@@ -314,6 +316,19 @@
   .flow-card-quiet:hover {
     @apply bg-flow-surface-elevated;
     border-color: color-mix(in oklch, var(--flow-border-accent) 42%, transparent);
+  }
+
+  /** Inactive profile cards in the library — clear card edge vs app background; selected uses accent ring. */
+  .flow-card-quiet-library {
+    background-color: color-mix(in oklch, var(--flow-surface) 94%, var(--flow-bg-primary) 6%);
+    border-color: color-mix(in oklch, var(--flow-border) 78%, transparent);
+    box-shadow: var(--flow-shadow-sm);
+  }
+
+  .flow-card-quiet-library:hover {
+    background-color: color-mix(in oklch, var(--flow-surface-elevated) 88%, var(--flow-bg-primary) 12%);
+    border-color: color-mix(in oklch, var(--flow-border-accent) 52%, transparent);
+    box-shadow: var(--flow-shadow-md);
   }
 
   .flow-segment-track {

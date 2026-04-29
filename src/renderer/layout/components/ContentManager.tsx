@@ -349,7 +349,6 @@ export function ContentManager({
   }, [content, folders, currentProfile?.id, onUpdateProfile, onPersistContentLibrary]);
 
   // Timer and state for click vs drag detection
-  const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
   const mouseStateRef = useRef({
     isMouseDown: false,
     startX: 0,
@@ -520,15 +519,7 @@ export function ContentManager({
       itemId: item.id,
       itemData: item
     };
-    
-    // Set up timer for drag initiation (500ms)
-    dragTimerRef.current = setTimeout(() => {
-      if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
-        console.log('⏰ CONTENT DRAG TIMER EXPIRED - Initiating drag');
-        initiateDrag(e.clientX, e.clientY);
-      }
-    }, 500);
-    
+
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
@@ -558,12 +549,6 @@ export function ContentManager({
       hasMoved: mouseStateRef.current.hasMoved
     });
     
-    // Clear the drag timer
-    if (dragTimerRef.current) {
-      clearTimeout(dragTimerRef.current);
-      dragTimerRef.current = null;
-    }
-    
     // If drag wasn't initiated and mouse didn't move much, it's a click
     if (!mouseStateRef.current.dragInitiated && !mouseStateRef.current.hasMoved) {
       console.log('🎯 CONTENT CLICK DETECTED');
@@ -582,14 +567,13 @@ export function ContentManager({
 
   const initiateDrag = (clientX: number, clientY: number) => {
     if (mouseStateRef.current.dragInitiated || !mouseStateRef.current.itemData) return;
-    
-    console.log('🚀 INITIATING CONTENT DRAG MODE');
-    mouseStateRef.current.dragInitiated = true;
-    
+
     const item = mouseStateRef.current.itemData;
-    
     // Only allow dragging content items, not folders
-    if (item.type === 'folder') return;
+    if (item.type === "folder") return;
+
+    console.log("🚀 INITIATING CONTENT DRAG MODE");
+    mouseStateRef.current.dragInitiated = true;
     
     // Trigger edit mode
     if (onDragStart) {
@@ -1582,12 +1566,8 @@ export function ContentManager({
     );
   };
 
-  // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (dragTimerRef.current) {
-        clearTimeout(dragTimerRef.current);
-      }
       document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
       document.removeEventListener('mouseup', handleMouseUpForClickDetection);
     };
@@ -2015,7 +1995,7 @@ export function ContentManager({
       <div
         className={
           compact
-            ? "scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pl-3 pb-3 pr-0"
+            ? "scrollbar-elegant min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pl-3 pr-0 pt-3 pb-3"
             : "scrollbar-elegant max-h-[60vh] overflow-x-hidden overflow-y-auto"
         }
       >

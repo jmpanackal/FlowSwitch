@@ -6,9 +6,16 @@ contextBridge.exposeInMainWorld('electron', {
   // Launch profile actions in main process (apps + tabs)
   launchProfile: (profileId, options) => ipcRenderer.invoke('launch-profile', profileId, options || {}),
 
-  /** Main → renderer when a profile launch starts outside the Launch button (hotkey, task list, dock). */
-  subscribeProfileLaunchExternal: (callback) => {
-    const channel = 'profile-launch-external';
+  /** Main → renderer when a profile launch run starts (any origin). */
+  subscribeProfileLaunchStarted: (callback) => {
+    const channel = 'profile-launch-started';
+    if (typeof callback !== 'function') return () => {};
+    const listener = (_event, payload) => callback(payload);
+    ipcRenderer.on(channel, listener);
+    return () => ipcRenderer.removeListener(channel, listener);
+  },
+  subscribeProfileLaunchFinished: (callback) => {
+    const channel = 'profile-launch-finished';
     if (typeof callback !== 'function') return () => {};
     const listener = (_event, payload) => callback(payload);
     ipcRenderer.on(channel, listener);

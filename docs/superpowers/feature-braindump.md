@@ -9,14 +9,8 @@ I will normalize, label, and review items later.
 Add new ideas here as raw bullets.
 After review, move them to `Reviewed Raw Archive` and keep this section small.
 
-*(empty — last intake reviewed 2026-04-19, see Archive Batch B)*
+*(empty — last intake reviewed 2026-04-27, see Archive Batch C)*
 
-- hide apps button for apps in sidebar that user decides they will never launch with flowswitch (also add filter to show/hide hidden apps)
-- change profile cards to display a list of app icons under instead of x monitors, x apps, x tabs, makes it easier to tell whats in the profile
-- add ability to save profile with app layout memory via hotkey (new profile or overwrite current profile) needs to have confirmation modal. Also ability to set hotkeys to launch profiles (both are important)
-- launch free and paid tiers, free has access to everythind but only three profiles, paid has access to everything and unlimited profiles.
-- App should be downloaded as free tier from website. if the users pays they get a product license they can use to convert their product to paid tier
-- WEBSITE IDEA; each section you scroll to it minimizes all the info you looking at into a taskbar like space, and maximizes the info you are scrolling to, cards and other info enter the screen like they are windows being placed and positioned into a desktop monitor layout. Cards and other info exit the screen like the are being app windows being closed/minimized. so scrolling throught the website section by section looks like you are switching monitor layouts like how you would with flowswitch
 
 ## Reviewed Raw Archive (Reference Only)
 
@@ -86,6 +80,36 @@ Do not include these in the next review pass unless they are explicitly reopened
 - rename profiles by clicking onn their name in the header and it lets you edit in place and clicking off saves the new name
 - fix display of content bubble tooltips in Monitor layout on hover or remove the on hover text
 
+### Archive Batch C (reviewed 2026-04-27)
+
+- hide apps button for apps in sidebar that user decides they will never launch with flowswitch (also add filter to show/hide hidden apps)
+- change profile cards to display a list of app icons under instead of x monitors, x apps, x tabs, makes it easier to tell whats in the profile
+- add ability to save profile with app layout memory via hotkey (new profile or overwrite current profile) needs to have confirmation modal. Also ability to set hotkeys to launch profiles (both are important)
+- launch free and paid tiers, free has access to everythind but only three profiles, paid has access to everything and unlimited profiles.
+- App should be downloaded as free tier from website. if the users pays they get a product license they can use to convert their product to paid tier
+- App profiles can be set to trigger when certain apps or tabs are opened. For example, user sets Development profile to open when they open VSCode so next time they launch VSCode and flowswitch is current it gives confirmation popup saying "Launch development profile, Yes No or Disable this automation" something along those lines.
+- add ability to manually add exe files to apps section
+- spam click dragging in the monitor layout makes the app freeze. Need to prevent freezing and allow this behavior by optimizing the drag experience
+- Dynamic layout name is not easily understandable. Instead dynamically change the name in the dropdown to the cuurent layout (1 app will say fullscreen)
+- If you edit and drag apps to minimized apps on non primary monitor it lawys goes to monitor 1
+- allow opening inspector by clicking on app in minimized app in edit mode
+- Make launch profile button text centered for non-hotkey profiles
+- Allow custom layouts, Free option in layout dropdown where user can drag whereever they want and resize apps as they please. make sure the mini title bar on app windows resizes well at small sizes
+- users report app is blurry for users on first launch
+- add constraints on launching too many apps, apps that compete
+- Some apps are found in apps tab but are not launchable (battle.net launcher did that)
+- Other users the have apps on other drives than C drive report no icons or other issues
+- All users to launch apps from apps tab/inspector to test
+- Some app windows cannot be small enough to fit in certain window constraints, we need to be aware of that. apps have minimum sizes for windows that we might want to detect
+- Make it more obvious when user is in view mode vs edit mode. users are forgetting about the two modes. user a segmented control maybe.
+- move launch status feedback to below the launch button
+- Allow users to click anywhere on the entire app card in the sidebar to initiate dragging instead of just the icon. Clcing once anywhere can still open the inspector
+- Add a tutorial on first launch
+- Allowi dragging by the full app card instead of icon only
+- right click context menu on apps for quick commands
+- Add undo/redo/copy/paste and shortcuts
+- Hide from catalog should be red by default in three dot menu for apps instead of just on hover
+
 ## Reviewed / Formalized
 
 This section converts raw inbox notes into a normalized product backlog.
@@ -98,6 +122,7 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 - A few items are high upside but low readiness and should remain exploratory (AI workspace generation, mobile companion).
 - UI polish requests are useful but should follow core reliability and workflow completion work.
 - **Batch B themes (2026-04-19):** primary-action clarity in the shell (header/launch CTA), design-system consistency for shared controls, MLP tooltip hygiene, ultrawide/template ergonomics, and **evaluate-don’t-commit** items: OS-level taskbar pin state per profile, time/rule-based profile gating, and system-load-aware launch (telemetry cost, accuracy, and user trust).
+- **Batch C themes (2026-04-27):** **reliability bugs** (layout drag freeze, wrong monitor when targeting minimized windows on secondary displays), **discovery gaps** (manual `.exe`, list vs launchable, non–C: installs, test-launch from catalog), **editor depth** (undo/redo, freeform layout mode, clearer preset naming, minimized-tile inspector), **shell polish** (launch status placement, launch label alignment, view/edit affordance, first-run tutorial), **catalog hygiene** (hide apps + show hidden filter, context menus, destructive-menu emphasis), **commercialization** (freemium profile caps + license upgrade—needs product/legal design), and **evaluate** tracks (foreground-triggered profile offers, OS minimum window sizes).
 
 ### Formalized Backlog (Now / Next / Later)
 
@@ -122,8 +147,12 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - hide system utilities/uninstallers/non-app entries
   - icon fallback pipeline for apps missing icons
   - list-level controls: exclude app from search, favorites/tags
-- Merged inbox items: missing apps, hide non-apps, missing icons, exclude apps, favorites/tags.
-- Done when: discovery feels trustworthy, searchable list is clean, and most apps show valid icons.
+  - optional user-supplied executable paths when catalog enumeration misses an install
+  - distinguish “listed for reference” vs “reliably launchable” (launcher indirection, elevation, working directory—e.g. Battle.net-style entries)
+  - “test launch” (or open file location) from Apps tab / inspector without mutating a profile
+  - resilient icon and path resolution for apps installed on volumes other than the system drive
+- Merged inbox items: missing apps, hide non-apps, missing icons, exclude apps, favorites/tags; Batch C manual `.exe`, list-but-not-launchable, other-drive icons, launch-from-inspector testing.
+- Done when: discovery feels trustworthy, searchable list is clean, most apps show valid icons, and users can verify launch behavior before committing an app to a profile.
 
 1. Safe launch guardrails for large profiles
 
@@ -132,8 +161,17 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - define soft threshold warning and hard threshold constraints
   - explain expected launch duration/risk before run
   - optional launch sequencing support for dependency-sensitive apps
-- Merged inbox items: constraints for too many apps, profile launch order.
+- Merged inbox items: constraints for too many apps, profile launch order, Batch C “competing apps” guidance (soft warnings / copy where overlaps exist with singleton or resource-heavy launch patterns).
 - Done when: users are warned/protected before risky launches and can intentionally choose launch order.
+
+1. Critical layout-editor responsiveness and first-run shell clarity
+
+- Problem: fast repeated drag operations in the monitor layout editor can freeze the app; some users report a blurry UI on first launch—both damage trust before core workflows land.
+- Scope:
+  - harden drag/drop and placement update paths (coalesce work, avoid main-thread stalls, cap redundant layout passes) so rapid input cannot wedge the renderer
+  - investigate Windows DPI / display scaling and Electron zoom paths for first-run blur; validate `devicePixelRatio` and font/asset scaling assumptions
+- Merged inbox items: Batch C spam-click drag freeze, first-launch blur.
+- Done when: layout editing stays responsive under fast pointer input and first-run chrome is sharp on common scaling configurations.
 
 #### Next (P1: usability and workflow acceleration)
 
@@ -163,23 +201,29 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - create profile from multiple surfaces (not only Profiles sidebar context)
   - taskbar/tray right-click profile switch
   - hotkeys for profile launch and quick selector overlay
+  - dedicated hotkey workflow to snapshot current window layout into a profile (create new vs overwrite active) with a confirmation modal and clear undo/discard path
   - explicit "run on startup" option per profile
   - inline rename for active profile from header (click name, edit in place, blur/click-out to save) with validation and undo-safe behavior
-- Merged inbox items: create from anywhere, taskbar switching, hotkeys, startup run, GeForce-style quick switcher, Batch B header inline rename.
-- Done when: launching/switching profiles requires minimal navigation friction and renaming a profile is obvious and low-risk.
+- Merged inbox items: create from anywhere, taskbar switching, hotkeys, startup run, GeForce-style quick switcher, Batch B header inline rename; Batch C layout-memory hotkey + modal, profile launch hotkeys (reinforced).
+- Done when: launching/switching profiles requires minimal navigation friction, renaming a profile is obvious and low-risk, and power users can bind both “launch profile” and “save layout to profile” without hunting through menus.
 
 1. Layout editor ergonomics
 
 - Problem: editing is click-precision heavy and some controls are awkward.
 - Scope:
-  - drag from full app card (not icon only)
+  - drag from full app card (not icon only); single click on card still opens inspector/details
   - optional "+" affordance for empty slots in edit mode
   - support vertically stacked monitor arrangements
   - allow monitor tile size tuning in preview
   - presets/templates for common geometries (including ultrawide) where they reduce setup time without constraining power users
+  - human-readable, context-aware names for the active layout preset in the selector (for example single-app tiles labeled as fullscreen rather than opaque internal labels)
+  - correct hit-testing when dropping onto minimized window representations on non-primary monitors (must not silently route to primary)
+  - open inspector by activating a minimized app tile while in edit mode
+  - editor history: undo/redo and copy/paste of placement state with keyboard shortcuts
+  - optional “freeform / custom” layout mode: less grid-bound drag and resize with MLP chrome and in-preview title bars that remain usable at small sizes
   - fix monitor-layout dropdown click interception bug
   - reorder hover window controls to native order
-- Merged inbox items: Batch B ultrawide presets support.
+- Merged inbox items: Batch B ultrawide presets support; Batch C full-card drag, dynamic layout naming, minimized-on-secondary monitor bug, minimized-tile inspector, undo/redo shortcuts, custom layout mode.
 - Done when: common edit operations are easy, predictable, and low-friction.
 
 1. Responsive UI behavior at smaller window sizes
@@ -191,7 +235,37 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - optimize monitor-preview space utilization
   - support easy sidebar hide/show controls
   - allow close-right-sidebar by clicking outside selected app context
+  - group primary launch status feedback directly under the Launch control for clearer cause-and-effect reading order
+  - center Launch button label when no hotkey hint is shown, if layout spec calls for symmetry
+- Merged inbox items: Batch C launch status below launch button, launch label centering for non-hotkey profiles.
 - Done when: app remains readable, usable, and visually consistent at reduced sizes.
+
+1. Profile list at-a-glance composition
+
+- Problem: aggregate counts (“N monitors / apps / tabs”) make it hard to recognize which apps a profile contains without opening it.
+- Scope:
+  - compact strip or cluster of app icons on profile cards with overflow + tooltip or popover for the remainder
+- Merged inbox items: Batch C profile cards show icons instead of counts-only summary.
+- Done when: users can scan the profile list and distinguish common profiles by visible app composition.
+
+1. Apps catalog organization and quick commands
+
+- Problem: long-lived catalogs accumulate entries users never launch via FlowSwitch; high-impact actions need predictable emphasis.
+- Scope:
+  - per-app “hide from FlowSwitch catalog” with a catalog filter to temporarily show hidden rows for recovery
+  - right-click context menu on catalog rows for frequent commands (hide/show, favorite when available, reveal in Explorer, test launch)
+  - persistent destructive styling for “hide from catalog” inside overflow menus (not red-only-on-hover)
+- Merged inbox items: Batch C hide apps + filter, context menu quick commands, hide-from-catalog default red styling.
+- Done when: users can curate the catalog quickly and rarely mis-tap destructive actions.
+
+1. Edit vs view affordance and first-run guidance
+
+- Problem: users forget which mode they are in; first sessions lack orientation.
+- Scope:
+  - high-salience mode control (for example segmented View | Edit) aligned to the existing edit/view state machine
+  - short first-run walkthrough or checklist covering modes, saving, and launching
+- Merged inbox items: Batch C segmented control for modes, first-launch tutorial.
+- Done when: qualitative feedback shows fewer “stuck in wrong mode” incidents and new users complete a first successful launch without external docs.
 
 #### Later (P2: valuable extensions after core workflow maturity)
 
@@ -206,8 +280,9 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 
 - Scope:
   - periodic layout autosave with profile overwrite policy
-  - manual "resave current layout" shortcut
+  - manual "resave current layout" shortcut (align UX with Batch C hotkey snapshot flows: create vs overwrite, confirmation modal, and optional undo)
   - schedule launch at user-defined times
+- Merged inbox items: Batch C overlaps with manual layout-memory hotkey; keep one coherent autosave / snapshot story across P1 hotkeys and P2 periodic autosave.
 - Done when: users can preserve and re-run routine states with minimal manual maintenance.
 
 1. Expanded launch targets and content-aware launching
@@ -259,6 +334,32 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 - Merged inbox items: Batch B machine load / temps / Task Manager–style signals.
 - Recommendation: **evaluate** signal quality on Windows, privacy/copy, and overlap with existing launch guardrails; implement only if warnings are trustworthy and actionable.
 
+1. Tiering, licensing, and download alignment (evaluate)
+
+- Scope:
+  - ship a single downloadable build aligned to a free tier (example intake: full feature surface with a small profile-count cap such as three profiles)
+  - paid tier removes caps (for example unlimited profiles) with terms TBD
+  - in-app activation via product license purchased outside the binary (website checkout → key or account token)
+- Merged inbox items: Batch C free vs paid tiers, website free download + paid license conversion.
+- Recommendation: **evaluate** with product, support, and legal before an engineering slot: entitlement storage, revocation, offline use, upgrade/downgrade, and messaging so users are never surprised by locked profiles.
+
+1. Profile offers when external apps or tabs enter focus (evaluate)
+
+- Scope:
+  - user-defined rules that map foreground app or browser tab signals to “offer this profile” prompts
+  - tri-state confirmation: launch now / dismiss once / disable this rule
+  - guardrails for false positives, rate limiting, and explicit opt-in per target app
+- Merged inbox items: Batch C “open VS Code → suggest Development profile” style automation.
+- Recommendation: **evaluate** detection fidelity, privacy copy, and overlap with future policy/automation; do not ship silent auto-launch without strong consent UX.
+
+1. OS minimum window sizes in layout validation (evaluate)
+
+- Scope:
+  - detect or learn per-app minimum window dimensions where Windows APIs and sampling allow
+  - surface editor warnings and launch-time placement feedback when tiles are smaller than minimums
+- Merged inbox items: Batch C apps that cannot shrink enough for chosen tiles.
+- Recommendation: **evaluate** feasibility and tie to placement-verification work; partial detection may still beat silent failure.
+
 #### Long-Horizon / Incubator (R&D)
 
 1. AI-generated workspace blueprints (business variant)
@@ -275,20 +376,21 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
 
 ### Candidate Sequencing
 
-1. Launch visibility/control (Item 1)
-2. App discovery completeness/hygiene (Item 2)
-3. Launch guardrails + sequence controls (Item 3)
-4. Reapply layout + preview status semantics (Items 5 + 4), including MLP tooltip fix
-5. Profile access acceleration + editor ergonomics (Items 6 + 7), including inline rename and ultrawide preset exploration
-6. Responsive UI pass (Item 8)
-7. Later-phase policy, automation, expanded targets, IA (including launch CTA evaluation), access-rule spike, visual system pass, and OS/telemetry evaluation items once core UX is stable
-8. Run evaluate-don’t-commit tracks as time-boxed spikes in parallel where helpful: access rules, taskbar pins per profile, system health signals for launch
-9. Incubator exploration only when foundation is stable (AI workspace blueprints, mobile companion)
+1. Launch visibility/control (Now Item 1)
+2. Critical layout-editor responsiveness, minimized-target monitor correctness, and first-run sharpness (Now Item 4)—pair with any shared renderer hit-testing work in the layout editor
+3. App discovery completeness/hygiene (Now Item 2), including manual executables, other-drive installs, and list-vs-launchable clarity
+4. Launch guardrails + sequence controls (Now Item 3)
+5. Layout preview status semantics + reapply layout without relaunch (Next), including MLP tooltip fix
+6. Profile access acceleration + editor ergonomics (Next Items 6 + 7), plus profile-card composition, catalog quick commands/hiding, and mode/onboarding passes (Batch C Next expansions)
+7. Responsive UI pass (Next Item 8)
+8. Later-phase policy, automation, expanded targets, IA (including launch CTA evaluation), access-rule spike, visual system pass, and OS/telemetry evaluation items once core UX is stable
+9. Run evaluate-don’t-commit tracks as time-boxed spikes in parallel where helpful: access rules, taskbar pins per profile, system health signals for launch, **Batch C** foreground-trigger profile offers, minimum-window validation, and freemium/licensing
+10. Incubator exploration only when foundation is stable (AI workspace blueprints, mobile companion)
 
 ### Notes for Future Spec Work
 
 - Convert each "Now" item into a dedicated design spec before implementation.
 - For each spec, define explicit acceptance criteria and non-goals to avoid scope creep.
 - Track dependencies between launch pipeline changes and renderer status UX so sequencing stays realistic.
-- For Batch B **evaluate** items, capture a short decision memo (feasibility, risks, user value) before promoting to P1/P2.
+- For Batch B and Batch C **evaluate** items, capture a short decision memo (feasibility, risks, user value) before promoting to P1/P2.
 

@@ -7,6 +7,10 @@
 const path = require('path');
 const { execFile } = require('child_process');
 const { hiddenProcessNamePatterns } = require('./windows-process-service');
+const { launchIconDataUrlFromProfileApp } = require('../utils/launch-ui-icons');
+
+/** App row outcome: opened via shell only — profile has no saved bounds to place or verify. */
+const OUTCOME_EXTERNAL_OPEN_NO_LAYOUT = 'ExternalOpenNoLayout';
 
 const createProfileLaunchRunner = (deps) => {
   const {
@@ -755,6 +759,7 @@ const createProfileLaunchRunner = (deps) => {
   }
 
   if (placementBounds.state === 'maximized' && monitor) {
+    // Surface intermediate statuses for fullscreen/maximized apps too.
     // Stabilize across the same expanded hint set used for enumeration. Companion-process
     // windows that were pre-dismissal (splash/overlay/friends/chooser) are already excluded
     // from candidate pools by the blocked-era quarantine, so the hint scope is safe here.
@@ -930,6 +935,332 @@ const launchProfileById = async (profileId, options = {}) => {
   const consumedReuseHandlesByProcessHint = new Map();
   const baselineReuseHandlesByProcessHint = new Map();
 
+  const displayOrdinalLabelForMonitor = (m) => {
+    if (!m || typeof m !== 'object') return null;
+    const mid = String(m.id || '').trim();
+    const list = Array.isArray(systemMonitors) ? [...systemMonitors] : [];
+    if (!list.length) return m.primary ? 'Primary display' : null;
+    list.sort((a, b) => {
+      if (Boolean(a?.primary) !== Boolean(b?.primary)) return a?.primary ? -1 : 1;
+      const ad = Number(a?.displayId);
+      const bd = Number(b?.displayId);
+      if (Number.isFinite(ad) && Number.isFinite(bd) && ad !== bd) return ad - bd;
+      return String(a?.id || '').localeCompare(String(b?.id || ''));
+    });
+    const idx = list.findIndex((mon) => String(mon?.id || '') === mid);
+    if (idx < 0) return m.primary ? 'Primary display' : null;
+    const hit = list[idx];
+    if (hit?.primary) return 'Primary display';
+    const nonPrimary = list.filter((mon) => !mon?.primary);
+    const rank = nonPrimary.findIndex((mon) => String(mon?.id || '') === mid);
+    if (rank < 0) return 'Display';
+    return `Display ${rank + 2}`;
+  };
+
+  const launchLocationLabel = (li) => {
+    if (li?.app?._launchFromMinimizedTray) return 'Minimized row';
+    const m = li?.monitor;
+    if (!m || typeof m !== 'object') return 'Display (unspecified)';
+    return displayOrdinalLabelForMonitor(m) || 'Display (unspecified)';
+  };
+
+  const appLaunchProgress = appLaunches.map((li, idx) => ({
+    key: String(li.app?.instanceId || '').trim() || `seq-${idx}`,
+    name: String(li.appName || '').trim() || `App ${idx + 1}`,
+    step: 'pending',
+    iconDataUrl: launchIconDataUrlFromProfileApp(li.app),
+    location: launchLocationLabel(li),
+    outcomes: [],
+  }));
+  let activeUiPhase = null;
+  let activeUiName = null;
+  const tabUrlDedupeForCount = new Set();
+  const countUniqueTabUrl = (rawUrl) => {
+    const u = normalizeSafeUrl(rawUrl);
+    if (!u || tabUrlDedupeForCount.has(u)) return;
+    tabUrlDedupeForCount.add(u);
+  };
+  for (const tab of (Array.isArray(profile?.browserTabs) ? profile.browserTabs : [])) {
+    countUniqueTabUrl(tab?.url);
+  }
+  for (const raw of legacyLaunchData.browserUrls || []) {
+    countUniqueTabUrl(raw);
+  }
+  const requestedBrowserTabCount = tabUrlDedupeForCount.size;
+
+  /** Ordered browser tabs (profile + legacy), deduped by normalized URL. */
+  const tabUrlList = [];
+  const tabUrlSeen = new Set();
+  const pushTabEntry = (raw) => {
+    const u = normalizeSafeUrl(raw);
+    if (!u || tabUrlSeen.has(u)) return;
+    tabUrlSeen.add(u);
+    let label = u;
+    try {
+      label = new URL(u).hostname || u;
+    } catch {
+      label = u;
+    }
+    tabUrlList.push({ url: u, label });
+  };
+  for (const tab of (Array.isArray(profile?.browserTabs) ? profile.browserTabs : [])) {
+    pushTabEntry(tab?.url);
+  }
+  for (const raw of legacyLaunchData.browserUrls || []) {
+    pushTabEntry(raw);
+  }
+
+  const tabActionIdForUrl = (url) => {
+    let h = 2166136261;
+    for (let i = 0; i < url.length; i += 1) {
+      h ^= url.charCodeAt(i);
+      h = Math.imul(h, 16777619);
+    }
+    return `tab:${(h >>> 0).toString(36)}`;
+  };
+
+  const makeAppSubsteps = () => ([
+    {
+      id: 'sub-launch',
+      label: 'Launching',
+      state: 'queued',
+      startedAtMs: null,
+      endedAtMs: null,
+    },
+    {
+      id: 'sub-place',
+      label: 'Positioning window',
+      state: 'queued',
+      startedAtMs: null,
+      endedAtMs: null,
+    },
+    {
+      id: 'sub-verify',
+      label: 'Verifying placement',
+      state: 'queued',
+      startedAtMs: null,
+      endedAtMs: null,
+    },
+    {
+      id: 'sub-confirm',
+      label: 'Waiting for confirmation',
+      state: 'queued',
+      startedAtMs: null,
+      endedAtMs: null,
+    },
+  ]);
+
+  const delayTimelineIndexByApp = new Array(appLaunches.length).fill(-1);
+  const appTimelineIndexByApp = new Array(appLaunches.length);
+  const executionActions = [];
+  let executionTimelineWrite = 0;
+  for (let i = 0; i < appLaunches.length; i += 1) {
+    const row = appLaunchProgress[i];
+    const delaySeconds = Number(appLaunchDelays[appLaunches[i].appName] || 0);
+    if (delaySeconds > 0) {
+      delayTimelineIndexByApp[i] = executionTimelineWrite;
+      executionActions.push({
+        id: `delay:${row.key}`,
+        kind: 'system',
+        title: `Wait before ${row.name}`,
+        state: 'queued',
+        pills: null,
+        smartDecisions: [`Waiting ${delaySeconds}s delay`],
+        errorMessage: null,
+        failureKind: null,
+        startedAtMs: null,
+        endedAtMs: null,
+        substeps: [{
+          id: 'sub-wait',
+          label: `Waiting ${delaySeconds}s delay`,
+          state: 'queued',
+          startedAtMs: null,
+          endedAtMs: null,
+        }],
+      });
+      executionTimelineWrite += 1;
+    }
+    appTimelineIndexByApp[i] = executionTimelineWrite;
+    const targetLocationRaw = row?.location ? String(row.location).trim() : '';
+    executionActions.push({
+      id: `app:${row.key}`,
+      kind: 'app',
+      title: row.name,
+      targetLocation: targetLocationRaw || null,
+      state: 'queued',
+      iconDataUrl: row.iconDataUrl,
+      pills: null,
+      smartDecisions: null,
+      errorMessage: null,
+      failureKind: null,
+      startedAtMs: null,
+      endedAtMs: null,
+      substeps: makeAppSubsteps(),
+    });
+    executionTimelineWrite += 1;
+  }
+
+  const tabUrlToTimelineIndex = new Map();
+  for (const { url, label } of tabUrlList) {
+    tabUrlToTimelineIndex.set(url, executionActions.length);
+    executionActions.push({
+      id: tabActionIdForUrl(url),
+      kind: 'tab',
+      title: label,
+      targetLocation: 'Browser',
+      state: 'queued',
+      iconDataUrl: null,
+      pills: null,
+      smartDecisions: null,
+      errorMessage: null,
+      failureKind: null,
+      startedAtMs: null,
+      endedAtMs: null,
+      substeps: [{
+        id: 'sub-open',
+        label: 'Opening in browser',
+        state: 'queued',
+        startedAtMs: null,
+        endedAtMs: null,
+      }],
+    });
+  }
+
+  const syncAppTimelineFromRow = (action, row) => {
+    if (!action || !row) return;
+    const step = row.step;
+    const subs = action.substeps || [];
+    const sl = (id) => subs.find((s) => s.id === id);
+    const setSubs = (triples) => {
+      for (const [id, st] of triples) {
+        const s = sl(id);
+        if (s) s.state = st;
+      }
+    };
+    if (step === 'pending') {
+      action.state = 'queued';
+      setSubs([
+        ['sub-launch', 'queued'],
+        ['sub-place', 'queued'],
+        ['sub-verify', 'queued'],
+        ['sub-confirm', 'queued'],
+      ]);
+    } else if (step === 'launching') {
+      action.state = 'running';
+      setSubs([
+        ['sub-launch', 'running'],
+        ['sub-place', 'queued'],
+        ['sub-verify', 'queued'],
+        ['sub-confirm', 'queued'],
+      ]);
+    } else if (step === 'placing') {
+      action.state = 'running';
+      setSubs([
+        ['sub-launch', 'completed'],
+        ['sub-place', 'running'],
+        ['sub-verify', 'queued'],
+        ['sub-confirm', 'queued'],
+      ]);
+    } else if (step === 'verifying') {
+      action.state = 'running';
+      setSubs([
+        ['sub-launch', 'completed'],
+        ['sub-place', 'completed'],
+        ['sub-verify', 'running'],
+        ['sub-confirm', 'queued'],
+      ]);
+    } else if (step === 'awaiting-confirmation') {
+      action.state = 'running';
+      setSubs([
+        ['sub-launch', 'completed'],
+        ['sub-place', 'completed'],
+        ['sub-verify', 'completed'],
+        ['sub-confirm', 'running'],
+      ]);
+    } else if (step === 'done') {
+      const externalNoLayout = Array.isArray(row.outcomes)
+        && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_EXTERNAL_OPEN_NO_LAYOUT);
+      if (externalNoLayout) {
+        action.state = 'warning';
+        appendSmartDecision(
+          action,
+          'No saved window slot — the OS opened the app or link; FlowSwitch did not place or verify a window. Add this app to a monitor in the profile for full launch control.',
+        );
+      } else {
+        action.state = 'completed';
+      }
+      setSubs([
+        ['sub-launch', 'completed'],
+        ['sub-place', 'completed'],
+        ['sub-verify', 'completed'],
+        ['sub-confirm', 'completed'],
+      ]);
+      const confirmSub = sl('sub-confirm');
+      if (confirmSub) confirmSub.label = externalNoLayout ? 'Not applicable' : 'Confirmed';
+    } else if (step === 'failed') {
+      action.state = 'failed';
+      const fk = action.failureKind || 'launch';
+      if (fk === 'placement') {
+        setSubs([
+          ['sub-launch', 'completed'],
+          ['sub-place', 'failed'],
+          ['sub-verify', 'queued'],
+          ['sub-confirm', 'queued'],
+        ]);
+      } else if (fk === 'verification') {
+        setSubs([
+          ['sub-launch', 'completed'],
+          ['sub-place', 'completed'],
+          ['sub-verify', 'failed'],
+          ['sub-confirm', 'queued'],
+        ]);
+      } else {
+        setSubs([
+          ['sub-launch', 'failed'],
+          ['sub-place', 'queued'],
+          ['sub-verify', 'queued'],
+          ['sub-confirm', 'queued'],
+        ]);
+      }
+    } else if (step === 'skipped') {
+      action.state = 'skipped';
+    }
+  };
+
+  const refreshAllAppTimelines = () => {
+    for (let i = 0; i < appLaunches.length; i += 1) {
+      const ai = appTimelineIndexByApp[i];
+      syncAppTimelineFromRow(executionActions[ai], appLaunchProgress[i]);
+    }
+  };
+
+  const countCompletedTimelineActions = () => executionActions.filter(
+    (a) => a.state === 'completed'
+      || a.state === 'failed'
+      || a.state === 'skipped'
+      || a.state === 'warning',
+  ).length;
+
+  const resolveActiveActionId = () => {
+    const running = executionActions.find((a) => a.state === 'running');
+    if (running) return running.id;
+    return null;
+  };
+
+  const appendUniquePill = (action, pill) => {
+    if (!action || !pill) return;
+    const prev = Array.isArray(action.pills) ? action.pills : [];
+    if (prev.includes(pill)) return;
+    action.pills = [...prev, pill];
+  };
+
+  const appendSmartDecision = (action, text) => {
+    if (!action || !text) return;
+    const prev = Array.isArray(action.smartDecisions) ? action.smartDecisions : [];
+    if (prev.includes(text)) return;
+    action.smartDecisions = [...prev, text];
+  };
+
   const { shell } = require('electron');
   const profileDiagnostics = createLaunchDiagnostics({
     profileId: normalizedProfileId,
@@ -937,6 +1268,8 @@ const launchProfileById = async (profileId, options = {}) => {
     runId: activeRunId,
   });
   const publishCurrentLaunchStatus = (state = 'in-progress') => {
+    refreshAllAppTimelines();
+    const activeActionId = resolveActiveActionId();
     publishLaunchProfileStatus(normalizedProfileId, activeRunId, {
       state,
       launchedAppCount,
@@ -944,7 +1277,15 @@ const launchProfileById = async (profileId, options = {}) => {
       failedAppCount: failedApps.length,
       skippedAppCount: skippedApps.length,
       requestedAppCount: appLaunches.length,
+      requestedBrowserTabCount,
+      activePhase: activeUiPhase,
+      activeAppName: activeUiName,
+      appLaunchProgress: appLaunchProgress.map((row) => ({ ...row })),
       pendingConfirmations,
+      activeActionId,
+      actionsTotal: executionActions.length,
+      actionsCompleted: countCompletedTimelineActions(),
+      actions: executionActions,
     });
   };
   profileDiagnostics.start({
@@ -988,7 +1329,7 @@ const launchProfileById = async (profileId, options = {}) => {
     },
   });
 
-  const runLaunch = async (launchItem) => {
+  const runLaunch = async (launchItem, appIndex) => {
     if (!isCurrentRunActive()) return;
     let launchStatusMode = 'spawned_new_window';
     let launchStatusReasonCode = 'spawned_new_window';
@@ -999,6 +1340,12 @@ const launchProfileById = async (profileId, options = {}) => {
       runId: activeRunId,
     });
     try {
+      if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+        activeUiPhase = 'launching';
+        activeUiName = launchItem.appName;
+        appLaunchProgress[appIndex].step = 'launching';
+        publishCurrentLaunchStatus('in-progress');
+      }
       const processHintLc = getPlacementProcessKey(launchItem);
       if (!consumedReuseHandlesByProcessHint.has(processHintLc)) {
         consumedReuseHandlesByProcessHint.set(processHintLc, new Set());
@@ -1076,11 +1423,42 @@ const launchProfileById = async (profileId, options = {}) => {
         } else {
           launchedChild = await launchExecutable(launchItem.executablePath, launchArgs);
         }
+        launchDiagnostics.decision({
+          processHintLc,
+          strategy: 'no-bounds-open',
+          reason: 'external-open-without-profile-placement',
+          launchTarget: launchItem.launchUrl
+            ? 'url'
+            : launchItem.shortcutPath
+              ? 'shortcut'
+              : 'executable',
+        });
         launchedAppCount += 1;
+        if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+          appLaunchProgress[appIndex].step = 'done';
+          const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+            ? appLaunchProgress[appIndex].outcomes
+            : [];
+          appLaunchProgress[appIndex].outcomes = Array.from(new Set(
+            [...prev, 'Launched', OUTCOME_EXTERNAL_OPEN_NO_LAYOUT],
+          ));
+        }
+        activeUiPhase = null;
+        activeUiName = null;
         publishCurrentLaunchStatus('in-progress');
         return;
       }
       if (bounds) {
+        let placementPhasePublished = false;
+        const signalPlacementPhase = () => {
+          if (placementPhasePublished) return;
+          placementPhasePublished = true;
+          if (!Number.isInteger(appIndex) || !appLaunchProgress[appIndex]) return;
+          activeUiPhase = 'placing';
+          activeUiName = launchItem.appName;
+          appLaunchProgress[appIndex].step = 'placing';
+          publishCurrentLaunchStatus('in-progress');
+        };
         const aggressiveMaximize = bounds.state === 'maximized' && processHintLc === 'msedge';
         const positionOnlyBeforeMaximize = processHintLc === 'msedge' && bounds.state === 'maximized';
         const shouldDelayChromiumMaximize = (
@@ -1265,6 +1643,17 @@ const launchProfileById = async (profileId, options = {}) => {
           launchStatusMode = 'reused_existing_window';
           launchStatusReasonCode = 'reused_existing_window';
           launchedAppCount += 1;
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+              ? appLaunchProgress[appIndex].outcomes
+              : [];
+            appLaunchProgress[appIndex].outcomes = Array.from(new Set([...prev, 'Reused']));
+            const tact = executionActions[appTimelineIndexByApp[appIndex]];
+            if (tact) {
+              appendUniquePill(tact, 'Reused');
+              appendSmartDecision(tact, 'Reusing existing window');
+            }
+          }
           publishCurrentLaunchStatus('in-progress');
           launchDiagnostics.decision({
             processHintLc,
@@ -1281,6 +1670,12 @@ const launchProfileById = async (profileId, options = {}) => {
           launchStatusReasonCode = shouldPreferReuseExisting
             ? 'fallback_to_spawn'
             : 'spawned_new_window';
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+              ? appLaunchProgress[appIndex].outcomes
+              : [];
+            appLaunchProgress[appIndex].outcomes = Array.from(new Set([...prev, 'New']));
+          }
           if (launchItem.shortcutPath) {
             const openErr = await shell.openPath(launchItem.shortcutPath);
             if (openErr) throw new Error(openErr);
@@ -1295,6 +1690,15 @@ const launchProfileById = async (profileId, options = {}) => {
             await sleep(200);
           }
           launchedAppCount += 1;
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            const tact = executionActions[appTimelineIndexByApp[appIndex]];
+            if (tact) {
+              appendUniquePill(tact, 'New');
+              if (shouldPreferReuseExisting) {
+                appendSmartDecision(tact, 'Launched new instance');
+              }
+            }
+          }
           publishCurrentLaunchStatus('in-progress');
         }
 
@@ -1417,6 +1821,15 @@ const launchProfileById = async (profileId, options = {}) => {
             status: 'waiting',
           };
           pendingConfirmations.push(pendingEntry);
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            appLaunchProgress[appIndex].step = 'awaiting-confirmation';
+            const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+              ? appLaunchProgress[appIndex].outcomes
+              : [];
+            appLaunchProgress[appIndex].outcomes = Array.from(new Set([...prev, 'Confirmation']));
+          }
+          activeUiPhase = 'launching';
+          activeUiName = launchItem.appName;
           publishCurrentLaunchStatus('awaiting-confirmations');
           void resumePlacementAfterConfirmationModal({
             processHintLc,
@@ -1537,6 +1950,7 @@ const launchProfileById = async (profileId, options = {}) => {
           }
 
           if (!result.applied) {
+            signalPlacementPhase();
             launchDiagnostics.attempt({
               processHintLc,
               strategy: 'window-ready-gate',
@@ -1561,6 +1975,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied && isDuplicateProcessLaunch) {
+          signalPlacementPhase();
           const postLaunchWindowInfos = await getVisibleWindowInfos(processHintLc, {
             diagnostics: launchDiagnostics,
             diagnosticsContext: {
@@ -1632,6 +2047,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied && isChromiumFamily) {
+          signalPlacementPhase();
           launchDiagnostics.attempt({
             processHintLc,
             strategy: 'chromium-ranked-windows',
@@ -1652,6 +2068,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied) {
+          signalPlacementPhase();
           launchDiagnostics.attempt({
             processHintLc,
             strategy: 'move-window-to-bounds',
@@ -1677,6 +2094,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied) {
+          signalPlacementPhase();
           await sleep(240);
           launchDiagnostics.attempt({
             processHintLc,
@@ -1703,11 +2121,11 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied) {
+          signalPlacementPhase();
+          // Only scan the primary launch hint here. Companion hints can pull in unrelated
+          // Chromium-class windows (wrong browser) that then win by area in scoring.
           const postLaunchRowsByHint = await Promise.all(
-            (Array.isArray(activeProcessHints) && activeProcessHints.length > 0
-              ? activeProcessHints
-              : [processHintLc]
-            ).map((hint) => getVisibleWindowInfos(hint, {
+            [processHintLc].map((hint) => getVisibleWindowInfos(hint, {
               diagnostics: launchDiagnostics,
               diagnosticsContext: {
                 processHintLc,
@@ -1764,6 +2182,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied && isDuplicateProcessLaunch) {
+          signalPlacementPhase();
           await sleep(260);
           launchDiagnostics.attempt({
             processHintLc,
@@ -1790,6 +2209,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         if (!result.applied && isDuplicateProcessLaunch && newHandles.length > 0) {
+          signalPlacementPhase();
           for (const newHandle of newHandles) {
             launchDiagnostics.attempt({
               processHintLc,
@@ -1895,6 +2315,10 @@ const launchProfileById = async (profileId, options = {}) => {
           && placementBounds.state === 'normal'
           && !shouldDelayChromiumMaximize
         ) {
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            appLaunchProgress[appIndex].step = 'verifying';
+            publishCurrentLaunchStatus('in-progress');
+          }
           const verification = await verifyAndCorrectWindowPlacement({
             handle: result.handle,
             monitor: launchItem.monitor,
@@ -2149,6 +2573,19 @@ const launchProfileById = async (profileId, options = {}) => {
           });
         }
       }
+      if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+        appLaunchProgress[appIndex].step = 'done';
+        const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+          ? appLaunchProgress[appIndex].outcomes
+          : [];
+        // If this path was reuse, the outcome is already set; otherwise record a generic success.
+        appLaunchProgress[appIndex].outcomes = Array.from(
+          new Set([...prev, ...(prev.includes('Reused') ? [] : ['Placed'])]),
+        );
+      }
+      activeUiPhase = null;
+      activeUiName = null;
+      publishCurrentLaunchStatus('in-progress');
     } catch (error) {
       launchDiagnostics.failure({
         strategy: 'run-launch',
@@ -2162,6 +2599,20 @@ const launchProfileById = async (profileId, options = {}) => {
         mode: launchStatusMode,
         reasonCode: launchStatusReasonCode,
       });
+      if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+        const prevStep = appLaunchProgress[appIndex].step;
+        let failureKind = 'launch';
+        if (prevStep === 'placing') failureKind = 'placement';
+        if (prevStep === 'verifying') failureKind = 'verification';
+        const tact = executionActions[appTimelineIndexByApp[appIndex]];
+        if (tact) {
+          tact.failureKind = failureKind;
+          tact.errorMessage = String(error?.message || error || 'Failed to launch app');
+        }
+        appLaunchProgress[appIndex].step = 'failed';
+      }
+      activeUiPhase = null;
+      activeUiName = null;
       publishCurrentLaunchStatus('in-progress');
     }
   };
@@ -2178,45 +2629,73 @@ const launchProfileById = async (profileId, options = {}) => {
     executionMode: launchOrder,
   });
 
-  for (const launchItem of appLaunches) {
+  for (let appIndex = 0; appIndex < appLaunches.length; appIndex += 1) {
+    const launchItem = appLaunches[appIndex];
     if (!isCurrentRunActive()) break;
     const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
     const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
-    if (safeDelayMs > 0) {
-      await sleep(safeDelayMs);
+    const delayIdx = delayTimelineIndexByApp[appIndex];
+    if (delayIdx >= 0) {
+      const dAct = executionActions[delayIdx];
+      if (safeDelayMs > 0) {
+        const t0 = Date.now();
+        dAct.state = 'running';
+        dAct.startedAtMs = t0;
+        dAct.substeps[0].state = 'running';
+        dAct.substeps[0].startedAtMs = t0;
+        publishCurrentLaunchStatus('in-progress');
+        await sleep(safeDelayMs);
+        const t1 = Date.now();
+        dAct.substeps[0].state = 'completed';
+        dAct.substeps[0].endedAtMs = t1;
+        dAct.state = 'completed';
+        dAct.endedAtMs = t1;
+        publishCurrentLaunchStatus('in-progress');
+      } else {
+        const t1 = Date.now();
+        dAct.substeps[0].state = 'completed';
+        dAct.substeps[0].endedAtMs = t1;
+        dAct.state = 'completed';
+        dAct.endedAtMs = t1;
+        publishCurrentLaunchStatus('in-progress');
+      }
     }
-    await runLaunch(launchItem);
+    await runLaunch(launchItem, appIndex);
   }
 
-  const browserTabs = Array.isArray(profile?.browserTabs) ? profile.browserTabs : [];
-  const launchedUrls = new Set();
-  for (const tab of browserTabs) {
+  for (const { url, label } of tabUrlList) {
     if (!isCurrentRunActive()) break;
-    const url = normalizeSafeUrl(tab?.url);
-    if (!url || launchedUrls.has(url)) continue;
-    launchedUrls.add(url);
+    const tIdx = tabUrlToTimelineIndex.get(url);
+    const tAct = tIdx != null ? executionActions[tIdx] : null;
     try {
+      activeUiPhase = 'tabs';
+      activeUiName = label;
+      if (tAct) {
+        const t0 = Date.now();
+        tAct.state = 'running';
+        tAct.startedAtMs = t0;
+        tAct.substeps[0].state = 'running';
+        tAct.substeps[0].startedAtMs = t0;
+      }
+      publishCurrentLaunchStatus('in-progress');
       await shell.openExternal(url);
       launchedTabCount += 1;
+      if (tAct) {
+        const t1 = Date.now();
+        tAct.substeps[0].state = 'completed';
+        tAct.substeps[0].endedAtMs = t1;
+        tAct.state = 'completed';
+        tAct.endedAtMs = t1;
+      }
       publishCurrentLaunchStatus('in-progress');
     } catch {
       // Keep profile launch resilient if one tab URL fails.
     }
   }
 
-  for (const url of legacyLaunchData.browserUrls) {
-    if (!isCurrentRunActive()) break;
-    const safeUrl = normalizeSafeUrl(url);
-    if (!safeUrl || launchedUrls.has(safeUrl)) continue;
-    launchedUrls.add(safeUrl);
-    try {
-      await shell.openExternal(safeUrl);
-      launchedTabCount += 1;
-      publishCurrentLaunchStatus('in-progress');
-    } catch {
-      // Keep profile launch resilient if one tab URL fails.
-    }
-  }
+  activeUiPhase = null;
+  activeUiName = null;
+  publishCurrentLaunchStatus('in-progress');
 
   const statusSnapshot = launchStatusStore.getStatus(normalizedProfileId);
   const wasLaunchCancelled = (

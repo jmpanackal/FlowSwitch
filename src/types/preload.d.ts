@@ -1,9 +1,9 @@
 import type { Profile } from './profile';
 import type {
-  FlowProfile,
   ProfileListResult,
   ProfileSavePayload,
 } from './flow-profile';
+import type { LaunchAction } from '../renderer/layout/hooks/useLaunchFeedback';
 
 export {};
 
@@ -49,8 +49,17 @@ declare global {
         pendingConfirmationCount?: number;
         unresolvedPendingConfirmationCount?: number;
       }>;
-      subscribeProfileLaunchExternal?: (
+      subscribeProfileLaunchStarted?: (
         callback: (payload: { profileId: string; runId: string }) => void,
+      ) => () => void;
+      subscribeProfileLaunchFinished?: (
+        callback: (payload: {
+          profileId: string;
+          runId: string;
+          outcome: 'success' | 'warning' | 'error' | 'idle';
+          message: string;
+          durationSeconds?: number;
+        }) => void,
       ) => () => void;
       cancelProfileLaunch?: (
         profileId: string,
@@ -70,6 +79,30 @@ declare global {
           pendingConfirmationCount: number;
           unresolvedPendingConfirmationCount: number;
           requestedAppCount: number;
+          requestedBrowserTabCount?: number;
+          startedAt?: number | null;
+          activePhase?: "launching" | "placing" | "tabs" | null;
+          activeAppName?: string | null;
+          activeActionId?: string | null;
+          actionsTotal?: number | null;
+          actionsCompleted?: number | null;
+          actions?: LaunchAction[] | null;
+          appLaunchProgress?: Array<{
+            key: string;
+            name: string;
+            step:
+              | "pending"
+              | "launching"
+              | "placing"
+              | "verifying"
+              | "awaiting-confirmation"
+              | "done"
+              | "failed"
+              | "skipped";
+            iconDataUrl?: string | null;
+            location?: string;
+            outcomes?: string[];
+          }>;
           pendingConfirmations: Array<{
             name: string;
             path: string;

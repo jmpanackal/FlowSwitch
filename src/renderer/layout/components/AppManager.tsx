@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
   Settings,
@@ -15,6 +15,7 @@ import {
   placeInstalledSidebarAppOnMinimized,
   placeInstalledSidebarAppOnMonitor,
 } from "../utils/sidebarExplicitPlacement";
+import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 import { FlowTooltip } from "./ui/tooltip";
@@ -22,6 +23,10 @@ import {
   FlowLibraryToolbar,
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
+import {
+  restoreDocumentTextSelection,
+  suspendDocumentTextSelection,
+} from "../utils/documentTextSelection";
 
 type AppType = {
   name: string;
@@ -64,6 +69,9 @@ const getStableColor = (name: string) => {
 const APPS_SIDEBAR_HELP =
   "Open ⋯ on a row to add to a monitor or minimized row, or change catalog visibility.";
 
+/** Pixels of pointer movement before a catalog row counts as a drag (not a click). */
+const SIDEBAR_APP_DRAG_THRESHOLD_PX = 6;
+
 export function AppManager({
   profiles,
   onUpdateProfile: _onUpdateProfile,
@@ -93,6 +101,11 @@ export function AppManager({
     catalogKey: string;
     anchor: HTMLElement;
   } | null>(null);
+  const [addToSubmenuOpen, setAddToSubmenuOpen] = useState<{
+    catalogKey: string;
+    anchor: HTMLElement;
+  } | null>(null);
+  const addToSubmenuCloseTimerRef = useRef<number | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
   const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps();
   const {
@@ -197,6 +210,7 @@ export function AppManager({
     const list = [...(currentProfile?.monitors ?? [])] as {
       id: string;
       name?: string;
+      systemName?: string | null;
       primary?: boolean;
     }[];
     list.sort((a, b) => {
@@ -206,9 +220,34 @@ export function AppManager({
     return list;
   }, [currentProfile?.monitors]);
 
+  const monitorDisplayLabelMap = useMemo(
+    () =>
+      buildMonitorDisplayLabelMap(
+        monitorsSortedForMenu.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          systemName: m.systemName ?? null,
+          primary: m.primary,
+        })),
+      ),
+    [monitorsSortedForMenu],
+  );
+
   useEffect(() => {
     setOverflowMenuOpen(null);
+    setAddToSubmenuOpen(null);
   }, [currentProfile?.id]);
+
+  useEffect(() => {
+    if (addToSubmenuCloseTimerRef.current != null) {
+      window.clearTimeout(addToSubmenuCloseTimerRef.current);
+      addToSubmenuCloseTimerRef.current = null;
+    }
+    // If the parent menu closes or switches rows, always close the submenu.
+    if (!overflowMenuOpen || overflowMenuOpen.catalogKey !== addToSubmenuOpen?.catalogKey) {
+      setAddToSubmenuOpen(null);
+    }
+  }, [overflowMenuOpen, addToSubmenuOpen?.catalogKey]);
 
   /** Icons for any profile layout slot using this app name (not tied to expansion UI). */
   const getAppLayoutAggregateFlags = (appName: string) => {
@@ -236,45 +275,99 @@ export function AppManager({
     return { runAsAdmin, forceCloseOnExit, smartSave };
   };
 
-  // CUSTOM DRAG SYSTEM - Mouse-based dragging
-  const handleMouseDown = (e: React.MouseEvent, app: any) => {
-    e.preventDefault();
+  const onCustomDragStartRef = useRef(onCustomDragStart);
+  onCustomDragStartRef.current = onCustomDragStart;
+  const onDragStartRef = useRef(onDragStart);
+  onDragStartRef.current = onDragStart;
+  const onInspectInstalledAppRef = useRef(onInspectInstalledApp);
+  onInspectInstalledAppRef.current = onInspectInstalledApp;
 
-    const dragData = {
-      source: 'sidebar',
-      type: 'app',
-      name: app.name,
-      iconPath: app.iconPath ?? null,
-      executablePath: app.executablePath ?? null,
-      color: app.color,
-      category: app.category,
-    };
-    const previewIconSrc = safeIconSrc(app.iconPath);
+  const beginInstalledAppSidebarDrag = useCallback(
+    (clientX: number, clientY: number, app: AppType) => {
+      const dragData = {
+        source: "sidebar" as const,
+        type: "app" as const,
+        name: app.name,
+        iconPath: app.iconPath ?? null,
+        executablePath: app.executablePath ?? null,
+        color: app.color,
+        category: app.category,
+      };
+      const previewIconSrc = safeIconSrc(app.iconPath);
+      const preview = (
+        <div className="flex items-center gap-2">
+          {previewIconSrc ? (
+            <img src={previewIconSrc} alt={app.name} className="w-4 h-4 rounded" />
+          ) : (
+            <Settings className="w-4 h-4 text-white" />
+          )}
+          <span>{app.name}</span>
+        </div>
+      );
+      onCustomDragStartRef.current(
+        dragData,
+        "sidebar",
+        "apps",
+        { x: clientX, y: clientY },
+        preview,
+      );
+      onDragStartRef.current?.();
+    },
+    [],
+  );
 
-    const preview = (
-      <div className="flex items-center gap-2">
-        {previewIconSrc ? (
-          <img src={previewIconSrc} alt={app.name} className="w-4 h-4 rounded" />
-        ) : (
-          <Settings className="w-4 h-4 text-white" />
-        )}
-        <span>{app.name}</span>
-      </div>
-    );
-    
-    onCustomDragStart(
-      dragData,
-      'sidebar',
-      'apps',
-      { x: e.clientX, y: e.clientY },
-      preview
-    );
-    
-    // Call parent's onDragStart to enable edit mode
-    if (onDragStart) {
-      onDragStart();
-    }
-  };
+  /** Full-row drag handle: move past threshold to drag; simple click opens inspector. */
+  const handleAppRowPointerDown = useCallback(
+    (e: React.PointerEvent, app: AppType) => {
+      if (!compact) return;
+      if (e.button !== 0) return;
+      const target = e.target as HTMLElement;
+      if (target.closest("button") || target.closest("[data-app-row-menu]")) {
+        return;
+      }
+
+      e.preventDefault();
+
+      const startX = e.clientX;
+      const startY = e.clientY;
+      let moved = false;
+      let dragStarted = false;
+
+      suspendDocumentTextSelection();
+
+      function cleanup() {
+        document.removeEventListener("pointermove", onPointerMove);
+        document.removeEventListener("pointerup", onPointerUp);
+        document.removeEventListener("pointercancel", onPointerUp);
+        restoreDocumentTextSelection();
+      }
+
+      function onPointerMove(ev: PointerEvent) {
+        if (dragStarted) return;
+        if (
+          Math.abs(ev.clientX - startX) > SIDEBAR_APP_DRAG_THRESHOLD_PX
+          || Math.abs(ev.clientY - startY) > SIDEBAR_APP_DRAG_THRESHOLD_PX
+        ) {
+          moved = true;
+          dragStarted = true;
+          beginInstalledAppSidebarDrag(ev.clientX, ev.clientY, app);
+          cleanup();
+        }
+      }
+
+      function onPointerUp() {
+        if (!dragStarted && !moved && onInspectInstalledAppRef.current) {
+          onInspectInstalledAppRef.current(app);
+        }
+        cleanup();
+      }
+
+      document.addEventListener("pointermove", onPointerMove);
+      document.addEventListener("pointerup", onPointerUp);
+      document.addEventListener("pointercancel", onPointerUp);
+    },
+    [beginInstalledAppSidebarDrag, compact],
+  );
 
   const stopRowPointerForDrag = (e: React.SyntheticEvent) => {
     e.preventDefault();
@@ -401,11 +494,31 @@ export function AppManager({
             const layoutFlags = getAppLayoutAggregateFlags(app.name);
             const iconSrc = safeIconSrc(app.iconPath);
             return (
-              <div
+              <FlowTooltip
                 key={catalogKey}
+                label="Drag from anywhere on the row to place on layout. Click without dragging to inspect."
+              >
+              <div
                 className={`flow-card-quiet rounded-lg min-w-0 ${
                   appsLibraryView === "grid" ? "min-w-0" : ""
+                } ${
+                  compact && onInspectInstalledApp
+                    ? "cursor-grab active:cursor-grabbing outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-flow-accent-blue/35"
+                    : ""
                 }`}
+                role={compact && onInspectInstalledApp ? "button" : undefined}
+                tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
+                onPointerDown={(e) => handleAppRowPointerDown(e, app)}
+                onKeyDown={
+                  compact && onInspectInstalledApp
+                    ? (e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          onInspectInstalledApp(app);
+                        }
+                      }
+                    : undefined
+                }
               >
                 <div
                   className={`flex gap-3 ${rowPad} ${
@@ -414,18 +527,16 @@ export function AppManager({
                       : "items-center"
                   }`}
                 >
-                  <FlowTooltip label="Drag to add to monitor or minimized apps">
-                  <div 
-                    className="w-8 h-8 rounded-lg flex items-center justify-center flex-shrink-0 cursor-grab active:cursor-grabbing transition-transform duration-150 ease-out hover:scale-[1.03] select-none relative"
+                  <div
+                    className="pointer-events-none w-8 h-8 shrink-0 rounded-lg flex items-center justify-center transition-transform duration-150 ease-out select-none relative"
                     style={{ backgroundColor: `${app.color ?? '#888'}20` }}
-                    onMouseDown={(e) => handleMouseDown(e, app)}
-                    onClick={(e) => e.stopPropagation()}
+                    aria-hidden
                   >
                     {iconSrc ? (
                       <>
                         <img
                           src={iconSrc}
-                          alt={app.name}
+                          alt=""
                           className="w-6 h-6 object-contain rounded"
                           draggable={false}
                           onError={e => {
@@ -447,28 +558,10 @@ export function AppManager({
                       <Settings className="w-4 h-4 text-white opacity-90" aria-hidden />
                     )}
                   </div>
-                  </FlowTooltip>
                   <div
                     className={`min-w-0 ${
                       appsLibraryView === "grid" ? "w-full" : "flex-1"
-                    }${compact && onInspectInstalledApp ? " cursor-pointer rounded-md" : ""}`}
-                    onClick={
-                      compact && onInspectInstalledApp
-                        ? () => onInspectInstalledApp(app)
-                        : undefined
-                    }
-                    onKeyDown={
-                      compact && onInspectInstalledApp
-                        ? (e) => {
-                          if (e.key === "Enter" || e.key === " ") {
-                            e.preventDefault();
-                            onInspectInstalledApp(app);
-                          }
-                        }
-                        : undefined
-                    }
-                    role={compact && onInspectInstalledApp ? "button" : undefined}
-                    tabIndex={compact && onInspectInstalledApp ? 0 : undefined}
+                    }`}
                   >
                     <div
                       className={`flex items-center gap-2 ${
@@ -503,6 +596,7 @@ export function AppManager({
                     )}
                   </div>
                   <div
+                    data-app-row-menu
                     className={`flex shrink-0 items-center gap-0 ${
                       appsLibraryView === "grid"
                         ? "justify-center self-center"
@@ -544,59 +638,140 @@ export function AppManager({
                         <SidebarOverlayMenu
                           open
                           anchorEl={overflowMenuOpen.anchor}
-                          onClose={() => setOverflowMenuOpen(null)}
+                          onClose={() => {
+                            setAddToSubmenuOpen(null);
+                            setOverflowMenuOpen(null);
+                          }}
                         >
                           <div className="px-1 py-0.5">
-                            {monitorsSortedForMenu.length ? (
-                              monitorsSortedForMenu.map((m) => (
-                                <button
-                                  key={m.id}
-                                  type="button"
-                                  role="menuitem"
-                                  disabled={!currentProfile || !onAddApp}
-                                  className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                                  onClick={(e) => {
-                                    stopRowPointerForDrag(e);
-                                    handleAddInstalledToMonitor(app, m.id);
-                                  }}
-                                >
-                                  <span className="truncate">
-                                    {(m.name || m.id) +
-                                      (m.primary ? " (primary)" : "")}
-                                  </span>
-                                </button>
-                              ))
-                            ) : (
-                              <div className="px-3 py-2 text-[11px] text-flow-text-muted">
-                                No monitors in this profile.
-                              </div>
-                            )}
-                            <div
-                              className="my-0.5 h-px bg-flow-border/50"
-                              role="separator"
-                              aria-hidden
-                            />
-                            <FlowTooltip
-                              label={
-                                !currentProfile ? "Select a profile first" : undefined
-                              }
+                            <button
+                              type="button"
+                              role="menuitem"
+                              aria-haspopup="menu"
+                              aria-expanded={addToSubmenuOpen?.catalogKey === catalogKey}
+                              className="flow-menu-item w-full text-left text-xs"
+                              onClick={(e) => {
+                                stopRowPointerForDrag(e);
+                                setAddToSubmenuOpen({
+                                  catalogKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                });
+                              }}
+                              onMouseEnter={(e) => {
+                                if (addToSubmenuCloseTimerRef.current != null) {
+                                  window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                  addToSubmenuCloseTimerRef.current = null;
+                                }
+                                setAddToSubmenuOpen({
+                                  catalogKey,
+                                  anchor: e.currentTarget as HTMLElement,
+                                });
+                              }}
+                              onMouseLeave={() => {
+                                if (addToSubmenuCloseTimerRef.current != null) {
+                                  window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                }
+                                addToSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                                  setAddToSubmenuOpen(null);
+                                }, 120);
+                              }}
                             >
-                              <span className="flex w-full">
-                                <button
-                                  type="button"
-                                  role="menuitem"
-                                  disabled={!currentProfile || !onAddAppToMinimized}
-                                  className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                                  onClick={(e) => {
-                                    stopRowPointerForDrag(e);
-                                    handleAddInstalledToMinimized(app);
-                                  }}
-                                >
-                                  Minimized row
-                                </button>
+                              <span className="flex items-center justify-between gap-2">
+                                <span>Add to</span>
+                                <span aria-hidden className="text-flow-text-muted">
+                                  ▸
+                                </span>
                               </span>
-                            </FlowTooltip>
+                            </button>
                           </div>
+                          {addToSubmenuOpen?.catalogKey === catalogKey ? (
+                            <SidebarOverlayMenu
+                              open
+                              anchorEl={addToSubmenuOpen.anchor}
+                              onClose={() => setAddToSubmenuOpen(null)}
+                              unconstrainedHeight
+                              placement="right-start"
+                            >
+                              <div
+                                className="px-1 py-0.5"
+                                onMouseEnter={() => {
+                                  if (addToSubmenuCloseTimerRef.current != null) {
+                                    window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                    addToSubmenuCloseTimerRef.current = null;
+                                  }
+                                }}
+                                onMouseLeave={() => {
+                                  if (addToSubmenuCloseTimerRef.current != null) {
+                                    window.clearTimeout(addToSubmenuCloseTimerRef.current);
+                                  }
+                                  addToSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                                    setAddToSubmenuOpen(null);
+                                  }, 120);
+                                }}
+                              >
+                                {monitorsSortedForMenu.length ? (
+                                  monitorsSortedForMenu.map((m) => (
+                                    <button
+                                      key={m.id}
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={!currentProfile || !onAddApp}
+                                      className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                      onClick={(e) => {
+                                        stopRowPointerForDrag(e);
+                                        handleAddInstalledToMonitor(app, m.id);
+                                        setAddToSubmenuOpen(null);
+                                        setOverflowMenuOpen(null);
+                                      }}
+                                    >
+                                      <span className="flex min-w-0 flex-col">
+                                        <span className="truncate">
+                                          {monitorDisplayLabelMap.get(m.id)?.headline ??
+                                            (m.name || m.id)}
+                                        </span>
+                                        <span className="truncate text-[10px] leading-snug text-flow-text-muted">
+                                          {monitorDisplayLabelMap.get(m.id)?.detail ??
+                                            m.name ??
+                                            m.id}
+                                        </span>
+                                      </span>
+                                    </button>
+                                  ))
+                                ) : (
+                                  <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                                    No monitors in this profile.
+                                  </div>
+                                )}
+                                <div
+                                  className="my-0.5 h-px bg-flow-border/50"
+                                  role="separator"
+                                  aria-hidden
+                                />
+                                <FlowTooltip
+                                  label={
+                                    !currentProfile ? "Select a profile first" : undefined
+                                  }
+                                >
+                                  <span className="flex w-full">
+                                    <button
+                                      type="button"
+                                      role="menuitem"
+                                      disabled={!currentProfile || !onAddAppToMinimized}
+                                      className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                                      onClick={(e) => {
+                                        stopRowPointerForDrag(e);
+                                        handleAddInstalledToMinimized(app);
+                                        setAddToSubmenuOpen(null);
+                                        setOverflowMenuOpen(null);
+                                      }}
+                                    >
+                                      Minimized row
+                                    </button>
+                                  </span>
+                                </FlowTooltip>
+                              </div>
+                            </SidebarOverlayMenu>
+                          ) : null}
                           <div
                             className="my-1 h-px bg-flow-border/60"
                             role="separator"
@@ -611,6 +786,7 @@ export function AppManager({
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
                                   includeInCatalog(catalogKey);
+                                  setAddToSubmenuOpen(null);
                                   setOverflowMenuOpen(null);
                                 }}
                               >
@@ -620,10 +796,11 @@ export function AppManager({
                               <button
                                 type="button"
                                 role="menuitem"
-                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                className="flow-menu-item w-full text-left text-xs text-flow-accent-red hover:text-flow-accent-red"
                                 onClick={(e) => {
                                   stopRowPointerForDrag(e);
                                   excludeFromCatalog(catalogKey);
+                                  setAddToSubmenuOpen(null);
                                   setOverflowMenuOpen(null);
                                 }}
                               >
@@ -637,6 +814,7 @@ export function AppManager({
                   </div>
                 </div>
               </div>
+              </FlowTooltip>
             );
           })}
           </div>

@@ -267,8 +267,7 @@ export function AppFileWindow({
   const finalizeDocumentPercentDragRef = useRef(finalizeDocumentPercentDrag);
   finalizeDocumentPercentDragRef.current = finalizeDocumentPercentDrag;
 
-  // Timer and state for click vs drag detection
-  const dragTimerRef = useRef<NodeJS.Timeout | null>(null);
+  // Click vs drag detection (pointer must move past threshold before drag starts)
   const mouseStateRef = useRef({
     isMouseDown: false,
     startX: 0,
@@ -728,15 +727,7 @@ export function AppFileWindow({
       hasMoved: false,
       dragInitiated: false
     };
-    
-    // Set up timer for drag initiation (500ms)
-    dragTimerRef.current = setTimeout(() => {
-      if (mouseStateRef.current.isMouseDown && !mouseStateRef.current.dragInitiated) {
-        console.log('⏰ DRAG TIMER EXPIRED - Initiating drag');
-        initiateDrag(e.clientX, e.clientY);
-      }
-    }, 500);
-    
+
     // Add global mouse event listeners for tracking
     document.addEventListener('mousemove', handleMouseMoveForClickDetection);
     document.addEventListener('mouseup', handleMouseUpForClickDetection);
@@ -762,11 +753,6 @@ export function AppFileWindow({
     
     console.log('🖱️ MOUSE UP - Processing click/drag result');
     
-    if (dragTimerRef.current) {
-      clearTimeout(dragTimerRef.current);
-      dragTimerRef.current = null;
-    }
-
     const hadDragInitiated = mouseStateRef.current.dragInitiated;
 
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
@@ -942,9 +928,6 @@ export function AppFileWindow({
   // Cleanup timers on unmount
   useEffect(() => {
     return () => {
-      if (dragTimerRef.current) {
-        clearTimeout(dragTimerRef.current);
-      }
       document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
       document.removeEventListener('mouseup', handleMouseUpForClickDetection);
       finalizeDocumentPercentDragRef.current();

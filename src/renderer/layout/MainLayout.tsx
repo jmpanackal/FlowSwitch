@@ -21,6 +21,7 @@ import {
 import { ProfileCard } from "./components/ProfileCard";
 import { FlowTooltip } from "./components/ui/tooltip";
 import { MonitorLayout } from "./components/MonitorLayout";
+import { LaunchCenterInspector } from "./components/LaunchCenterInspector";
 import {
   FLOW_SHELL_INSPECTOR_MARGIN_CLASS,
   FLOW_SHELL_INSPECTOR_WIDTH_CLASS,
@@ -66,6 +67,8 @@ import {
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
 import type { InstalledAppCatalogKeySource } from "../utils/installedAppCatalogKey";
+import type { LaunchProgressSnapshot } from "./hooks/useLaunchFeedback";
+import { progressFromLaunchStatus } from "./utils/launchProgressFromStatus";
 import {
   readInstalledAppCategoryOverrides,
   persistInstalledAppCategoryOverrides,
@@ -115,8 +118,6 @@ import {
   uniqueProfileDisplayName,
   validateMemoryCapture,
 } from "./utils/buildNewProfile";
-
-const GENERIC_LAUNCH_PROFILE_MESSAGE = "Launching profile...";
 
 /**
  * Application shell: profile grid, monitor layout editor, app/content managers, and the custom
@@ -176,6 +177,60 @@ export default function App() {
   const [leftSidebarOpen, setLeftSidebarOpen] = useState(true);
   const [rightSidebarOpen, setRightSidebarOpen] =
     useState(false);
+  const [inspectorMode, setInspectorMode] = useState<"inspect" | "launch">(
+    "inspect",
+  );
+  const inspectorModeRef = useRef(inspectorMode);
+  inspectorModeRef.current = inspectorMode;
+
+  const [lastLaunchProgress, setLastLaunchProgress] =
+    useState<LaunchProgressSnapshot | null>(null);
+  const [lastLaunchDetailMessage, setLastLaunchDetailMessage] = useState<string | null>(
+    null,
+  );
+  const [lastLaunchRunId, setLastLaunchRunId] = useState<string | null>(null);
+  const [lastLaunchProfileId, setLastLaunchProfileId] = useState<string | null>(
+    null,
+  );
+  const [launchCancelPending, setLaunchCancelPending] = useState(false);
+  const expectedLaunchRunIdRef = useRef<string | null>(null);
+  const expectedLaunchProfileIdRef = useRef<string | null>(null);
+
+  const launchRunProgressRunId = lastLaunchProgress?.runId?.trim() ?? "";
+  const launchRunIdsMismatched =
+    Boolean(lastLaunchRunId)
+    && Boolean(launchRunProgressRunId)
+    && launchRunProgressRunId !== String(lastLaunchRunId || "").trim();
+  const launchProgressRunState = String(lastLaunchProgress?.runState || "").trim().toLowerCase();
+  const launchProgressNonTerminal =
+    launchProgressRunState === "in-progress"
+    || launchProgressRunState === "awaiting-confirmations";
+  /** Keep polling after a mistaken "finished" IPC so awaiting-confirmations UI still updates. */
+  const shouldPollLaunchStatus = Boolean(selectedProfile)
+    && Boolean(window.electron?.getLaunchProfileStatus)
+    && (
+      isLaunching
+      || (
+        String(lastLaunchProfileId || "") === String(selectedProfile || "")
+        && Boolean(lastLaunchRunId)
+        && (launchRunIdsMismatched || launchProgressNonTerminal)
+      )
+    );
+  const launchCancelEnabled = Boolean(
+    !launchCancelPending
+    && window.electron?.cancelProfileLaunch
+    && lastLaunchProfileId
+    && lastLaunchRunId
+    && (
+      isLaunching
+      || (
+        lastLaunchProgress
+        && (!launchRunProgressRunId
+          || launchRunProgressRunId === String(lastLaunchRunId || "").trim())
+        && launchProgressNonTerminal
+      )
+    ),
+  );
   const [librarySelection, setLibrarySelection] =
     useState<LibrarySelection | null>(null);
   const [openLibraryFolderId, setOpenLibraryFolderId] = useState<
@@ -425,22 +480,27 @@ export default function App() {
     };
   }, [currentProfile, profileLaunchSummaryParts]);
 
+  const profileLaunchBreakdownLines = useMemo(() => {
+    if (!currentProfile) return null;
+    const p = currentProfile;
+    const lines: string[] = [];
+    const lead = profileHeaderMeta?.lead?.trim();
+    if (lead) lines.push(lead);
+    lines.push(`Apps: ${p.appCount ?? 0}`);
+    if ((p.tabCount ?? 0) > 0) {
+      lines.push(`Tabs: ${p.tabCount}`);
+    }
+    lines.push(`Estimated startup: ~${p.estimatedStartupTime ?? 0}s`);
+    if (p.monitors?.length) {
+      lines.push(`Monitors: ${p.monitors.length}`);
+    }
+    return lines;
+  }, [currentProfile, profileHeaderMeta?.lead]);
+
   const profileForSettings =
     profiles.find((p) => p.id === profileSettingsIntent?.profileId) || null;
 
-  const showLaunchFeedbackStrip =
-    launchFeedback.status !== "idle"
-    && !(
-      launchFeedback.status === "in-progress"
-      && launchFeedback.message === GENERIC_LAUNCH_PROFILE_MESSAGE
-    );
-
-  const launchControlShowCancel = Boolean(
-    (isLaunching
-      || launchFeedback.status === "in-progress"
-      || launchFeedback.status === "warning")
-    && window.electron?.cancelProfileLaunch,
-  );
+  // Launch feedback is surfaced in the right-side Launch inspector.
 
   const currentProfileRef = useRef<FlowProfile | null>(null);
   currentProfileRef.current = currentProfile;
@@ -499,6 +559,7 @@ export default function App() {
       setLaunchFeedback({
         status: "idle",
         message: "",
+        progress: null,
       });
       launchFeedbackTimeoutRef.current = null;
     }, 7000);
@@ -532,6 +593,7 @@ export default function App() {
       setLaunchFeedback({
         status: "error",
         message: "Layout capture is not available in this build.",
+        progress: null,
       });
       scheduleLaunchFeedbackClear();
       return;
@@ -545,6 +607,7 @@ export default function App() {
         setLaunchFeedback({
           status: "error",
           message: "Failed to capture running app layout.",
+          progress: null,
         });
         scheduleLaunchFeedbackClear();
         return;
@@ -554,6 +617,7 @@ export default function App() {
         setLaunchFeedback({
           status: "error",
           message: validationError,
+          progress: null,
         });
         scheduleLaunchFeedbackClear();
         return;
@@ -682,13 +746,29 @@ export default function App() {
     [selectedProfile],
   );
 
-  const { handleLaunch, handleCancelLaunch } = useProfileLaunch({
+  const { handleLaunch, abortPendingLaunch } = useProfileLaunch({
     profiles,
     buildSavePayload,
     selectedProfileId: selectedProfile,
     setIsLaunching,
     setLaunchFeedback,
     launchFeedbackTimeoutRef,
+    onLaunchPreparing: (profileId) => {
+      expectedLaunchProfileIdRef.current = profileId;
+      expectedLaunchRunIdRef.current = null;
+      setLastLaunchProfileId(profileId);
+      setLastLaunchRunId(null);
+      setLastLaunchProgress(null);
+      setLastLaunchDetailMessage(null);
+    },
+    onLaunchStarted: (profileId, runId) => {
+      expectedLaunchProfileIdRef.current = profileId;
+      expectedLaunchRunIdRef.current = runId;
+      setLastLaunchProfileId(profileId);
+      setLastLaunchRunId(runId);
+      setLastLaunchProgress(null);
+      setLastLaunchDetailMessage(null);
+    },
     onLaunchCompletedDuration: (profileId, durationSeconds) => {
       updateProfile(profileId, {
         estimatedStartupTime: durationSeconds,
@@ -1386,6 +1466,177 @@ export default function App() {
     setRightSidebarOpen(false);
   }, []);
 
+  useEffect(() => {
+    if (!isLaunching && !launchProgressNonTerminal) return;
+
+    // Ensure launch status is visible during a run (including awaiting confirmations).
+    setRightSidebarOpen(true);
+    if (inspectorModeRef.current !== "launch") {
+      setInspectorMode("launch");
+    }
+  }, [isLaunching, launchProgressNonTerminal]);
+
+  useEffect(() => {
+    if (!shouldPollLaunchStatus) return;
+
+    let cancelled = false;
+    let interval: number | null = null;
+
+    const tick = async () => {
+      if (cancelled) return;
+      try {
+        const res = await window.electron.getLaunchProfileStatus(selectedProfile);
+        if (cancelled) return;
+        const status = res?.status;
+        if (!res?.ok || !status) return;
+
+        const runId = String(status.runId || "").trim();
+        const expectedProfileId = String(expectedLaunchProfileIdRef.current || "").trim();
+        const expectedRunId = String(expectedLaunchRunIdRef.current || "").trim();
+        if (
+          expectedProfileId
+          && expectedProfileId === selectedProfile
+          && expectedRunId
+          && runId
+          && runId !== expectedRunId
+        ) {
+          // Ignore stale statuses from the previous run during a new launch.
+          return;
+        }
+        if (runId) {
+          expectedLaunchProfileIdRef.current = selectedProfile;
+          expectedLaunchRunIdRef.current = runId;
+          setLastLaunchRunId(runId);
+          setLastLaunchProfileId(selectedProfile);
+        }
+
+        const progressSnap = progressFromLaunchStatus(status);
+        setLastLaunchProgress(progressSnap);
+
+        const st = String(status.state || "").toLowerCase();
+        if (st === "awaiting-confirmations") {
+          const unresolved = Number(status.unresolvedPendingConfirmationCount || 0);
+          if (unresolved > 0) {
+            const pendingNames = Array.isArray(status.pendingConfirmations)
+              ? status.pendingConfirmations
+                  .filter(
+                    (item) =>
+                      String(item?.status || "waiting").toLowerCase() !== "resolved",
+                  )
+                  .map((item) => String(item?.name || "").trim())
+                  .filter(Boolean)
+                  .slice(0, 3)
+              : [];
+            const namesList =
+              pendingNames.length > 0
+                ? ` (${pendingNames.join(", ")}${
+                    unresolved > pendingNames.length ? ", ..." : ""
+                  })`
+                : "";
+            setLastLaunchDetailMessage(
+              `Waiting for ${unresolved} confirmation${unresolved === 1 ? "" : "s"}${namesList}.`,
+            );
+          }
+        } else {
+          setLastLaunchDetailMessage(null);
+        }
+      } catch {
+        // ignore
+      }
+    };
+
+    void tick();
+    interval = window.setInterval(() => void tick(), 1100);
+    return () => {
+      cancelled = true;
+      if (interval != null) window.clearInterval(interval);
+    };
+  }, [shouldPollLaunchStatus, selectedProfile]);
+
+  useEffect(() => {
+    const sub = window.electron?.subscribeProfileLaunchStarted?.((payload) => {
+      const pid = String(payload?.profileId || "").trim();
+      const rid = String(payload?.runId || "").trim();
+      if (!pid || !rid) return;
+      expectedLaunchProfileIdRef.current = pid;
+      expectedLaunchRunIdRef.current = rid;
+      setLastLaunchProfileId(pid);
+      setLastLaunchRunId(rid);
+    });
+    return () => {
+      sub?.();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (isLaunching) return;
+    if (!lastLaunchProfileId) return;
+    if (!lastLaunchRunId) return;
+    if (!window.electron?.getLaunchProfileStatus) return;
+
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await window.electron.getLaunchProfileStatus(lastLaunchProfileId);
+        if (cancelled) return;
+        const status = res?.status;
+        if (!res?.ok || !status) return;
+        if (String(status.runId || "").trim() !== String(lastLaunchRunId || "").trim()) return;
+        setLastLaunchProgress(progressFromLaunchStatus(status));
+      } catch {
+        // ignore
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [isLaunching, lastLaunchProfileId, lastLaunchRunId]);
+
+  const handleCancelLatestLaunch = useCallback(async () => {
+    if (
+      lastLaunchProfileId
+      && lastLaunchRunId
+      && window.electron?.cancelProfileLaunch
+    ) {
+      setLaunchCancelPending(true);
+      try {
+        await window.electron.cancelProfileLaunch(lastLaunchProfileId, lastLaunchRunId);
+      } catch {
+        setLaunchCancelPending(false);
+      }
+      return;
+    }
+    abortPendingLaunch();
+  }, [abortPendingLaunch, lastLaunchProfileId, lastLaunchRunId]);
+
+  /** Keep "Cancelling…" until the run is actually idle (IPC returns before main finishes winding down). */
+  useEffect(() => {
+    if (!launchCancelPending) return;
+    const progressRunId = lastLaunchProgress?.runId?.trim() ?? "";
+    const progressMatchesRun =
+      !progressRunId
+      || progressRunId === String(lastLaunchRunId || "").trim();
+    const progressState = String(lastLaunchProgress?.runState || "").trim().toLowerCase();
+    const progressNonTerminal =
+      progressState === "in-progress"
+      || progressState === "awaiting-confirmations";
+    const stillBusy =
+      isLaunching
+      || Boolean(
+        lastLaunchProgress
+        && progressMatchesRun
+        && progressNonTerminal,
+      );
+    if (!stillBusy) {
+      setLaunchCancelPending(false);
+    }
+  }, [
+    isLaunching,
+    launchCancelPending,
+    lastLaunchProgress,
+    lastLaunchRunId,
+  ]);
+
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
     (profileId: string) => {
@@ -1522,7 +1773,11 @@ export default function App() {
               : "w-0 min-w-0"
           }`}
         >
-        <div className="flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden">
+        <div
+          className={`flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden transition-opacity duration-200 ${
+            isEditMode ? "opacity-[0.78] saturate-[0.92]" : ""
+          }`}
+        >
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
               <div className="flow-library-tablist-rail">
@@ -1583,7 +1838,7 @@ export default function App() {
           </div>
 
           {/* List region: three panels on one row; slide via translate3d (no width animation). */}
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-flow-border/30 bg-flow-bg-primary/15 pt-1">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden border-t border-flow-border/25 bg-flow-bg-primary/[0.06] pt-1">
             <div
               className="flow-tab-slide-track flex h-full min-h-0 w-[300%] flex-shrink-0"
               style={{
@@ -1991,7 +2246,7 @@ export default function App() {
                   </div>
                 </div>
 
-                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:ml-auto sm:flex-row sm:items-center sm:justify-end sm:gap-2.5">
+                <div className="flex shrink-0 flex-col items-stretch gap-2 sm:ml-auto sm:items-end sm:gap-2.5">
                   <div className="flex flex-wrap items-center justify-end gap-2">
                     <ProfileHeaderSettingsButton
                       disabled={isEditMode}
@@ -2005,40 +2260,11 @@ export default function App() {
                       isEditMode={isEditMode}
                       isLaunching={isLaunching}
                       onLaunch={handleLaunch}
-                      onCancel={handleCancelLaunch}
-                      showCancel={launchControlShowCancel}
                       hotkey={currentProfile.hotkey?.trim() || null}
+                      primaryLabel={`Launch ${currentProfile.name}`}
+                      breakdownLines={profileLaunchBreakdownLines}
                     />
                   </div>
-                  {showLaunchFeedbackStrip ? (
-                    <div
-                      className={`inline-flex max-w-full items-center gap-2 rounded-md border px-3 py-1.5 text-xs ${
-                        launchFeedback.status === "success"
-                          ? "border-emerald-400/40 bg-emerald-500/10 text-emerald-300"
-                          : launchFeedback.status === "warning"
-                            ? "border-amber-400/40 bg-amber-500/10 text-amber-300"
-                            : launchFeedback.status === "error"
-                              ? "border-rose-400/40 bg-rose-500/10 text-rose-300"
-                              : "border-flow-border-accent bg-flow-surface-elevated text-flow-text-secondary"
-                      }`}
-                    >
-                      {launchFeedback.status === "success" ? (
-                        <Check className="h-3.5 w-3.5 shrink-0" />
-                      ) : launchFeedback.status === "warning" ? (
-                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
-                      ) : launchFeedback.status === "error" ? (
-                        <X className="h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <div
-                          className="h-3.5 w-3.5 shrink-0 animate-spin rounded-full border border-current border-t-transparent"
-                          aria-hidden
-                        />
-                      )}
-                      <span className="min-w-0 break-words text-left">
-                        {launchFeedback.message}
-                      </span>
-                    </div>
-                  ) : null}
                 </div>
               </div>
             </header>
@@ -2103,9 +2329,7 @@ export default function App() {
                   minimizedFiles={[]} // REMOVED: No more standalone files
                   browserTabs={currentProfile.browserTabs}
                   isEditMode={isEditMode}
-                  onToggleLayoutEdit={() =>
-                    setIsEditMode((prev) => !prev)
-                  }
+                  onSetLayoutEditMode={setIsEditMode}
                   layoutToolbarConnected
                   dragState={dragState}
                   selectedApp={selectedApp}
@@ -2269,24 +2493,100 @@ export default function App() {
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
           <div
-            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30`}
+            className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30 transition-opacity duration-200 ${
+              isEditMode ? "opacity-[0.82] saturate-[0.94]" : ""
+            }`}
           >
-            {/* Sidebar Header - Close button only */}
-            <div className="absolute top-3 right-3 z-10">
+            {/* Sidebar Header */}
+            <div className="flex items-center justify-between gap-2 border-b border-flow-border px-3 py-2">
+              <div
+                role="tablist"
+                aria-label="Inspector mode"
+                className="inline-flex max-w-full shrink-0 flex-nowrap items-stretch rounded-full border border-white/[0.12] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={inspectorMode === "inspect"}
+                  onClick={() => setInspectorMode("inspect")}
+                  className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
+                    inspectorMode === "inspect"
+                      ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
+                      : "text-flow-text-muted hover:bg-white/[0.06] hover:text-flow-text-secondary"
+                  }`}
+                >
+                  Inspect
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  aria-selected={inspectorMode === "launch"}
+                  onClick={() => setInspectorMode("launch")}
+                  className={`relative inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
+                    inspectorMode === "launch"
+                      ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
+                      : "text-flow-text-muted hover:bg-white/[0.06] hover:text-flow-text-secondary"
+                  }`}
+                >
+                  Launch
+                  {isLaunching || launchFeedback.status !== "idle" || lastLaunchProgress ? (
+                    <span
+                      className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-flow-accent-blue"
+                      aria-hidden
+                    />
+                  ) : null}
+                </button>
+              </div>
+
               <button
                 type="button"
                 onClick={handleCloseSidebar}
-                className="inline-flex items-center justify-center p-1.5 text-flow-text-secondary hover:bg-flow-surface hover:text-flow-text-primary rounded-lg transition-[color,background-color,transform] duration-200 ease-out active:scale-95 motion-reduce:active:scale-100"
+                className="inline-flex items-center justify-center rounded-lg p-1.5 text-flow-text-secondary transition-[color,background-color,transform] duration-200 ease-out hover:bg-flow-surface hover:text-flow-text-primary active:scale-95 motion-reduce:active:scale-100"
+                aria-label="Close sidebar"
               >
-                <X className="w-4 h-4" />
+                <X className="h-4 w-4" />
               </button>
             </div>
 
             {/* Sidebar Content - Now contains app header */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
-              {librarySelection
-              && contentInspectorSelection
-              && currentProfile ? (
+              {inspectorMode === "launch" ? (
+                currentProfile ? (
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-3">
+                    <LaunchCenterInspector
+                      profile={currentProfile}
+                      progress={lastLaunchProgress}
+                      summaryMessage={
+                        (lastLaunchDetailMessage
+                          || (launchFeedback.status !== "idle" && launchFeedback.status !== "in-progress"
+                            ? launchFeedback.message
+                            : "")
+                          || "")
+                          .trim() || undefined
+                      }
+                      summaryTone={
+                        lastLaunchDetailMessage?.trim()
+                          ? "warning"
+                          : launchFeedback.status === "success"
+                            ? "success"
+                            : launchFeedback.status === "warning"
+                              ? "warning"
+                              : launchFeedback.status === "error"
+                                ? "error"
+                                : undefined
+                      }
+                      isLaunching={isLaunching}
+                      onCancel={handleCancelLatestLaunch}
+                      cancelDisabled={!launchCancelEnabled}
+                      cancelPending={launchCancelPending}
+                    />
+                  </div>
+                ) : (
+                  <div className="flex min-h-0 min-w-0 flex-1 items-center justify-center px-4 text-sm text-flow-text-muted">
+                    Select a profile to view launch status.
+                  </div>
+                )
+              ) : librarySelection && contentInspectorSelection && currentProfile ? (
                 <SelectedContentDetails
                   selection={contentInspectorSelection}
                   libraryItems={contentLibrary.items as ContentItem[]}
@@ -2304,9 +2604,7 @@ export default function App() {
                   onDeleteFromLibrary={() => {
                     if (!contentInspectorSelection) return;
                     handleDeleteLibraryEntry(
-                      contentInspectorSelection.kind === "item"
-                        ? "item"
-                        : "folder",
+                      contentInspectorSelection.kind === "item" ? "item" : "folder",
                       contentInspectorSelection.kind === "item"
                         ? contentInspectorSelection.item.id
                         : contentInspectorSelection.folder.id,
@@ -2321,25 +2619,16 @@ export default function App() {
                   selectedApp={selectedApp}
                   onClose={handleCloseSidebar}
                   onUpdateApp={handleSelectedAppUpdate}
-                  onUpdateAssociatedFiles={
-                    handleSelectedAppAssociatedFiles
-                  }
+                  onUpdateAssociatedFiles={handleSelectedAppAssociatedFiles}
                   onDeleteApp={handleSelectedAppDelete}
                   onMoveToMonitor={handleSelectedAppMoveToMonitor}
-                  onMoveToMinimized={
-                    handleSelectedAppMoveToMinimized
-                  }
+                  onMoveToMinimized={handleSelectedAppMoveToMinimized}
                   monitors={currentProfile?.monitors || []}
                   browserTabs={currentProfile?.browserTabs || []}
                   onUpdateBrowserTabs={(tabs) =>
-                    updateBrowserTabs(
-                      currentProfile?.id || "",
-                      tabs,
-                    )
+                    updateBrowserTabs(currentProfile?.id || "", tabs)
                   }
-                  onAddBrowserTab={(tab) =>
-                    addBrowserTab(currentProfile?.id || "", tab)
-                  }
+                  onAddBrowserTab={(tab) => addBrowserTab(currentProfile?.id || "", tab)}
                   onAddSidebarAppToMonitor={
                     selectedApp.source === "sidebar"
                       ? handleSidebarInstalledAppPlaceOnMonitor

@@ -417,7 +417,7 @@ export function AddAppModal({
                               <button
                                 type="button"
                                 role="menuitem"
-                                className="flow-menu-item w-full text-left text-xs text-flow-text-muted hover:text-flow-accent-red"
+                                className="flow-menu-item w-full text-left text-xs text-flow-accent-red hover:text-flow-accent-red"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   excludeFromCatalog(rowKey);

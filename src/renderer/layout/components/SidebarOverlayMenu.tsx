@@ -9,6 +9,8 @@ import { createPortal } from "react-dom";
 
 const MENU_MAX_H_PX = 224; // matches max-h-56
 
+type SidebarOverlayMenuPlacement = "align-end" | "right-start";
+
 type SidebarOverlayMenuProps = {
   open: boolean;
   anchorEl: HTMLElement | null;
@@ -19,6 +21,12 @@ type SidebarOverlayMenuProps = {
    * Library filter/sort popovers are short; this shows full content without a scrollbar.
    */
   unconstrainedHeight?: boolean;
+  /**
+   * How to position relative to `anchorEl`.
+   * - `align-end`: default dropdown, aligns right edge to anchor right edge.
+   * - `right-start`: cascading submenu, prefers opening to the right of the anchor.
+   */
+  placement?: SidebarOverlayMenuPlacement;
 };
 
 /**
@@ -31,6 +39,7 @@ export function SidebarOverlayMenu({
   onClose,
   children,
   unconstrainedHeight = false,
+  placement = "align-end",
 }: SidebarOverlayMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null);
   const [layoutTick, setLayoutTick] = useState(0);
@@ -62,9 +71,22 @@ export function SidebarOverlayMenu({
     const mw = Math.min(menu.offsetWidth, vw - margin * 2);
 
     let left = r.right - mw;
-    left = Math.max(margin, Math.min(left, vw - mw - margin));
-
     let top = r.bottom + margin;
+
+    if (placement === "right-start") {
+      // Prefer opening to the right of the anchor (cascading submenu).
+      const preferredLeft = r.right + margin;
+      const fitsRight = preferredLeft + mw <= vw - margin;
+      if (fitsRight) {
+        left = preferredLeft;
+      } else {
+        // Fallback: open to the left of the anchor.
+        left = r.left - margin - mw;
+      }
+      top = r.top - 4;
+    }
+
+    left = Math.max(margin, Math.min(left, vw - mw - margin));
 
     let h = menu.offsetHeight;
     if (top + h > vh - margin) {
@@ -88,6 +110,7 @@ export function SidebarOverlayMenu({
         }
       }
     }
+    top = Math.max(margin, top);
 
     menu.style.position = "fixed";
     menu.style.top = `${top}px`;
@@ -95,7 +118,7 @@ export function SidebarOverlayMenu({
     menu.style.right = "auto";
     menu.style.bottom = "auto";
     menu.style.zIndex = "30000";
-  }, [open, anchorEl, layoutTick, unconstrainedHeight]);
+  }, [open, anchorEl, layoutTick, unconstrainedHeight, placement]);
 
   useEffect(() => {
     if (!open) return;
