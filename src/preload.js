@@ -24,7 +24,6 @@ contextBridge.exposeInMainWorld('electron', {
   cancelProfileLaunch: (profileId, runId) => (
     ipcRenderer.invoke('cancel-profile-launch', { profileId, runId })
   ),
-  closeLaunchProgressWindow: () => ipcRenderer.invoke('close-launch-progress-window'),
   getLaunchProfileStatus: (profileId) => ipcRenderer.invoke('launch-profile-status', profileId),
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)

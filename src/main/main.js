@@ -998,8 +998,11 @@ const notifyMainWindowLaunchFinishedFromStore = (profileId, runId) => {
       outcome = 'success';
       message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
     } else {
-      outcome = 'success';
-      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+      // Defensive: do not report success for in-progress / stuck confirmation states.
+      outcome = 'error';
+      message = summaryText
+        ? `Launch finished in an unexpected state (${summaryText}).`
+        : 'Launch finished in an unexpected state.';
     }
   }
 
@@ -1032,69 +1035,10 @@ const notifyMainWindowLaunchFinishedWithError = (profileId, runId) => {
 };
 
 const openLaunchProgressWindow = (profileId, runId) => {
-  closeLaunchProgressWindow();
-  launchProgressSurfaceStartedAtMs = Date.now();
-  const icon = getWindowIconPath();
-  const win = new BrowserWindow({
-    width: 460,
-    height: 560,
-    minWidth: 380,
-    minHeight: 440,
-    center: true,
-    show: false,
-    frame: false,
-    alwaysOnTop: true,
-    icon,
-    title: 'Launching…',
-    autoHideMenuBar: true,
-    backgroundColor: '#0b1020',
-    webPreferences: {
-      preload: path.join(__dirname, '../preload.js'),
-      contextIsolation: true,
-      sandbox: true,
-      nodeIntegration: false,
-    },
-  });
-  win.__flowLaunchMeta = { profileId, runId };
-  win.webContents.on('will-navigate', (event, url) => {
-    if (isTrustedRendererUrl(url)) return;
-    event.preventDefault();
-    console.warn('[electron] blocked launch overlay navigation:', url);
-  });
-  win.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  win.on('closed', () => {
-    clearLaunchProgressTerminalWait();
-    if (launchProgressWindow === win) launchProgressWindow = null;
-  });
-  win.on('close', () => {
-    if (launchProgressProgrammaticClose) return;
-    const meta = win.__flowLaunchMeta;
-    if (meta && launchStatusStore.isActiveRun(meta.profileId, meta.runId)) {
-      try {
-        launchStatusStore.cancelRun(meta.profileId, meta.runId);
-      } catch {
-        // ignore
-      }
-      try {
-        clearMainWindowLaunchTaskbarProgress();
-      } catch {
-        // ignore
-      }
-    }
-  });
-  launchProgressWindow = win;
-  const url = buildLaunchProgressPageUrl(profileId, runId);
-  void win.loadURL(url);
-  win.once('ready-to-show', () => {
-    if (win.isDestroyed()) return;
-    win.show();
-    try {
-      win.setAlwaysOnTop(true);
-      win.moveTop();
-    } catch {
-      // ignore
-    }
-  });
+  // Launch progress is shown in-app (right inspector Launch tab).
+  // Do not spawn any additional windows during launch.
+  void profileId;
+  void runId;
 };
 
 const launchProfileById = (profileId, options = {}) => {
@@ -1137,7 +1081,8 @@ const launchProfileById = (profileId, options = {}) => {
       surfaceRunId = payload.runId;
       applyLaunchVisibilityBegin();
       profileAccessShell?.onProfileLaunchStarted(payload.profileId);
-      openLaunchProgressWindow(surfaceProfileId, surfaceRunId);
+      // Progress is shown in-app (right inspector Launch tab). Keep the overlay window
+      // available for future "pop out" affordances, but do not open it automatically.
       notifyMainWindowLaunchStarted(surfaceProfileId, surfaceRunId);
       if (typeof userOnStarted === 'function') userOnStarted(payload);
     },
@@ -1323,21 +1268,6 @@ if (shouldBootstrapElectronMain) {
   if (process.platform === 'win32') {
     scheduleInstalledAppsCatalogWarmup();
   }
-
-  // Dedicated handler so reveal-in-folder always registers with main ipcMain (avoids ordering issues).
-  ipcMain.handle('close-launch-progress-window', async (event) => {
-    if (!isTrustedIpcSender(event)) {
-      throw new Error('Untrusted renderer origin');
-    }
-    if (!launchProgressWindow || launchProgressWindow.isDestroyed()) {
-      return { ok: false };
-    }
-    if (event.sender !== launchProgressWindow.webContents) {
-      return { ok: false };
-    }
-    launchProgressWindow.close();
-    return { ok: true };
-  });
 
   ipcMain.handle('show-item-in-folder', async (event, rawPath) => {
     if (!isTrustedIpcSender(event)) {

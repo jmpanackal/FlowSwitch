@@ -1,9 +1,9 @@
 import type { Profile } from './profile';
 import type {
-  FlowProfile,
   ProfileListResult,
   ProfileSavePayload,
 } from './flow-profile';
+import type { LaunchAction } from '../renderer/layout/hooks/useLaunchFeedback';
 
 export {};
 
@@ -65,7 +65,6 @@ declare global {
         profileId: string,
         runId: string,
       ) => Promise<{ ok: boolean; error?: string; reason?: string }>;
-      closeLaunchProgressWindow?: () => Promise<{ ok: boolean }>;
       getLaunchProfileStatus: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;
@@ -81,8 +80,13 @@ declare global {
           unresolvedPendingConfirmationCount: number;
           requestedAppCount: number;
           requestedBrowserTabCount?: number;
+          startedAt?: number | null;
           activePhase?: "launching" | "placing" | "tabs" | null;
           activeAppName?: string | null;
+          activeActionId?: string | null;
+          actionsTotal?: number | null;
+          actionsCompleted?: number | null;
+          actions?: LaunchAction[] | null;
           appLaunchProgress?: Array<{
             key: string;
             name: string;
@@ -90,11 +94,14 @@ declare global {
               | "pending"
               | "launching"
               | "placing"
+              | "verifying"
               | "awaiting-confirmation"
               | "done"
               | "failed"
               | "skipped";
             iconDataUrl?: string | null;
+            location?: string;
+            outcomes?: string[];
           }>;
           pendingConfirmations: Array<{
             name: string;

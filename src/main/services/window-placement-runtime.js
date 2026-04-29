@@ -260,8 +260,16 @@ const createWindowPlacementRuntime = (deps) => {
       || app?._launchFromMinimizedTray === true
     );
     // Minimize intent wins over maximize/profile defaults.
+    // `windowState` supports "fullscreen" from the editor; treat it as maximized for placement.
+    const wantsFullscreen = String(app?.windowState || '').trim().toLowerCase() === 'fullscreen';
+    const wantsMaximized = String(app?.windowState || '').trim().toLowerCase() === 'maximized';
     const shouldForceFullscreen = !shouldMinimize
-      && (launchState === 'maximized' || app?.launchBehavior === 'maximize');
+      && (
+        launchState === 'maximized'
+        || app?.launchBehavior === 'maximize'
+        || wantsFullscreen
+        || wantsMaximized
+      );
     const looksFullscreenByGeometry = widthPct >= 95 && heightPct >= 95;
     const minimizedWithoutSavedGeometry = (
       shouldMinimize

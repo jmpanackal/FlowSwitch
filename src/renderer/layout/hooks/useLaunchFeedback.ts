@@ -7,12 +7,57 @@ export type AppLaunchRowProgress = {
     | "pending"
     | "launching"
     | "placing"
+    | "verifying"
     | "awaiting-confirmation"
     | "done"
     | "failed"
     | "skipped";
   /** Raster data URL from main (profile snapshot at launch); validated in mapper. */
   iconDataUrl?: string | null;
+  /** Where this item is targeting (e.g. "Primary Display", "Display 2", "Minimized row"). */
+  location?: string | null;
+  /** Small outcome tags (e.g. "Placed", "Confirmation"); "New"/"Reused" may be hidden in the launch panel when redundant. */
+  outcomes?: string[] | null;
+};
+
+/** Aligns with `launchTimeline.js` JSDoc. */
+export type LaunchActionState =
+  | "queued"
+  | "running"
+  | "completed"
+  | "warning"
+  | "failed"
+  | "skipped";
+
+export type LaunchActionSubstepState =
+  | "queued"
+  | "running"
+  | "completed"
+  | "failed";
+
+export type LaunchActionSubstep = {
+  id: string;
+  label: string;
+  state: LaunchActionSubstepState;
+  startedAtMs?: number | null;
+  endedAtMs?: number | null;
+};
+
+export type LaunchAction = {
+  id: string;
+  kind: "app" | "tab" | "system";
+  title: string;
+  /** Target display or zone (e.g. monitor name, "Minimized row", "Browser"). */
+  targetLocation?: string | null;
+  state: LaunchActionState;
+  iconDataUrl?: string | null;
+  pills?: string[] | null;
+  smartDecisions?: string[] | null;
+  errorMessage?: string | null;
+  failureKind?: "launch" | "placement" | "verification" | null;
+  startedAtMs?: number | null;
+  endedAtMs?: number | null;
+  substeps?: LaunchActionSubstep[] | null;
 };
 
 /** Counts mirrored from main `launch-status-store` while a run is active (for UI progress). */
@@ -27,6 +72,17 @@ export type LaunchProgressSnapshot = {
   activePhase: "launching" | "placing" | "tabs" | null;
   activeAppName: string | null;
   appLaunchProgress: AppLaunchRowProgress[];
+  /** Latest `state` from main status store (e.g. complete, failed, cancelled). */
+  runState?: string | null;
+  /** Timeline / execution engine (optional until main publishes them). */
+  activeActionId?: string | null;
+  actionsTotal?: number | null;
+  actionsCompleted?: number | null;
+  actions?: LaunchAction[] | null;
+  startedAtMs?: number | null;
+  updatedAtMs?: number | null;
+  /** Mirrors main launch-status-store run id for this snapshot (cancel / poll staleness). */
+  runId?: string | null;
 };
 
 export type LaunchFeedbackState = {

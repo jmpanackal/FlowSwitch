@@ -11,6 +11,8 @@ type ProfileLaunchProgressPanelProps = {
   progress: LaunchProgressSnapshot | null;
   onCancel: () => void;
   cancelDisabled?: boolean;
+  /** Use a tighter layout suitable for the right inspector. */
+  variant?: "overlay" | "inspector";
 };
 
 type AppRow = NonNullable<LaunchProgressSnapshot["appLaunchProgress"]>[number];
@@ -215,6 +217,7 @@ export function ProfileLaunchProgressPanel({
   progress,
   onCancel,
   cancelDisabled = false,
+  variant = "overlay",
 }: ProfileLaunchProgressPanelProps) {
   const [elapsedSec, setElapsedSec] = useState(0);
 
@@ -285,21 +288,38 @@ export function ProfileLaunchProgressPanel({
     return `Browser tabs: ${done} / ${total}`;
   }, [progress]);
 
+  const isInspector = variant === "inspector";
+
   return (
     <div
-      className="w-full min-w-[min(18rem,calc(100vw-8rem))] max-w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-flow-accent-blue/40 bg-gradient-to-b from-flow-surface-elevated via-flow-bg-secondary to-flow-bg-secondary/95 p-4 shadow-xl shadow-black/35 ring-1 ring-flow-accent-blue/15"
-      role="dialog"
-      aria-modal="true"
+      className={
+        isInspector
+          ? "w-full min-w-0 rounded-xl border border-flow-border/60 bg-flow-bg-secondary/70 p-3 shadow-[0_10px_30px_rgba(0,0,0,0.35)] ring-1 ring-white/5"
+          : "w-full min-w-[min(18rem,calc(100vw-8rem))] max-w-[min(26rem,calc(100vw-2rem))] rounded-xl border border-flow-accent-blue/40 bg-gradient-to-b from-flow-surface-elevated via-flow-bg-secondary to-flow-bg-secondary/95 p-4 shadow-xl shadow-black/35 ring-1 ring-flow-accent-blue/15"
+      }
+      role={isInspector ? "region" : "dialog"}
+      aria-modal={isInspector ? undefined : true}
       aria-labelledby="launch-progress-title"
     >
-      <div className="flex items-start gap-3 border-b border-flow-border/50 pb-3">
-        <div className="relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-flow-text-primary/10 to-flow-text-primary/5 ring-2 ring-flow-accent-blue/30 shadow-md">
+      <div className={`flex items-start gap-3 border-b border-flow-border/50 ${isInspector ? "pb-2" : "pb-3"}`}>
+        <div
+          className={
+            isInspector
+              ? "relative flex h-10 w-10 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-flow-text-primary/5 ring-1 ring-flow-border/50"
+              : "relative flex h-14 w-14 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-gradient-to-br from-flow-text-primary/10 to-flow-text-primary/5 ring-2 ring-flow-accent-blue/30 shadow-md"
+          }
+        >
           {heroSlot.mode === "tabs" ? (
-            <Globe className="h-8 w-8 text-sky-300" strokeWidth={1.5} />
+            <Globe
+              className={isInspector ? "h-5 w-5 text-sky-300" : "h-8 w-8 text-sky-300"}
+              strokeWidth={1.5}
+            />
           ) : heroSlot.mode === "app" ? (
             <AppIconMark visual={heroSlot.visual} size="hero" />
           ) : (
-            <Loader2 className="h-8 w-8 animate-spin text-flow-accent-blue/80" />
+            <Loader2
+              className={isInspector ? "h-5 w-5 animate-spin text-flow-accent-blue/80" : "h-8 w-8 animate-spin text-flow-accent-blue/80"}
+            />
           )}
         </div>
         <div className="min-w-0 flex-1">
@@ -311,24 +331,24 @@ export function ProfileLaunchProgressPanel({
               >
                 Launching workspace
               </p>
-              <h2 className="truncate text-base font-semibold text-flow-text-primary">
+              <h2 className={`truncate font-semibold text-flow-text-primary ${isInspector ? "text-sm" : "text-base"}`}>
                 {profile.name}
               </h2>
-              <p className="mt-0.5 truncate text-sm font-medium text-flow-text-primary">
+              <p className={`mt-0.5 truncate font-medium text-flow-text-primary ${isInspector ? "text-xs" : "text-sm"}`}>
                 {headline.title}
               </p>
               {headline.subtitle ? (
-                <p className="truncate text-xs text-flow-text-secondary">
+                <p className={`truncate text-flow-text-secondary ${isInspector ? "text-[11px]" : "text-xs"}`}>
                   {headline.subtitle}
                 </p>
               ) : null}
               {detailMessage?.trim() ? (
-                <p className="mt-1 line-clamp-2 text-xs text-amber-200/90">
+                <p className={`mt-1 line-clamp-2 text-amber-200/90 ${isInspector ? "text-[11px]" : "text-xs"}`}>
                   {detailMessage.trim()}
                 </p>
               ) : null}
             </div>
-            <span className="shrink-0 tabular-nums text-xs text-flow-text-muted">
+            <span className={`shrink-0 tabular-nums text-flow-text-muted ${isInspector ? "text-[11px]" : "text-xs"}`}>
               {elapsedSec}s
             </span>
           </div>
@@ -336,7 +356,7 @@ export function ProfileLaunchProgressPanel({
       </div>
 
       {overallFraction != null ? (
-        <div className="mt-3">
+        <div className={isInspector ? "mt-2" : "mt-3"}>
           <div className="mb-1 flex items-center justify-between gap-2 text-[11px] text-flow-text-secondary">
             <span>Overall apps</span>
             <span className="tabular-nums text-flow-text-primary/90">
@@ -359,7 +379,7 @@ export function ProfileLaunchProgressPanel({
           </div>
         </div>
       ) : (
-        <div className="mt-3 flex items-center gap-2 text-xs text-flow-text-secondary">
+        <div className={`${isInspector ? "mt-2" : "mt-3"} flex items-center gap-2 text-xs text-flow-text-secondary`}>
           <Loader2 className="h-4 w-4 shrink-0 animate-spin opacity-80" />
           <span>Connecting to launch status…</span>
         </div>
@@ -370,19 +390,29 @@ export function ProfileLaunchProgressPanel({
       ) : null}
 
       {rows.length > 0 ? (
-        <ul className="mt-3 max-h-[min(14rem,40vh)] space-y-1.5 overflow-y-auto pr-0.5">
+        <ul
+          className={`mt-3 space-y-1.5 overflow-y-auto pr-0.5 ${
+            isInspector ? "max-h-[min(40vh,28rem)]" : "max-h-[min(14rem,40vh)]"
+          }`}
+        >
           {rows.map((row) => {
             const rowVisual = resolveVisualForRow(appVisualLookup, row);
             return (
               <li
                 key={row.key}
-                className="flex items-center gap-2.5 rounded-lg border border-flow-border/40 bg-flow-bg-secondary/60 px-2.5 py-2"
+                className={`flex items-center gap-2.5 rounded-lg border border-flow-border/40 bg-flow-bg-secondary/60 ${
+                  isInspector ? "px-2 py-1.5" : "px-2.5 py-2"
+                }`}
               >
-                <div className="flex h-9 w-9 shrink-0 items-center justify-center overflow-hidden rounded-md bg-flow-text-primary/5 ring-1 ring-flow-border/40">
+                <div
+                  className={`flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-flow-text-primary/5 ring-1 ring-flow-border/40 ${
+                    isInspector ? "h-8 w-8" : "h-9 w-9"
+                  }`}
+                >
                   <AppIconMark visual={rowVisual} size="row" />
                 </div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-flow-text-primary">
+                  <p className={`truncate font-medium text-flow-text-primary ${isInspector ? "text-xs" : "text-sm"}`}>
                     {row.name}
                   </p>
                 </div>
@@ -397,7 +427,7 @@ export function ProfileLaunchProgressPanel({
         </ul>
       ) : null}
 
-      <div className="mt-4 flex flex-wrap items-center justify-between gap-2 border-t border-flow-border/40 pt-3 text-[11px] text-flow-text-muted">
+      <div className={`${isInspector ? "mt-3 pt-2" : "mt-4 pt-3"} flex flex-wrap items-center justify-between gap-2 border-t border-flow-border/40 text-[11px] text-flow-text-muted`}>
         <span className="tabular-nums">
           {progress?.failedAppCount ? `${progress.failedAppCount} failed · ` : ""}
           {progress?.skippedAppCount ? `${progress.skippedAppCount} skipped` : ""}
@@ -406,7 +436,9 @@ export function ProfileLaunchProgressPanel({
           type="button"
           onClick={() => void onCancel()}
           disabled={cancelDisabled}
-          className="rounded-lg border border-rose-400/40 bg-rose-500/15 px-3 py-2 text-sm font-medium text-rose-100 transition-colors hover:bg-rose-500/25 disabled:pointer-events-none disabled:opacity-45"
+          className={`rounded-lg border border-rose-400/40 bg-rose-500/15 font-medium text-rose-100 transition-colors hover:bg-rose-500/25 disabled:pointer-events-none disabled:opacity-45 ${
+            isInspector ? "px-2.5 py-1.5 text-xs" : "px-3 py-2 text-sm"
+          }`}
         >
           Cancel launch
         </button>

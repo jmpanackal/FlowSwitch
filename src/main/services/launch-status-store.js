@@ -11,6 +11,7 @@ const normalizeAppLaunchStep = (value) => {
     'pending',
     'launching',
     'placing',
+    'verifying',
     'awaiting-confirmation',
     'done',
     'failed',
@@ -33,8 +34,122 @@ const cloneAppLaunchProgress = (rows) => (
     name: String(item?.name || '').trim() || 'App',
     step: normalizeAppLaunchStep(item?.step),
     iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
+    location: item?.location ? String(item.location) : undefined,
+    outcomes: Array.isArray(item?.outcomes)
+      ? item.outcomes.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 6)
+      : undefined,
   }))
 );
+
+const normalizeLaunchActionState = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = new Set(['queued', 'running', 'completed', 'warning', 'failed', 'skipped']);
+  return allowed.has(normalized) ? normalized : 'queued';
+};
+
+const normalizeLaunchActionSubstepState = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = new Set(['queued', 'running', 'completed', 'failed']);
+  return allowed.has(normalized) ? normalized : 'queued';
+};
+
+const normalizeLaunchActionKind = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = new Set(['app', 'tab', 'system']);
+  return allowed.has(normalized) ? normalized : 'app';
+};
+
+const normalizeLaunchFailureKind = (value) => {
+  if (value == null) return null;
+  const normalized = String(value || '').trim().toLowerCase();
+  const allowed = new Set(['launch', 'placement', 'verification']);
+  return allowed.has(normalized) ? normalized : null;
+};
+
+const clampString = (value, maxLen, { allowNull = false } = {}) => {
+  if (value == null) return allowNull ? null : '';
+  const s = String(value).trim();
+  if (!s) return allowNull ? null : '';
+  return s.length <= maxLen ? s : s.slice(0, maxLen);
+};
+
+const clampNullableFiniteNumber = (value) => {
+  if (value == null) return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+};
+
+const clampNullableNonNegativeInt = (value) => {
+  if (value == null) return null;
+  const n = Number(value);
+  if (!Number.isFinite(n)) return null;
+  return Math.max(0, Math.floor(n));
+};
+
+const cloneStringList = (value, { cap = 32, maxItemLen = 256 } = {}) => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  const items = value
+    .slice(0, Math.max(0, cap))
+    .map((item) => clampString(item, maxItemLen, { allowNull: false }))
+    .filter((s) => Boolean(s));
+  return items.length ? items : [];
+};
+
+const cloneLaunchActionSubsteps = (value) => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  const cap = 32;
+  return value.slice(0, cap).map((item, index) => {
+    const id = clampString(item?.id, 128) || `substep-${index + 1}`;
+    const label = clampString(item?.label, 256) || 'Step';
+    const startedAtMs = clampNullableFiniteNumber(item?.startedAtMs ?? item?.startedAt);
+    const endedAtMs = clampNullableFiniteNumber(item?.endedAtMs ?? item?.endedAt);
+    return {
+      id,
+      label,
+      state: normalizeLaunchActionSubstepState(item?.state),
+      startedAtMs,
+      endedAtMs,
+    };
+  });
+};
+
+const cloneLaunchActions = (value) => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  const cap = 64;
+  return value.slice(0, cap).map((item, index) => {
+    const id = clampString(item?.id, 128) || `action-${index + 1}`;
+    const title = clampString(item?.title, 256) || 'Action';
+    const startedAtMs = clampNullableFiniteNumber(item?.startedAtMs ?? item?.startedAt);
+    const endedAtMs = clampNullableFiniteNumber(item?.endedAtMs ?? item?.endedAt);
+    const pills = cloneStringList(item?.pills, { cap: 16, maxItemLen: 256 });
+    const smartDecisions = cloneStringList(item?.smartDecisions, { cap: 16, maxItemLen: 256 });
+    const errorMessage = clampString(item?.errorMessage, 4000, { allowNull: true });
+    const failureKind = normalizeLaunchFailureKind(item?.failureKind);
+    const substeps = cloneLaunchActionSubsteps(item?.substeps);
+    const targetLocation = item?.targetLocation != null
+      ? (clampString(item.targetLocation, 256, { allowNull: true }) || null)
+      : null;
+
+    return {
+      id,
+      kind: normalizeLaunchActionKind(item?.kind),
+      title,
+      state: normalizeLaunchActionState(item?.state),
+      iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
+      pills,
+      smartDecisions,
+      errorMessage,
+      failureKind,
+      startedAtMs,
+      endedAtMs,
+      substeps,
+      targetLocation,
+    };
+  });
+};
 
 const clonePendingConfirmations = (pendingConfirmations) => (
   (Array.isArray(pendingConfirmations) ? pendingConfirmations : []).map((item) => ({
@@ -69,6 +184,12 @@ const createLaunchStatusStore = (options = {}) => {
     : clonePendingConfirmations;
   const statusByProfileId = new Map();
   const activeRunByProfileId = new Map();
+
+  const cloneStatusOutput = (status) => ({
+    ...status,
+    pendingConfirmations: clonePending(status.pendingConfirmations),
+    actions: cloneLaunchActions(status.actions),
+  });
 
   const startRun = (profileId) => {
     const safeProfileId = String(profileId || '').trim();
@@ -112,9 +233,14 @@ const createLaunchStatusStore = (options = {}) => {
       ? rawPhase
       : null;
     const activeAppName = status.activeAppName != null ? String(status.activeAppName).trim() : '';
+    const activeActionId = clampString(status.activeActionId, 128, { allowNull: true });
+    const actionsTotal = clampNullableNonNegativeInt(status.actionsTotal);
+    const actionsCompleted = clampNullableNonNegativeInt(status.actionsCompleted);
+    const actions = cloneLaunchActions(status.actions);
     const nextStatus = {
       profileId: safeProfileId,
       runId: safeRunId,
+      startedAt: activeRunByProfileId.get(safeProfileId)?.startedAt ?? null,
       state: String(status.state || 'idle'),
       launchedAppCount: Number(status.launchedAppCount || 0),
       launchedTabCount: Number(status.launchedTabCount || 0),
@@ -127,11 +253,15 @@ const createLaunchStatusStore = (options = {}) => {
       activePhase,
       activeAppName: activeAppName || null,
       appLaunchProgress: cloneAppLaunchProgress(status.appLaunchProgress),
+      activeActionId,
+      actionsTotal,
+      actionsCompleted,
+      actions,
       pendingConfirmations,
       updatedAt: now(),
     };
     statusByProfileId.set(safeProfileId, nextStatus);
-    return { published: true, status: { ...nextStatus, pendingConfirmations: clonePending(nextStatus.pendingConfirmations) } };
+    return { published: true, status: cloneStatusOutput(nextStatus) };
   };
 
   const getStatus = (profileId) => {
@@ -139,10 +269,7 @@ const createLaunchStatusStore = (options = {}) => {
     if (!safeProfileId) return null;
     const status = statusByProfileId.get(safeProfileId);
     if (!status) return null;
-    return {
-      ...status,
-      pendingConfirmations: clonePending(status.pendingConfirmations),
-    };
+    return cloneStatusOutput(status);
   };
 
   const sealRun = (profileId, runId, state = null) => {
