@@ -1,15 +1,17 @@
-import { useEffect, useMemo, useState, type ReactNode } from "react";
+import {
+  useEffect,
+  useMemo,
+  useState,
+  type ReactNode,
+} from "react";
 import {
   AlertTriangle,
   Check,
-  CheckCircle2,
-  ChevronDown,
   ChevronRight,
   Globe,
   Loader2,
   Sparkles,
   X,
-  XCircle,
 } from "lucide-react";
 import type { FlowProfile } from "../../../types/flow-profile";
 import type {
@@ -18,7 +20,6 @@ import type {
   LaunchProgressSnapshot,
 } from "../hooks/useLaunchFeedback";
 import { safeIconSrc } from "../../utils/safeIconSrc";
-import { ProfileIconFrame } from "../utils/profileHeaderPresentation";
 import {
   computeEta,
   computeSubstepWeightedProgress,
@@ -212,44 +213,275 @@ function stepBadgeClasses(step: Row["step"]): string {
   }
 }
 
-type SummaryOutcome = "success" | "warning" | "error";
+type SummaryOutcome = "success" | "warning" | "error" | "cancelled";
 
-function SessionSummaryStatusIcon({ outcome }: { outcome: SummaryOutcome }) {
-  const common = "h-8 w-8 shrink-0 stroke-[1.75]";
+function sessionSummaryOutcomeLabel(
+  outcome: SummaryOutcome,
+  runState: string | null | undefined,
+): string {
+  const rs = String(runState || "").trim().toLowerCase();
+  if (rs === "cancelled" || outcome === "cancelled") {
+    return "Launch cancelled. Hover app icons for per-app status.";
+  }
   switch (outcome) {
     case "error":
-      return (
-        <XCircle
-          className={`${common} text-rose-400/95`}
-          aria-hidden
-        />
-      );
+      return "Run completed with one or more failures. Hover each app icon for the error.";
     case "warning":
-      return (
-        <AlertTriangle
-          className={`${common} text-amber-400/95`}
-          aria-hidden
-        />
-      );
+      return "Run completed with warnings. Hover each app icon for details.";
     default:
-      return (
-        <CheckCircle2
-          className={`${common} text-emerald-400/95`}
-          aria-hidden
-        />
-      );
+      return "Run completed successfully.";
   }
 }
 
-function sessionSummaryOutcomeLabel(outcome: SummaryOutcome): string {
+/** Optional one-line context when the session outcome is not obvious from icons alone. */
+function buildPostRunContextLine(runState: string | null | undefined): string | null {
+  const rs = String(runState || "").trim().toLowerCase();
+  if (rs === "cancelled") {
+    return "Stopped early — re-run this profile to continue.";
+  }
+  return null;
+}
+
+/** Prefer the substantive warning (e.g. constrained placement) over earlier reuse/delay lines. */
+function pickNonTrivialSmartDecisionLine(action: LaunchAction): string | null {
+  const raw = (action.smartDecisions ?? [])
+    .map((s) => String(s || "").trim())
+    .filter(Boolean);
+  if (!raw.length) return null;
+  const isTrivial = (t: string) =>
+    /^(?:reusing|reused) existing window$/i.test(t)
+    || /^waiting \d+s delay$/i.test(t);
+  for (let i = raw.length - 1; i >= 0; i -= 1) {
+    if (!isTrivial(raw[i])) return raw[i];
+  }
+  return null;
+}
+
+function TerminalCompletedTrailing({ action }: { action: LaunchAction }) {
+  if (action.state === "failed") {
+    return (
+      <X
+        className="h-3.5 w-3.5 shrink-0 rounded-full bg-flow-bg-secondary p-0.5 text-rose-300 ring-1 ring-rose-400/50"
+        strokeWidth={2.5}
+        aria-hidden
+      />
+    );
+  }
+  if (action.state === "warning") {
+    return (
+      <AlertTriangle
+        className="h-3.5 w-3.5 shrink-0 rounded-full bg-flow-bg-secondary p-0.5 text-amber-300 ring-1 ring-amber-400/45"
+        strokeWidth={2.25}
+        aria-hidden
+      />
+    );
+  }
+  if (action.state === "skipped") {
+    return (
+      <span
+        className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-flow-bg-secondary text-[9px] font-bold text-flow-text-muted ring-1 ring-white/15"
+        aria-hidden
+      >
+        —
+      </span>
+    );
+  }
+  return (
+    <Check
+      className="h-3.5 w-3.5 shrink-0 rounded-full bg-flow-bg-secondary p-0.5 text-emerald-300 ring-1 ring-emerald-400/50"
+      strokeWidth={2.5}
+      aria-hidden
+    />
+  );
+}
+
+type AppSummaryStatus = "ok" | "warn" | "error" | "cancelled";
+
+function summaryOutcomeHeaderChip(outcome: SummaryOutcome): {
+  label: string;
+  className: string;
+} {
   switch (outcome) {
     case "error":
-      return "Run finished with failures.";
+      return {
+        label: "Issues",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+      };
+    case "cancelled":
+      return {
+        label: "Cancelled",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+      };
     case "warning":
-      return "Run finished with warnings or was cancelled.";
+      return {
+        label: "Warnings",
+        className: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/35",
+      };
     default:
-      return "Run finished successfully.";
+      return {
+        label: "OK",
+        className: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/35",
+      };
   }
+}
+
+function resolveAppSummaryStatus(
+  action: LaunchAction,
+  runState: string | null | undefined,
+): AppSummaryStatus {
+  if (action.state === "failed") return "error";
+  if (action.state === "warning") return "warn";
+  if (
+    String(runState || "").trim().toLowerCase() === "cancelled"
+    && !isTerminalActionState(action.state)
+  ) {
+    return "cancelled";
+  }
+  if (action.state === "skipped") return "warn";
+  return "ok";
+}
+
+function appSummaryBadgeMeta(status: AppSummaryStatus): {
+  label: string;
+  className: string;
+} {
+  switch (status) {
+    case "error":
+      return {
+        label: "Error",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+      };
+    case "cancelled":
+      return {
+        label: "Stopped",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+      };
+    case "warn":
+      return {
+        label: "Warn",
+        className: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/35",
+      };
+    default:
+      return {
+        label: "OK",
+        className: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/35",
+      };
+  }
+}
+
+function cleanAppSummaryLine(action: LaunchAction): string {
+  const decisions = Array.isArray(action.smartDecisions)
+    ? action.smartDecisions.map((d) => String(d || "").trim()).filter(Boolean)
+    : [];
+  const reused = decisions.some((d) => /^(?:reusing|reused) existing window$/i.test(d));
+  return reused ? "Launched · Reused existing window" : "Launched";
+}
+
+function LaunchSummarySubstepIcon({
+  substep,
+  warnSubstepIds,
+}: {
+  substep: LaunchActionSubstep;
+  warnSubstepIds?: Set<string> | null;
+}) {
+  if (warnSubstepIds?.has(substep.id) && substep.state === "completed") {
+    return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300/95" strokeWidth={2.2} aria-hidden />;
+  }
+  if (substep.state === "completed") {
+    return <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300/95" strokeWidth={2.5} aria-hidden />;
+  }
+  if (substep.state === "failed") {
+    return <X className="h-3.5 w-3.5 shrink-0 text-rose-300/95" strokeWidth={2.5} aria-hidden />;
+  }
+  if (substep.state === "running") {
+    return <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/80" aria-hidden />;
+  }
+  return <span className="h-3.5 w-3.5 shrink-0 rounded-full bg-white/15" aria-hidden />;
+}
+
+function LaunchSummaryAppRow({
+  action,
+  progress,
+  runState,
+}: {
+  action: LaunchAction;
+  progress: LaunchProgressSnapshot | null;
+  runState: string | null | undefined;
+}) {
+  const status = resolveAppSummaryStatus(action, runState);
+  const badge = appSummaryBadgeMeta(status);
+  const loc = resolveActionDisplayLocation(action, progress);
+  const subs = displaySubstepsForAction(action, runState);
+  const warnSubstepIds = shouldMarkVerifySubstepAsWarning(action)
+    ? new Set(["sub-verify"])
+    : null;
+  const warningNote = status === "warn" ? pickNonTrivialSmartDecisionLine(action) : null;
+  const errorNote = status === "error" ? (action.errorMessage || "").trim() : "";
+  const cleanLine = cleanAppSummaryLine(action);
+  const okReuseNote =
+    status === "ok" && cleanLine !== "Launched"
+      ? cleanLine.replace(/^Launched · /, "")
+      : null;
+  const okPrimary = status === "ok" ? (
+    <span
+      className="flex h-6 w-6 shrink-0 items-center justify-center self-start text-emerald-400/95"
+      title="OK"
+      aria-label="OK"
+    >
+      <Check className="h-4 w-4" strokeWidth={2.5} aria-hidden />
+    </span>
+  ) : (
+    <span className={`inline-flex h-6 shrink-0 items-center self-start rounded-full px-2 text-[11px] font-semibold ${badge.className}`}>
+      {badge.label}
+    </span>
+  );
+  const detailBody =
+    status === "ok" ? (
+      okReuseNote ? (
+        <p className="text-[11px] leading-snug text-flow-text-secondary break-words">{okReuseNote}</p>
+      ) : null
+    ) : (
+      <ul className="space-y-0.5">
+        {subs.map((s) => (
+          <li key={s.id} className="flex items-center gap-1.5 text-[11px] text-flow-text-secondary">
+            <LaunchSummarySubstepIcon substep={s} warnSubstepIds={warnSubstepIds} />
+            <span className="break-words">{substepDisplayLabel(s)}</span>
+          </li>
+        ))}
+      </ul>
+    );
+  const hasDetailRow = detailBody != null || warningNote != null || errorNote != null;
+
+  return (
+    <li className="grid grid-cols-[auto,1fr,auto] gap-x-2.5 gap-y-1.5 px-0 py-2.5">
+      <div className={`pt-0.5 ${hasDetailRow ? "row-span-2" : ""}`}>
+        <ActionIcon action={action} size="sm" />
+      </div>
+      <div className="min-w-0">
+        <p className="text-[13px] font-semibold leading-snug text-flow-text-primary break-words">{action.title}</p>
+        {loc ? (
+          <p className="mt-0.5 text-[11px] leading-snug text-flow-text-muted break-words">{loc}</p>
+        ) : null}
+      </div>
+      {okPrimary}
+
+      {hasDetailRow ? (
+        <div className="col-start-2 col-end-4 min-w-0 space-y-1">
+          {detailBody}
+          {warningNote ? (
+            <span className="block max-w-full rounded-lg bg-white/[0.04] px-2 py-0.5 text-[11px] leading-snug text-flow-text-secondary ring-1 ring-white/10 break-words">
+              {warningNote}
+            </span>
+          ) : null}
+          {errorNote ? (
+            <span className="block max-w-full rounded-lg bg-rose-500/12 px-2 py-0.5 text-[11px] leading-snug text-rose-200 ring-1 ring-rose-400/25 break-words">
+              {failureKindLabel(action.failureKind)}: {errorNote}
+            </span>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
+  );
 }
 
 function Chip({ children }: { children: string }) {
@@ -446,15 +678,37 @@ function shouldMarkVerifySubstepAsWarning(action: LaunchAction): boolean {
   return pills.some((p) => String(p || "").trim().toLowerCase() === "constrained");
 }
 
+function humanLaunchActionState(
+  state: LaunchAction["state"],
+  runState: string | null | undefined,
+): string {
+  const rs = String(runState || "").trim().toLowerCase();
+  if (rs === "cancelled" && !isTerminalActionState(state)) {
+    return "Cancelled mid-run";
+  }
+  switch (state) {
+    case "queued":
+      return "Queued";
+    case "running":
+      return "In progress";
+    case "completed":
+      return "Completed";
+    case "warning":
+      return "Completed with a placement note";
+    case "failed":
+      return "Failed";
+    case "skipped":
+      return "Skipped";
+    default:
+      return state;
+  }
+}
+
 function actionStateLabel(
   action: LaunchAction,
   runState: string | null | undefined,
 ): string {
-  const rs = String(runState || "").trim().toLowerCase();
-  if (rs === "cancelled" && !isTerminalActionState(action.state)) {
-    return "cancelled";
-  }
-  return action.state;
+  return humanLaunchActionState(action.state, runState);
 }
 
 function displaySubstepsForAction(
@@ -770,15 +1024,14 @@ export function LaunchCenterInspector({
     hasTimeline && !isLaunching && postRunTerminal && summaryReady,
   );
 
-  const summaryTitle = useMemo(() => {
-    if (runState === "cancelled") return "Launch cancelled";
-    if (runState === "failed") return "Launch finished with issues";
-    return "Launch complete";
-  }, [runState]);
+  const postRunContextLine = useMemo(
+    () => buildPostRunContextLine(runState),
+    [runState],
+  );
 
   const summaryOutcome = useMemo((): SummaryOutcome => {
     const rs = String(runState || "").toLowerCase();
-    if (rs === "cancelled") return "warning";
+    if (rs === "cancelled") return "cancelled";
     if (rs === "failed") return "error";
     if ((progress?.failedAppCount ?? 0) > 0) return "error";
     const hasFailedAction = actions?.some((a) => a.state === "failed");
@@ -788,11 +1041,10 @@ export function LaunchCenterInspector({
     return "success";
   }, [actions, progress?.failedAppCount, progress?.skippedAppCount, runState]);
 
-  /** App actions that were actually launched (including cancelled runs that started launch). */
-  const launchedAppIcons = useMemo(() => {
-    if (!actions?.length) return [];
-    return actions.filter((a) => actionLooksLaunched(a, progress, runState));
-  }, [actions, progress, runState]);
+  const summaryAppActions = useMemo(
+    () => (actions ?? []).filter((a) => a.kind === "app"),
+    [actions],
+  );
 
   const completedAllList = useMemo(() => {
     if (!actions) return [];
@@ -949,136 +1201,66 @@ export function LaunchCenterInspector({
 
       {showSummaryChrome ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="min-w-0 shrink-0">
-          <div className="flex items-start justify-between gap-2">
-            <h3 className="min-w-0 flex-1 text-base font-semibold leading-snug text-flow-text-primary">
-              {summaryTitle}
-            </h3>
-            <span
-              className="flex shrink-0 pt-0.5"
-              title={sessionSummaryOutcomeLabel(summaryOutcome)}
-              aria-label={sessionSummaryOutcomeLabel(summaryOutcome)}
-            >
-              <SessionSummaryStatusIcon outcome={summaryOutcome} />
-            </span>
-          </div>
-          <div className="mt-1.5 flex min-w-0 items-center gap-2.5">
-            <ProfileIconFrame
-              icon={profile.icon}
-              variant="sidebar"
-              className="h-8 w-8 rounded-lg"
-            />
-            <p className="min-w-0 flex-1 truncate text-sm font-semibold leading-snug text-flow-text-primary">
-              {profile.name}
-            </p>
-          </div>
-          {elapsedSec != null ? (
-            <p className="mt-2 text-sm font-medium text-flow-text-secondary tabular-nums">
-              Launch time: <span className="text-flow-text-primary">{elapsedSec}s</span>
-            </p>
-          ) : null}
-          {(progress?.requestedAppCount ?? 0) > 0 || launchedAppIcons.length > 0 ? (
-            <div className="mt-2.5 border-t border-white/10 pt-2">
-              <div className="mb-1.5 flex items-end justify-between gap-2">
-                <p className="text-[10px] font-semibold uppercase tracking-wide text-flow-text-muted">
-                  Apps launched
-                </p>
-                <p className="tabular-nums text-sm font-semibold text-flow-text-primary">
-                  {progress?.launchedAppCount ?? launchedAppIcons.length}
-                  {(progress?.requestedAppCount ?? 0) > 0
-                    ? ` / ${progress?.requestedAppCount ?? 0}`
-                    : ""}
-                </p>
-              </div>
-              {launchedAppIcons.length > 0 ? (
-                <ul className="flex flex-wrap gap-1.5" aria-label="Launched application icons">
-                  {launchedAppIcons.map((a) => {
-                    const src = safeIconSrc(a.iconDataUrl ?? undefined);
-                    return (
-                      <li key={a.id} title={a.title}>
-                        <div className="flex h-7 w-7 items-center justify-center overflow-hidden rounded-md bg-white/[0.06]">
-                          {src ? (
-                            <img
-                              src={src}
-                              alt=""
-                              className="h-full w-full object-cover"
-                              draggable={false}
-                            />
-                          ) : (
-                            <Globe className="h-3.5 w-3.5 text-flow-text-muted" strokeWidth={1.5} aria-hidden />
-                          )}
-                        </div>
-                      </li>
-                    );
-                  })}
-                </ul>
-              ) : null}
-              {(progress?.requestedBrowserTabCount ?? 0) > 0
-              || (progress?.failedAppCount ?? 0) > 0
-              || (progress?.skippedAppCount ?? 0) > 0 ? (
-                <dl className="mt-2 grid grid-cols-2 gap-x-2 gap-y-1 text-xs text-flow-text-secondary">
-                  {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
-                    <>
-                      <dt>Tabs</dt>
-                      <dd className="text-right tabular-nums text-flow-text-primary">
-                        {progress?.launchedTabCount ?? 0}
-                        {" / "}
-                        {progress?.requestedBrowserTabCount ?? 0}
-                      </dd>
-                    </>
-                  ) : null}
-                  {(progress?.failedAppCount ?? 0) > 0 ? (
-                    <>
-                      <dt>Failed</dt>
-                      <dd className="text-right tabular-nums text-rose-200">{progress?.failedAppCount}</dd>
-                    </>
-                  ) : null}
-                  {(progress?.skippedAppCount ?? 0) > 0 ? (
-                    <>
-                      <dt>Skipped</dt>
-                      <dd className="text-right tabular-nums text-flow-text-muted">{progress?.skippedAppCount}</dd>
-                    </>
-                  ) : null}
-                </dl>
-              ) : null}
-            </div>
-          ) : null}
-          </div>
-          <div className="mt-3 flex min-h-0 flex-1 flex-col border-t border-white/10 pt-2">
-            <button
-              type="button"
-              aria-expanded={detailsOpen}
-              id="launch-session-summary-details-toggle"
-              onClick={() => setDetailsOpen((open) => !open)}
-              className="flex w-full shrink-0 items-center justify-between gap-2 rounded-md py-2 pl-0 pr-1 text-left text-sm font-semibold text-flow-text-primary transition-colors hover:bg-white/[0.04]"
-            >
-              <span>{detailsOpen ? "Hide details" : "View details"}</span>
-              <ChevronDown
-                className={`h-4 w-4 shrink-0 text-flow-text-muted ${detailsOpen ? "rotate-180" : ""}`}
-                aria-hidden
-              />
-            </button>
-            {actions?.length ? (
-              <div
-                className="mt-2 grid min-h-0 overflow-hidden"
-                style={{ gridTemplateRows: detailsOpen ? "1fr" : "0fr" }}
-                role="region"
-                aria-labelledby="launch-session-summary-details-toggle"
-                aria-hidden={!detailsOpen}
-              >
-                <div className="min-h-0 overflow-hidden">
-                  <div className="scrollbar-elegant min-h-0 max-h-[min(50vh,22rem)] overflow-y-auto overscroll-contain pr-0.5">
-                    <ActionDetailsList
-                      actions={actions}
-                      reducedMotion={reducedMotion}
-                      progress={progress}
-                      runState={runState}
-                      className="min-h-0"
-                    />
-                  </div>
+          <div className="min-w-0 shrink-0 overflow-visible">
+            <div className="border-b border-white/10 pb-2">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                  <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-flow-text-muted">
+                    Launch summary
+                  </p>
+                  <span
+                    className={`inline-flex h-6 shrink-0 items-center gap-1 rounded-full px-2 text-[11px] font-semibold ${summaryOutcomeHeaderChip(summaryOutcome).className}`}
+                    title={sessionSummaryOutcomeLabel(summaryOutcome, runState)}
+                    aria-label={sessionSummaryOutcomeLabel(summaryOutcome, runState)}
+                  >
+                    {summaryOutcome === "error" || summaryOutcome === "cancelled" ? (
+                      <X className="h-3.5 w-3.5 shrink-0" strokeWidth={2.3} aria-hidden />
+                    ) : summaryOutcome === "warning" ? (
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" strokeWidth={2.2} aria-hidden />
+                    ) : (
+                      <Check className="h-3.5 w-3.5 shrink-0" strokeWidth={2.3} aria-hidden />
+                    )}
+                    <span>{summaryOutcomeHeaderChip(summaryOutcome).label}</span>
+                  </span>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="tabular-nums text-xl font-semibold leading-none text-flow-text-primary">
+                    {progress?.launchedAppCount ?? summaryAppActions.filter((a) => actionLooksLaunched(a, progress, runState)).length}
+                    <span className="text-flow-text-secondary">/{progress?.requestedAppCount ?? summaryAppActions.length}</span>
+                  </p>
+                  <p className="text-[11px] font-semibold text-flow-text-muted">apps</p>
                 </div>
               </div>
+              <p className="mt-1.5 min-w-0 text-sm font-semibold leading-snug text-flow-text-primary">
+                <span className="break-words">{profile.name}</span>
+                {elapsedSec != null ? (
+                  <span className="whitespace-nowrap text-flow-text-secondary/90 tabular-nums">
+                    {" · "}
+                    {elapsedSec}
+                    s
+                  </span>
+                ) : null}
+              </p>
+            </div>
+            {postRunContextLine ? (
+              <p className="pb-2 pt-1 text-[11px] text-flow-text-secondary">
+                {postRunContextLine}
+              </p>
             ) : null}
+            {summaryAppActions.length > 0 ? (
+              <ul className="divide-y divide-white/10">
+                {summaryAppActions.map((a) => (
+                  <LaunchSummaryAppRow
+                    key={a.id}
+                    action={a}
+                    progress={progress}
+                    runState={runState}
+                  />
+                ))}
+              </ul>
+            ) : (
+              <p className="py-3 text-[12px] text-flow-text-muted">No app actions were recorded for this run.</p>
+            )}
           </div>
         </div>
       ) : (
@@ -1130,6 +1312,72 @@ export function LaunchCenterInspector({
                   style={{ width: `${pctRounded}%` }}
                 />
               </div>
+            {isLaunching
+            && (
+              (progress?.requestedAppCount ?? 0) > 0
+              || (progress?.requestedBrowserTabCount ?? 0) > 0
+              || (progress?.failedAppCount ?? 0) > 0
+              || (progress?.skippedAppCount ?? 0) > 0
+              || (progress?.unresolvedPendingConfirmationCount ?? 0) > 0
+            ) ? (
+              <p className="mt-2 text-[11px] leading-snug text-flow-text-secondary">
+                <span className="font-semibold text-flow-text-muted">Run overview:</span>
+                {" "}
+                {(progress?.requestedAppCount ?? 0) > 0 ? (
+                  <>
+                    Apps
+                    {" "}
+                    <span className="tabular-nums text-flow-text-primary">
+                      {progress?.launchedAppCount ?? 0}
+                      /
+                      {progress?.requestedAppCount ?? 0}
+                    </span>
+                  </>
+                ) : null}
+                {(progress?.requestedAppCount ?? 0) > 0
+                && (progress?.requestedBrowserTabCount ?? 0) > 0
+                  ? " · "
+                  : null}
+                {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
+                  <>
+                    Tabs
+                    {" "}
+                    <span className="tabular-nums text-flow-text-primary">
+                      {progress?.launchedTabCount ?? 0}
+                      /
+                      {progress?.requestedBrowserTabCount ?? 0}
+                    </span>
+                  </>
+                ) : null}
+                {(progress?.failedAppCount ?? 0) > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="text-rose-200/95">
+                      {progress?.failedAppCount}
+                      {" failed"}
+                    </span>
+                  </>
+                ) : null}
+                {(progress?.skippedAppCount ?? 0) > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="text-flow-text-muted">
+                      {progress?.skippedAppCount}
+                      {" skipped"}
+                    </span>
+                  </>
+                ) : null}
+                {(progress?.unresolvedPendingConfirmationCount ?? 0) > 0 ? (
+                  <>
+                    {" · "}
+                    <span className="text-amber-200/90">
+                      {progress?.unresolvedPendingConfirmationCount}
+                      {" awaiting confirmation"}
+                    </span>
+                  </>
+                ) : null}
+              </p>
+            ) : null}
             {isLaunching ? (
               <div className="mt-2 flex justify-end">
                 <button
@@ -1243,13 +1491,7 @@ export function LaunchCenterInspector({
                             <LaunchActionLeadSurface
                               action={a}
                               progress={progress}
-                              trailing={(
-                                <Check
-                                  className="h-3.5 w-3.5 shrink-0 rounded-full bg-flow-bg-secondary p-0.5 text-emerald-300 ring-1 ring-emerald-400/50"
-                                  strokeWidth={2.5}
-                                  aria-hidden
-                                />
-                              )}
+                              trailing={<TerminalCompletedTrailing action={a} />}
                             />
                           </div>
                         </div>

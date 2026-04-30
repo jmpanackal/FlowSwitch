@@ -1741,7 +1741,7 @@ const launchProfileById = async (profileId, options = {}) => {
             const tact = executionActions[appTimelineIndexByApp[appIndex]];
             if (tact) {
               appendUniquePill(tact, 'Reused');
-              appendSmartDecision(tact, 'Reusing existing window');
+              appendSmartDecision(tact, 'Reused existing window');
             }
           }
           publishCurrentLaunchStatus('in-progress');

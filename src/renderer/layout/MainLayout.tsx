@@ -284,6 +284,16 @@ export default function App() {
     (p) => p.id === selectedProfile,
   ) || null;
 
+  /** Launch tab shows the profile that owns `lastLaunchProgress`, not the canvas selection. */
+  const launchInspectorProfile = useMemo(() => {
+    const launchedId = String(lastLaunchProfileId || "").trim();
+    if (launchedId) {
+      const match = profiles.find((p) => p.id === launchedId);
+      if (match) return match;
+    }
+    return currentProfile;
+  }, [profiles, lastLaunchProfileId, currentProfile]);
+
   const excludedContentIdSet = useMemo(() => {
     if (!selectedProfile) return new Set<string>();
     return new Set(contentLibraryExclusions[selectedProfile] || []);
@@ -1550,7 +1560,18 @@ export default function App() {
     const tick = async () => {
       if (cancelled) return;
       try {
-        const res = await window.electron.getLaunchProfileStatus(selectedProfile);
+        const profileIdForPoll = (() => {
+          if (isLaunching) {
+            const fromRef = String(expectedLaunchProfileIdRef.current || "").trim();
+            if (fromRef) return fromRef;
+            const fromLast = String(lastLaunchProfileId || "").trim();
+            if (fromLast) return fromLast;
+          }
+          return String(selectedProfile || "").trim();
+        })();
+        if (!profileIdForPoll) return;
+
+        const res = await window.electron.getLaunchProfileStatus(profileIdForPoll);
         if (cancelled) return;
         const status = res?.status;
         if (!res?.ok || !status) return;
@@ -1560,7 +1581,7 @@ export default function App() {
         const expectedRunId = String(expectedLaunchRunIdRef.current || "").trim();
         if (
           expectedProfileId
-          && expectedProfileId === selectedProfile
+          && expectedProfileId === profileIdForPoll
           && expectedRunId
           && runId
           && runId !== expectedRunId
@@ -1569,10 +1590,10 @@ export default function App() {
           return;
         }
         if (runId) {
-          expectedLaunchProfileIdRef.current = selectedProfile;
+          expectedLaunchProfileIdRef.current = profileIdForPoll;
           expectedLaunchRunIdRef.current = runId;
           setLastLaunchRunId(runId);
-          setLastLaunchProfileId(selectedProfile);
+          setLastLaunchProfileId(profileIdForPoll);
         }
 
         const progressSnap = progressFromLaunchStatus(status);
@@ -1616,7 +1637,7 @@ export default function App() {
       cancelled = true;
       if (interval != null) window.clearInterval(interval);
     };
-  }, [shouldPollLaunchStatus, selectedProfile]);
+  }, [shouldPollLaunchStatus, selectedProfile, isLaunching, lastLaunchProfileId]);
 
   useEffect(() => {
     const sub = window.electron?.subscribeProfileLaunchStarted?.((payload) => {
@@ -2643,10 +2664,10 @@ export default function App() {
             {/* Sidebar Content - Now contains app header */}
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               {inspectorMode === "launch" ? (
-                currentProfile ? (
+                launchInspectorProfile ? (
                   <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-3">
                     <LaunchCenterInspector
-                      profile={currentProfile}
+                      profile={launchInspectorProfile}
                       progress={lastLaunchProgress}
                       summaryMessage={
                         (lastLaunchDetailMessage

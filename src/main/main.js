@@ -985,7 +985,7 @@ const notifyMainWindowLaunchFinishedFromStore = (profileId, runId) => {
   launchProgressSurfaceStartedAtMs = null;
 
   let outcome = 'error';
-  let message = 'Launch finished.';
+  let message = 'Launch completed.';
   if (!status || String(status.runId || '') !== String(runId || '')) {
     outcome = 'idle';
     message = '';
@@ -998,23 +998,23 @@ const notifyMainWindowLaunchFinishedFromStore = (profileId, runId) => {
     } else if (st === 'failed') {
       outcome = 'error';
       message = summaryText
-        ? `Launch finished with failures (${summaryText}).`
-        : 'Launch finished with failures.';
+        ? `Launch completed with failures (${summaryText}).`
+        : 'Launch completed with failures.';
     } else if (st === 'complete') {
       outcome = 'success';
-      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+      message = summaryText ? `Launch completed: ${summaryText}.` : 'Launch completed.';
     } else if (
       st === 'awaiting-confirmations'
       && Number(status.unresolvedPendingConfirmationCount || 0) === 0
     ) {
       outcome = 'success';
-      message = summaryText ? `Launch complete: ${summaryText}.` : 'Launch complete.';
+      message = summaryText ? `Launch completed: ${summaryText}.` : 'Launch completed.';
     } else {
       // Defensive: do not report success for in-progress / stuck confirmation states.
       outcome = 'error';
       message = summaryText
-        ? `Launch finished in an unexpected state (${summaryText}).`
-        : 'Launch finished in an unexpected state.';
+        ? `Launch completed in an unexpected state (${summaryText}).`
+        : 'Launch completed in an unexpected state.';
     }
   }
 

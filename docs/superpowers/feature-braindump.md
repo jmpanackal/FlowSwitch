@@ -138,7 +138,7 @@ Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
   - user-triggered cancel launch action
   - completion feedback option (audio cue)
 - Merged inbox items: launch progress visibility, launch modal concept, cancel launch, done audio signal, "already open" count.
-- **Status (2026-04-30):** Shipped a hardening pass on this track: launch panel persistence during active runs, pin-at-launch preference, cancel IPC failure surfacing, truthful completion (placement verify/stabilize unless constrained acceptance), exe-directory `cwd` for spawns, fatal error dialogs treated as failures, constrained-placement warning path with clearer timeline copy. **Still open:** per-app/overall status density and completion feedback policy (including partial-run semantics).
+- **Status (2026-04-30):** Shipped a hardening pass on this track: launch panel persistence during active runs, pin-at-launch preference, cancel IPC failure surfacing, truthful completion (placement verify/stabilize unless constrained acceptance), exe-directory `cwd` for spawns, fatal error dialogs treated as failures, constrained-placement warning path with clearer timeline copy. **Follow-up (same track):** post-run summary titles (“completed with warnings/issues”), per-app badges and portaled tooltips (substantive warning/error text, not duplicate prose), in-run overview counts (apps/tabs/failed/skipped/confirmations), human-readable action states in details, and terminal icons in the completed list. **Still optional:** audio / taskbar progress and copy tuning from dogfood runs.
 - Done when: users can always see launch state, cancel safely, and understand completion/partial failure without guessing.
 
 1. App discovery completeness and hygiene
