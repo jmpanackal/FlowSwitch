@@ -11,6 +11,15 @@ const { launchIconDataUrlFromProfileApp } = require('../utils/launch-ui-icons');
 
 /** App row outcome: opened via shell only — profile has no saved bounds to place or verify. */
 const OUTCOME_EXTERNAL_OPEN_NO_LAYOUT = 'ExternalOpenNoLayout';
+const OUTCOME_CONSTRAINED_PLACEMENT = 'ConstrainedPlacement';
+const CONSTRAINED_PLACEMENT_DECISION_TEXT = (
+  'This app has a fixed window size and was positioned as close to the snap zone as possible.'
+);
+const OBS_ERROR_WINDOW_TITLE_SET = new Set([
+  'error',
+  'obs error',
+  'critical error',
+]);
 
 const createProfileLaunchRunner = (deps) => {
   const {
@@ -1137,6 +1146,14 @@ const launchProfileById = async (profileId, options = {}) => {
         if (s) s.state = st;
       }
     };
+    const setSubLabel = (id, label) => {
+      const s = sl(id);
+      if (s) s.label = label;
+    };
+    setSubLabel('sub-launch', 'Launching');
+    setSubLabel('sub-place', 'Positioning window');
+    setSubLabel('sub-verify', 'Verifying placement');
+    setSubLabel('sub-confirm', 'Waiting for confirmation');
     if (step === 'pending') {
       action.state = 'queued';
       setSubs([
@@ -1155,6 +1172,7 @@ const launchProfileById = async (profileId, options = {}) => {
       ]);
     } else if (step === 'placing') {
       action.state = 'running';
+      setSubLabel('sub-launch', 'Launched');
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'running'],
@@ -1163,6 +1181,8 @@ const launchProfileById = async (profileId, options = {}) => {
       ]);
     } else if (step === 'verifying') {
       action.state = 'running';
+      setSubLabel('sub-launch', 'Launched');
+      setSubLabel('sub-place', 'Positioned');
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
@@ -1171,6 +1191,9 @@ const launchProfileById = async (profileId, options = {}) => {
       ]);
     } else if (step === 'awaiting-confirmation') {
       action.state = 'running';
+      setSubLabel('sub-launch', 'Launched');
+      setSubLabel('sub-place', 'Positioned');
+      setSubLabel('sub-verify', 'Verified placement');
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
@@ -1180,15 +1203,24 @@ const launchProfileById = async (profileId, options = {}) => {
     } else if (step === 'done') {
       const externalNoLayout = Array.isArray(row.outcomes)
         && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_EXTERNAL_OPEN_NO_LAYOUT);
+      const constrainedPlacement = Array.isArray(row.outcomes)
+        && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_CONSTRAINED_PLACEMENT);
+      const hadConfirmation = Array.isArray(row.outcomes)
+        && row.outcomes.some((o) => String(o || '').trim() === 'Confirmation');
       if (externalNoLayout) {
         action.state = 'warning';
         appendSmartDecision(
           action,
           'No saved window slot — the OS opened the app or link; FlowSwitch did not place or verify a window. Add this app to a monitor in the profile for full launch control.',
         );
+      } else if (constrainedPlacement) {
+        action.state = 'warning';
       } else {
         action.state = 'completed';
       }
+      setSubLabel('sub-launch', 'Launched');
+      setSubLabel('sub-place', 'Positioned');
+      setSubLabel('sub-verify', 'Verified placement');
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
@@ -1196,7 +1228,15 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-confirm', 'completed'],
       ]);
       const confirmSub = sl('sub-confirm');
-      if (confirmSub) confirmSub.label = externalNoLayout ? 'Not applicable' : 'Confirmed';
+      if (confirmSub) {
+        if (externalNoLayout) {
+          confirmSub.label = 'Not applicable';
+        } else if (hadConfirmation) {
+          confirmSub.label = 'Confirmed';
+        } else {
+          confirmSub.label = 'No confirmation needed';
+        }
+      }
     } else if (step === 'failed') {
       action.state = 'failed';
       const fk = action.failureKind || 'launch';
@@ -1287,6 +1327,55 @@ const launchProfileById = async (profileId, options = {}) => {
       actionsCompleted: countCompletedTimelineActions(),
       actions: executionActions,
     });
+  };
+
+  const isLikelyFatalLaunchDialog = (row, processHintLc) => {
+    const hint = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    const title = String(row?.title || '').trim().toLowerCase();
+    const className = String(row?.className || '').trim().toLowerCase();
+    if (!title) return false;
+    if (hint === 'obs64' || hint === 'obs') {
+      return OBS_ERROR_WINDOW_TITLE_SET.has(title) && /qt\d+qwindowicon/.test(className);
+    }
+    return false;
+  };
+
+  const buildFatalLaunchDialogErrorMessage = (processHintLc, row) => {
+    const hint = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (hint === 'obs64' || hint === 'obs') {
+      return (
+        'OBS opened an error dialog instead of a usable main window. '
+        + 'Close the OBS error dialog, confirm the OBS executable path points to the real install '
+        + '(not an updater/helper), then relaunch. If it persists, repair/reinstall OBS.'
+      );
+    }
+    const title = String(row?.title || '').trim();
+    if (title) {
+      return `App opened an error dialog ("${title}") instead of a usable main window.`;
+    }
+    return 'App opened an error dialog instead of a usable main window.';
+  };
+
+  const isConstrainedPlacementAcceptable = ({
+    finalRect,
+    targetBounds,
+    monitor,
+  }) => {
+    if (!finalRect || !targetBounds || !monitor) return false;
+    if (String(targetBounds.state || '').trim().toLowerCase() !== 'normal') return false;
+    const onTargetMonitor = isWindowOnTargetMonitor({
+      rect: finalRect,
+      monitor,
+      bounds: targetBounds,
+    });
+    if (!onTargetMonitor) return false;
+    const leftDelta = Math.abs(Number(finalRect.left || 0) - Number(targetBounds.left || 0));
+    const topDelta = Math.abs(Number(finalRect.top || 0) - Number(targetBounds.top || 0));
+    const widthDelta = Math.abs(Number(finalRect.width || 0) - Number(targetBounds.width || 0));
+    const heightDelta = Math.abs(Number(finalRect.height || 0) - Number(targetBounds.height || 0));
+    const anchoredNearTargetOrigin = leftDelta <= 24 && topDelta <= 24;
+    const largeSizeConstraintDelta = widthDelta >= 80 || heightDelta >= 80;
+    return anchoredNearTargetOrigin && largeSizeConstraintDelta;
   };
   profileDiagnostics.start({
     strategy: 'launch-profile',
@@ -1548,6 +1637,7 @@ const launchProfileById = async (profileId, options = {}) => {
                 if (row?.cloaked || row?.hung || row?.tool || !row?.enabled) continue;
                 if (row?.hasOwner || row?.topMost) continue;
                 if (isLikelyAuxiliaryWindowClass(row?.className)) continue;
+                if (isLikelyFatalLaunchDialog(row, processHintLc)) continue;
                 if (isChromiumFamily && isChromiumNonPrimaryWindowRow(row)) continue;
                 const isMinimized = Boolean(row?.isMinimized);
                 if (!isMinimized && (Number(row?.width || 0) < 280 || Number(row?.height || 0) < 140)) continue;
@@ -2241,6 +2331,30 @@ const launchProfileById = async (profileId, options = {}) => {
           applied: result.applied,
           handle: result.handle || null,
         });
+        if (!result.applied || !result.handle) {
+          throw new Error('Window placement was not applied to a launchable handle.');
+        }
+        const postPlacementRows = await getVisibleWindowInfos(processHintLc, {
+          diagnostics: launchDiagnostics,
+          diagnosticsContext: {
+            processHintLc,
+            strategy: 'launch-window-health',
+            reason: 'post-placement-window-scan',
+          },
+        });
+        const placedRow = (Array.isArray(postPlacementRows) ? postPlacementRows : [])
+          .find((row) => String(row?.handle || '').trim() === String(result.handle || '').trim());
+        if (isLikelyFatalLaunchDialog(placedRow, processHintLc)) {
+          launchDiagnostics.failure({
+            processHintLc,
+            strategy: 'launch-window-health',
+            reason: 'fatal-app-error-dialog-detected',
+            handle: result.handle,
+            className: String(placedRow?.className || '').trim() || null,
+            title: String(placedRow?.title || '').trim() || null,
+          });
+          throw new Error(buildFatalLaunchDialogErrorMessage(processHintLc, placedRow));
+        }
         const reusedAlreadyWithinTolerance = (
           launchStatusMode === 'reused_existing_window'
           && (result.status === 'foreground-within-tolerance'
@@ -2308,6 +2422,7 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         let placementVerified = false;
+        let maximizedPlacementVerified = false;
         if (
           result.applied
           && result.handle
@@ -2559,6 +2674,7 @@ const launchProfileById = async (profileId, options = {}) => {
             verified: maximizedStabilized.verified,
             handle: maximizedStabilized.handle,
           });
+          maximizedPlacementVerified = Boolean(maximizedStabilized.verified);
         } else if (
           result.applied
           && bounds.state === 'maximized'
@@ -2571,6 +2687,68 @@ const launchProfileById = async (profileId, options = {}) => {
             reason: 'skip-maximized-stabilization-reused-within-tolerance',
             handle: result.handle || null,
           });
+          maximizedPlacementVerified = true;
+        }
+        if (bounds.state === 'maximized' && skipDelayedChromiumMaximizeStabilization) {
+          maximizedPlacementVerified = true;
+        }
+        const placementValidated = (
+          bounds.state === 'normal'
+            ? placementVerified
+            : bounds.state === 'maximized'
+              ? maximizedPlacementVerified
+              : Boolean(result.applied && result.handle)
+        );
+        if (!placementValidated) {
+          const finalPlacementRects = await getWindowPlacementRectsByHandle(result.handle);
+          const finalPlacementRect = (
+            finalPlacementRects?.visibleRect
+            || finalPlacementRects?.outerRect
+            || null
+          );
+          const constrainedPlacementAccepted = isConstrainedPlacementAcceptable({
+            finalRect: finalPlacementRect,
+            targetBounds: bounds,
+            monitor: launchItem.monitor,
+          });
+          if (constrainedPlacementAccepted) {
+            launchDiagnostics.result({
+              processHintLc,
+              strategy: 'placement-verification',
+              reason: 'placement-constrained-accepted',
+              handle: result.handle,
+              finalRect: finalPlacementRect,
+              targetBounds: bounds,
+            });
+            if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+              const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
+                ? appLaunchProgress[appIndex].outcomes
+                : [];
+              appLaunchProgress[appIndex].outcomes = Array.from(new Set([
+                ...prev,
+                OUTCOME_CONSTRAINED_PLACEMENT,
+              ]));
+              const tact = executionActions[appTimelineIndexByApp[appIndex]];
+              if (tact) {
+                appendUniquePill(tact, 'Constrained');
+                appendSmartDecision(
+                  tact,
+                  CONSTRAINED_PLACEMENT_DECISION_TEXT,
+                );
+              }
+            }
+          } else {
+          if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+            appLaunchProgress[appIndex].step = 'verifying';
+          }
+          throw new Error(
+            bounds.state === 'maximized'
+              ? 'Placed window did not pass maximized stabilization verification.'
+              : bounds.state === 'normal'
+                ? 'Placed window did not pass placement verification/stabilization.'
+                : 'Placed window could not be validated.',
+          );
+          }
         }
       }
       if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {

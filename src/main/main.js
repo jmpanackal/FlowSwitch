@@ -68,6 +68,7 @@ const {
   applySoftwareRenderingWorkaround,
   shouldForceSoftwareRendering,
 } = require('./utils/software-rendering-flags');
+const { readAppPreferences } = require('./services/app-preferences-store');
 
 const shouldBootstrapElectronMain = (
   Boolean(app)
@@ -716,12 +717,15 @@ if (shouldBootstrapElectronMain) {
 
 const launchExecutable = (executablePath, args = []) => (
   new Promise((resolve, reject) => {
+    const safeExecutablePath = String(executablePath || '').trim();
+    const launchCwd = safeExecutablePath ? path.dirname(safeExecutablePath) : undefined;
     let child;
     try {
-      child = spawn(executablePath, args, {
+      child = spawn(safeExecutablePath, args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
+        cwd: launchCwd,
       });
     } catch (error) {
       reject(error);
@@ -856,8 +860,22 @@ let profileAccessShell = null;
 let profileScheduleRunner = null;
 
 const applyLaunchVisibilityBegin = () => {
-  // Intentionally do not focus, move to top, or set always-on-top during launch so other apps
-  // can remain in front; progress is shown in the renderer instead.
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  let shouldPin = true;
+  try {
+    const prefs = readAppPreferences();
+    shouldPin = Boolean(prefs?.pinMainWindowDuringProfileLaunch);
+  } catch (err) {
+    console.warn('[launch-surface] read prefs failed:', String(err?.message || err));
+  }
+  if (!shouldPin) return;
+  try {
+    // Keep launch progress reachable without stealing focus from the app being launched.
+    win.setAlwaysOnTop(true, 'screen-saver');
+  } catch (err) {
+    console.warn('[launch-surface] begin failed:', String(err?.message || err));
+  }
 };
 
 const applyLaunchVisibilityEnd = () => {

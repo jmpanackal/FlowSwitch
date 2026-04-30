@@ -185,8 +185,6 @@ export default function App() {
   const [inspectorMode, setInspectorMode] = useState<"inspect" | "launch">(
     "inspect",
   );
-  const inspectorModeRef = useRef(inspectorMode);
-  inspectorModeRef.current = inspectorMode;
 
   const [lastLaunchProgress, setLastLaunchProgress] =
     useState<LaunchProgressSnapshot | null>(null);
@@ -1537,11 +1535,11 @@ export default function App() {
     if (!isLaunching && !launchProgressNonTerminal) return;
 
     // Ensure launch status is visible during a run (including awaiting confirmations).
-    setRightSidebarOpen(true);
-    if (inspectorModeRef.current !== "launch") {
+    if (!rightSidebarOpen) setRightSidebarOpen(true);
+    if (inspectorMode !== "launch") {
       setInspectorMode("launch");
     }
-  }, [isLaunching, launchProgressNonTerminal]);
+  }, [isLaunching, launchProgressNonTerminal, rightSidebarOpen, inspectorMode]);
 
   useEffect(() => {
     if (!shouldPollLaunchStatus) return;
@@ -1667,14 +1665,38 @@ export default function App() {
     ) {
       setLaunchCancelPending(true);
       try {
-        await window.electron.cancelProfileLaunch(lastLaunchProfileId, lastLaunchRunId);
+        const result = await window.electron.cancelProfileLaunch(
+          lastLaunchProfileId,
+          lastLaunchRunId,
+        );
+        if (!result?.ok) {
+          setLaunchFeedback({
+            status: "error",
+            message: result?.reason === "not-active"
+              ? "Launch is no longer active."
+              : "Could not cancel launch. Try again.",
+            progress: lastLaunchProgress ?? null,
+          });
+          setLaunchCancelPending(false);
+        }
       } catch {
+        setLaunchFeedback({
+          status: "error",
+          message: "Could not cancel launch. Try again.",
+          progress: lastLaunchProgress ?? null,
+        });
         setLaunchCancelPending(false);
       }
       return;
     }
     abortPendingLaunch();
-  }, [abortPendingLaunch, lastLaunchProfileId, lastLaunchRunId]);
+  }, [
+    abortPendingLaunch,
+    lastLaunchProfileId,
+    lastLaunchProgress,
+    lastLaunchRunId,
+    setLaunchFeedback,
+  ]);
 
   /** Keep "Cancelling…" until the run is actually idle (IPC returns before main finishes winding down). */
   useEffect(() => {
