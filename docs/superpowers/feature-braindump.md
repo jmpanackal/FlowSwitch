@@ -114,6 +114,7 @@ Do not include these in the next review pass unless they are explicitly reopened
 
 This section converts raw inbox notes into a normalized product backlog.
 It groups related ideas, removes duplication, and assigns priority, scope, and readiness.
+Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
 
 ### Evaluation Snapshot
 
@@ -137,6 +138,7 @@ It groups related ideas, removes duplication, and assigns priority, scope, and r
   - user-triggered cancel launch action
   - completion feedback option (audio cue)
 - Merged inbox items: launch progress visibility, launch modal concept, cancel launch, done audio signal, "already open" count.
+- **Status (2026-04-30):** Shipped a hardening pass on this track: launch panel persistence during active runs, pin-at-launch preference, cancel IPC failure surfacing, truthful completion (placement verify/stabilize unless constrained acceptance), exe-directory `cwd` for spawns, fatal error dialogs treated as failures, constrained-placement warning path with clearer timeline copy. **Still open:** per-app/overall status density and completion feedback policy (including partial-run semantics).
 - Done when: users can always see launch state, cancel safely, and understand completion/partial failure without guessing.
 
 1. App discovery completeness and hygiene

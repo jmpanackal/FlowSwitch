@@ -62,6 +62,13 @@ import {
   inspectorSectionPrimaryTitleClass,
 } from "./inspectorStyles";
 
+const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
+  if (typeof value === "function") return true;
+  if (!value || typeof value !== "object") return false;
+  return ("$$typeof" in (value as Record<string, unknown>))
+    || ("render" in (value as Record<string, unknown>));
+};
+
 /** Use text/plain so Electron/Chromium reliably carries drag payload. */
 const dragTabPayload = (index: number) => `flowswitch-tab:${index}`;
 const dragAssocPayload = (index: number) => `flowswitch-assoc:${index}`;
@@ -382,23 +389,22 @@ export function SelectedAppDetails({
       );
     }
     
-    try {
+    if (isRenderableIconComponent(app.icon)) {
       const IconComponent = app.icon;
       return (
-        <div 
+        <div
           className={`${size} rounded-xl flex items-center justify-center border border-white/20 shadow-sm`}
           style={{ backgroundColor: `${app.color}80` }}
         >
           <IconComponent className="w-1/2 h-1/2 text-white" />
         </div>
       );
-    } catch (error) {
-      return (
-        <div className={`${size} bg-flow-surface rounded-xl flex items-center justify-center border border-flow-border`}>
-          <span className="text-flow-text-muted text-lg">❓</span>
-        </div>
-      );
     }
+    return (
+      <div className={`${size} bg-flow-surface rounded-xl flex items-center justify-center border border-flow-border`}>
+        <span className="text-flow-text-muted text-lg">❓</span>
+      </div>
+    );
   };
 
   // Render Overview tab (quick actions, add-to-layout when browsing installed apps, path)

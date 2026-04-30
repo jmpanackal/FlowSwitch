@@ -440,6 +440,12 @@ function substepDisplayLabel(s: LaunchActionSubstep): string {
   return s.label;
 }
 
+function shouldMarkVerifySubstepAsWarning(action: LaunchAction): boolean {
+  if (action.state !== "warning") return false;
+  const pills = Array.isArray(action.pills) ? action.pills : [];
+  return pills.some((p) => String(p || "").trim().toLowerCase() === "constrained");
+}
+
 function actionStateLabel(
   action: LaunchAction,
   runState: string | null | undefined,
@@ -483,12 +489,22 @@ function displaySubstepsForAction(
   return next;
 }
 
-function SubstepList({ subs, reducedMotion }: { subs: NonNullable<LaunchAction["substeps"]>; reducedMotion: boolean }) {
+function SubstepList({
+  subs,
+  reducedMotion,
+  warnSubstepIds = null,
+}: {
+  subs: NonNullable<LaunchAction["substeps"]>;
+  reducedMotion: boolean;
+  warnSubstepIds?: Set<string> | null;
+}) {
   return (
     <ul className="mt-2 space-y-1 border-t border-white/[0.08] pt-2">
       {subs.map((s) => (
         <li key={s.id} className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
-          {s.state === "running" && !reducedMotion ? (
+          {(warnSubstepIds?.has(s.id) && s.state === "completed") ? (
+            <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300/95" strokeWidth={2.25} aria-hidden />
+          ) : s.state === "running" && !reducedMotion ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/80" aria-hidden />
           ) : s.state === "completed" ? (
             <Check className="h-3.5 w-3.5 shrink-0 text-emerald-300/90" strokeWidth={2.5} aria-hidden />
@@ -521,6 +537,9 @@ function CurrentActionExpandedBody({
 }) {
   const extra = smartDecisionExtraCount(action);
   const displaySubsteps = displaySubstepsForAction(action, runState);
+  const warnSubstepIds = shouldMarkVerifySubstepAsWarning(action)
+    ? new Set(["sub-verify"])
+    : null;
   return (
     <div className="border-t border-white/[0.08] pt-2">
       <div className="min-h-[2.5rem]">
@@ -567,7 +586,11 @@ function CurrentActionExpandedBody({
         </p>
       ) : null}
       {displaySubsteps.length ? (
-        <SubstepList subs={displaySubsteps} reducedMotion={reducedMotion} />
+        <SubstepList
+          subs={displaySubsteps}
+          reducedMotion={reducedMotion}
+          warnSubstepIds={warnSubstepIds}
+        />
       ) : null}
     </div>
   );
@@ -616,10 +639,18 @@ function ActionDetailsList({
               ) : null}
               {displaySubstepsForAction(a, runState).length
                 ? (
+                  (() => {
+                    const warnSubstepIds = shouldMarkVerifySubstepAsWarning(a)
+                      ? new Set(["sub-verify"])
+                      : null;
+                    return (
                   <SubstepList
                     subs={displaySubstepsForAction(a, runState)}
                     reducedMotion={reducedMotion}
+                    warnSubstepIds={warnSubstepIds}
                   />
+                    );
+                  })()
                 )
                 : null}
             </div>

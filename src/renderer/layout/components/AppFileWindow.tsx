@@ -4,12 +4,20 @@ import { LucideIcon } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AppSettings } from "./AppSettings";
 import { safeIconSrc } from "../../utils/safeIconSrc";
+import { createDragFrameScheduler } from "../utils/dragFrameScheduler";
 import { startMonitorPercentResize } from "../utils/monitorPercentResize";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
 import { FlowTooltip } from "./ui/tooltip";
+
+const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
+  if (typeof value === "function") return true;
+  if (!value || typeof value !== "object") return false;
+  return ("$$typeof" in (value as Record<string, unknown>))
+    || ("render" in (value as Record<string, unknown>));
+};
 
 interface BaseItem {
   name: string;
@@ -206,6 +214,7 @@ export function AppFileWindow({
   const [mainTooltipPosition, setMainTooltipPosition] = useState<{ x: number; y: number } | null>(null);
   
   const fileIconRef = useRef<HTMLDivElement>(null);
+  const outerWindowRef = useRef<HTMLDivElement>(null);
   const mainWindowRef = useRef<HTMLDivElement>(null);
   const restoreLayoutRef = useRef<{
     position: { x: number; y: number };
@@ -217,8 +226,20 @@ export function AppFileWindow({
     startX: 0,
     startY: 0,
     startPosition: { x: 0, y: 0 },
-    monitorElement: null as HTMLElement | null
+    monitorElement: null as HTMLElement | null,
+    monitorRect: null as DOMRect | null,
+    visualScaleX: 1,
+    visualScaleY: 1,
   });
+  const visualDragFrameRef = useRef(
+    createDragFrameScheduler<{ x: number; y: number }>(
+      ({ x, y }) => {
+        const el = outerWindowRef.current;
+        if (!el) return;
+        el.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+      },
+    ),
+  );
 
   /** Same function instances passed to add/removeEventListener for document drag. */
   const docDragPairRef = useRef<{
@@ -243,12 +264,21 @@ export function AppFileWindow({
     docDragPairRef.current = null;
   };
 
+  const resetVisualDragTransform = () => {
+    visualDragFrameRef.current.cancel();
+    const el = outerWindowRef.current;
+    if (!el) return;
+    el.style.transform = "";
+    el.style.willChange = "";
+  };
+
   const finalizeDocumentPercentDrag = () => {
     if (!dragStateRef.current.isDragging) {
       detachDocumentDragListeners();
       // Parent can clear layout drag (e.g. HTML5 dragend before mouseup) while this
       // tile still has localDragging — always drop the local tint/listeners.
       setLocalDragging(false);
+      resetVisualDragTransform();
       return;
     }
     dragStateRef.current.isDragging = false;
@@ -262,6 +292,7 @@ export function AppFileWindow({
     } catch {
       // Profile update can throw; tile chrome is already cleared above.
     }
+    window.requestAnimationFrame(resetVisualDragTransform);
   };
 
   const finalizeDocumentPercentDragRef = useRef(finalizeDocumentPercentDrag);
@@ -345,17 +376,15 @@ export function AppFileWindow({
       );
     }
     
-    try {
+    if (isRenderableIconComponent(mainIcon)) {
       const IconComponent = mainIcon;
       return <IconComponent className="app-icon text-white" />;
-    } catch (error) {
-      console.warn('Failed to render icon:', error);
-      return (
-        <div className="app-icon-fallback bg-white/20 rounded-lg">
-          <span className="text-white text-sm">⚠️</span>
-        </div>
-      );
     }
+    return (
+      <div className="app-icon-fallback bg-white/20 rounded-lg">
+        <span className="text-white text-sm">⚠️</span>
+      </div>
+    );
   };
 
   // FIXED: Simple content indicator hover for concise tooltip
@@ -796,16 +825,31 @@ export function AppFileWindow({
       return;
     }
     
+    const monitorEl = monitorContainer as HTMLElement;
+    const monitorRect = monitorEl.getBoundingClientRect();
+    const visualScaleX =
+      monitorEl.offsetWidth > 0 ? monitorRect.width / monitorEl.offsetWidth : 1;
+    const visualScaleY =
+      monitorEl.offsetHeight > 0 ? monitorRect.height / monitorEl.offsetHeight : 1;
+
     dragStateRef.current = {
       isDragging: true,
       startX: clientX,
       startY: clientY,
       startPosition: { ...item.position },
-      monitorElement: monitorContainer as HTMLElement
+      monitorElement: monitorEl,
+      monitorRect,
+      visualScaleX: Number.isFinite(visualScaleX) && visualScaleX > 0 ? visualScaleX : 1,
+      visualScaleY: Number.isFinite(visualScaleY) && visualScaleY > 0 ? visualScaleY : 1,
     };
     
     setLocalDragging(true);
     onDragStart();
+    const outerEl = outerWindowRef.current;
+    if (outerEl && !monitorPreviewSurface) {
+      outerEl.style.willChange = "transform";
+      outerEl.style.transform = "translate3d(0, 0, 0)";
+    }
 
     // Remove click detection listeners and add drag listeners
     document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
@@ -822,7 +866,10 @@ export function AppFileWindow({
       const deltaX = e.clientX - dragStateRef.current.startX;
       const deltaY = e.clientY - dragStateRef.current.startY;
 
-      const monitorRect = dragStateRef.current.monitorElement.getBoundingClientRect();
+      const monitorRect = dragStateRef.current.monitorRect;
+      if (!monitorRect || monitorRect.width <= 0 || monitorRect.height <= 0) {
+        return;
+      }
 
       const percentDeltaX = (deltaX / monitorRect.width) * 100;
       const percentDeltaY = (deltaY / monitorRect.height) * 100;
@@ -848,6 +895,12 @@ export function AppFileWindow({
       const pointerY = ((e.clientY - monitorRect.top) / monitorRect.height) * 100;
       // Keep raw percentages so parent can tell when pointer is off-monitor
       // during cross-monitor drags (values can be <0 or >100).
+      if (!monitorPreviewSurface) {
+        visualDragFrameRef.current.schedule({
+          x: deltaX / dragStateRef.current.visualScaleX,
+          y: deltaY / dragStateRef.current.visualScaleY,
+        });
+      }
       onDragRef.current(newPosition, { x: pointerX, y: pointerY });
     };
 
@@ -912,6 +965,7 @@ export function AppFileWindow({
       dragStateRef.current.isDragging = false;
       setLocalDragging(false);
       detachDocumentDragListeners();
+      resetVisualDragTransform();
     }
   }, [isDragging, localDragging]);
 
@@ -923,6 +977,7 @@ export function AppFileWindow({
     dragStateRef.current.isDragging = false;
     setLocalDragging(false);
     detachDocumentDragListeners();
+    resetVisualDragTransform();
   }, [isEditable, localDragging]);
 
   // Cleanup timers on unmount
@@ -931,6 +986,7 @@ export function AppFileWindow({
       document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
       document.removeEventListener('mouseup', handleMouseUpForClickDetection);
       finalizeDocumentPercentDragRef.current();
+      resetVisualDragTransform();
     };
   }, []);
 
@@ -1128,22 +1184,24 @@ export function AppFileWindow({
     } as React.CSSProperties);
 
   const outerClassName = embedInStack
-    ? `relative h-full min-h-0 w-full transition-all duration-200 ${
+    ? `relative h-full min-h-0 w-full ${
       isCurrentlyDragging ? "opacity-90 z-50" : "z-10"
-    }`
-    : `absolute transition-all duration-200 ${
+    } ${isCurrentlyDragging ? "transition-none" : "transition-all duration-200"}`
+    : `absolute ${
       isCurrentlyDragging ? "opacity-90 z-50" : "z-10"
-    }`;
+    } ${isCurrentlyDragging ? "transition-none" : "transition-all duration-200"}`;
 
   return (
     <>
       <div 
+        ref={outerWindowRef}
         className={outerClassName}
         style={outerPositionStyle}
         draggable={monitorPreviewSurface ? false : isEditable}
         onDragStart={handleDragStartEvent}
         onDragEnd={handleDragEndEvent}
         data-unified-window="true"
+        data-layout-hit-test-ignore={isCurrentlyDragging ? "true" : undefined}
         data-monitor-id={monitorId}
         data-item-index={itemIndex}
         data-item-type={item.type}

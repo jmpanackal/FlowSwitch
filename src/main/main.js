@@ -64,6 +64,11 @@ const {
   parseProfileLaunchIdFromArgv,
 } = require('./services/profile-access-shell');
 const { createProfileScheduleRunner } = require('./services/profile-schedule-runner');
+const {
+  applySoftwareRenderingWorkaround,
+  shouldForceSoftwareRendering,
+} = require('./utils/software-rendering-flags');
+const { readAppPreferences } = require('./services/app-preferences-store');
 
 const shouldBootstrapElectronMain = (
   Boolean(app)
@@ -82,20 +87,10 @@ if (shouldBootstrapElectronMain) {
     app.setAppUserModelId('app.flowswitch.desktop');
   }
 
-  // GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
-  // which leads to renderer blackscreens. Force software rendering path.
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('disable-gpu-compositing');
-  app.commandLine.appendSwitch('in-process-gpu');
-  app.commandLine.appendSwitch('use-angle', 'swiftshader');
-  app.commandLine.appendSwitch('use-gl', 'swiftshader');
-  app.commandLine.appendSwitch('disable-direct-composition');
-  app.commandLine.appendSwitch('disable-d3d11');
-  app.commandLine.appendSwitch(
-    'disable-features',
-    'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas,FluentScrollbar',
-  );
+  if (shouldForceSoftwareRendering()) {
+    // Opt-in fallback for Windows driver stacks that crash the GPU process.
+    applySoftwareRenderingWorkaround(app);
+  }
 }
 
 const iconDataUrlCache = new Map();
@@ -722,12 +717,15 @@ if (shouldBootstrapElectronMain) {
 
 const launchExecutable = (executablePath, args = []) => (
   new Promise((resolve, reject) => {
+    const safeExecutablePath = String(executablePath || '').trim();
+    const launchCwd = safeExecutablePath ? path.dirname(safeExecutablePath) : undefined;
     let child;
     try {
-      child = spawn(executablePath, args, {
+      child = spawn(safeExecutablePath, args, {
         detached: true,
         stdio: 'ignore',
         windowsHide: false,
+        cwd: launchCwd,
       });
     } catch (error) {
       reject(error);
@@ -862,8 +860,22 @@ let profileAccessShell = null;
 let profileScheduleRunner = null;
 
 const applyLaunchVisibilityBegin = () => {
-  // Intentionally do not focus, move to top, or set always-on-top during launch so other apps
-  // can remain in front; progress is shown in the renderer instead.
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return;
+  let shouldPin = true;
+  try {
+    const prefs = readAppPreferences();
+    shouldPin = Boolean(prefs?.pinMainWindowDuringProfileLaunch);
+  } catch (err) {
+    console.warn('[launch-surface] read prefs failed:', String(err?.message || err));
+  }
+  if (!shouldPin) return;
+  try {
+    // Keep launch progress reachable without stealing focus from the app being launched.
+    win.setAlwaysOnTop(true, 'screen-saver');
+  } catch (err) {
+    console.warn('[launch-surface] begin failed:', String(err?.message || err));
+  }
 };
 
 const applyLaunchVisibilityEnd = () => {

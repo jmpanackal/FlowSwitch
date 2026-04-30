@@ -80,6 +80,9 @@ Use this when shipping a **new app version** users download from the marketing s
 - Use commit prefixes: `feat:`, `fix:`, `refactor:`, `chore:`.
 - Use `refactor:` on `chore/*` unless required to deliver a `feature/*` or `fix/*`.
 - Run lint and typecheck before committing.
+- After each commit, update backlog docs before handoff:
+  - Update `docs/superpowers/feature-braindump.md` (`Reviewed / Formalized` and sequencing/status notes for impacted items).
+  - Update `docs/superpowers/unified-backlog.md` so it remains the single current backlog snapshot.
 - Do not commit unless the user explicitly asks in that request.
 
 ## Agent Handoff (Human Review First)
@@ -157,6 +160,12 @@ Required:
 5. Enforce controls: no task `in_progress` > 2 days without note/status; blocked for 2 iterations needs repro + redesign/limitation note.
 6. Preserve guardrails: no stale `runId` renderer mutation; placement verification before placeable-window success.
 7. Keep phase sequencing aligned with checklist priorities.
+
+## Backlog Source of Truth (Mandatory)
+
+- Canonical backlog file: `docs/superpowers/unified-backlog.md`.
+- Source inputs (minimum): `docs/superpowers/feature-braindump.md` and `docs/superpowers/specs/workflow-orchestration-rewrite-plan.md` plus `docs/superpowers/specs/workflow-orchestration-execution-checklist.md`.
+- When implementation status changes, sync the canonical backlog and source docs in the same working session so priorities and status do not drift.
 
 ## Priority Order (When Rules Conflict)
 
