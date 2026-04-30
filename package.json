@@ -11,7 +11,7 @@
     "typecheck": "node scripts/typecheck-baseline.mjs check",
     "typecheck:full": "tsc --noEmit",
     "typecheck:baseline:update": "node scripts/typecheck-baseline.mjs update",
-    "test": "node --test src/main/utils/ src/main/services/ && tsx --test src/renderer/layout/utils/launchTimeline.test.ts",
+    "test": "node --test src/main/utils/ src/main/services/ && tsx --test src/renderer/layout/utils/launchTimeline.test.ts src/renderer/layout/utils/dragFrameScheduler.test.ts src/renderer/layout/utils/layoutDragMoveEvents.test.ts src/renderer/layout/utils/layoutHitTesting.test.ts src/renderer/layout/utils/minimizedStripDragGesture.test.ts",
     "dev:frontend": "vite",
     "dev:electron": "electron .",
     "dev": "npm-run-all -p dev:frontend dev:electron",

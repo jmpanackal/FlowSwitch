@@ -15,6 +15,13 @@ import {
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
 import { flowDropdownNativeSelectClass } from "./inspectorStyles";
+import { safeIconSrc } from "../../utils/safeIconSrc";
+import {
+  getAppColor,
+  getAppIcon,
+  getBrowserColor,
+  getBrowserIcon,
+} from "../utils/layoutDropPresentation";
 
 // Enhanced content types for the unified system
 export interface ContentFolder {
@@ -84,6 +91,8 @@ interface ContentManagerProps {
   }) => void;
   /** IDs hidden for the active profile only (global library still contains them). */
   excludedContentIds?: string[];
+  /** Installed-app catalog rows (name + shell icon path) for drag previews matching “Opens with”. */
+  installedAppsCatalog?: { name: string; iconPath: string | null }[];
   compact?: boolean;
   /** When both set with `compact`, hides the local search field and uses this query. */
   sidebarSearchQuery?: string;
@@ -143,6 +152,63 @@ export const AVAILABLE_APPS = [
   'Sketch',
   'Canva'
 ];
+
+const SIDEBAR_DRAG_BROWSER_NAMES = new Set(
+  ["Chrome", "Firefox", "Safari", "Edge"].map((s) => s.toLowerCase()),
+);
+
+function resolveInstalledCatalogIconPath(
+  catalog: { name: string; iconPath: string | null }[] | undefined,
+  appName: string,
+): string | null {
+  if (!catalog?.length || !appName.trim()) return null;
+  const t = appName.trim();
+  const tl = t.toLowerCase();
+  const byExact = catalog.find((a) => a.name.trim().toLowerCase() === tl);
+  if (byExact?.iconPath) return byExact.iconPath;
+  const byPartial = catalog.find((a) => {
+    const al = a.name.trim().toLowerCase();
+    return al.includes(tl) || tl.includes(al);
+  });
+  return byPartial?.iconPath ?? null;
+}
+
+function renderOpensWithDragPreview(
+  defaultApp: string,
+  label: string,
+  catalog: { name: string; iconPath: string | null }[] | undefined,
+) {
+  const raster = safeIconSrc(
+    resolveInstalledCatalogIconPath(catalog, defaultApp) ?? undefined,
+  );
+  const AppGlyph = getAppIcon(defaultApp);
+  const BrowserGlyph = getBrowserIcon(defaultApp);
+  const tl = defaultApp.trim().toLowerCase();
+  const isLikelyBrowser =
+    SIDEBAR_DRAG_BROWSER_NAMES.has(tl)
+    || tl.includes("chrome")
+    || tl.includes("firefox")
+    || tl.includes("edge")
+    || tl.includes("safari");
+  return (
+    <div className="flex max-w-[240px] items-center gap-2">
+      {raster ? (
+        <img src={raster} alt="" className="h-4 w-4 shrink-0 rounded object-contain" />
+      ) : isLikelyBrowser ? (
+        <BrowserGlyph
+          className="h-4 w-4 shrink-0"
+          style={{ color: getBrowserColor(defaultApp) }}
+        />
+      ) : (
+        <AppGlyph
+          className="h-4 w-4 shrink-0"
+          style={{ color: getAppColor(defaultApp) }}
+        />
+      )}
+      <span className="truncate font-medium text-white">{label}</span>
+    </div>
+  );
+}
 
 // Default app mappings by content type (for initial suggestions)
 const DEFAULT_APP_MAPPINGS = {
@@ -206,6 +272,7 @@ export function ContentManager({
   externalContentFolders,
   onPersistContentLibrary,
   excludedContentIds,
+  installedAppsCatalog,
   compact = false,
   sidebarSearchQuery,
   onSidebarSearchQueryChange,
@@ -569,23 +636,43 @@ export function ContentManager({
     if (mouseStateRef.current.dragInitiated || !mouseStateRef.current.itemData) return;
 
     const item = mouseStateRef.current.itemData;
-    // Only allow dragging content items, not folders
-    if (item.type === "folder") return;
-
-    console.log("🚀 INITIATING CONTENT DRAG MODE");
     mouseStateRef.current.dragInitiated = true;
-    
-    // Trigger edit mode
+
     if (onDragStart) {
       onDragStart();
     }
-    
+
+    if (item.type === "folder") {
+      const folder = item as ContentFolder;
+      const dragData = {
+        source: "sidebar" as const,
+        type: "libraryFolder" as const,
+        folder: { ...folder },
+        name: folder.name,
+        defaultApp: folder.defaultApp,
+      };
+      const preview = renderOpensWithDragPreview(
+        folder.defaultApp,
+        folder.name,
+        installedAppsCatalog,
+      );
+      onCustomDragStart(
+        dragData,
+        "sidebar",
+        "content",
+        { x: clientX, y: clientY },
+        preview,
+      );
+      document.removeEventListener("mousemove", handleMouseMoveForClickDetection);
+      document.removeEventListener("mouseup", handleMouseUpForClickDetection);
+      return;
+    }
+
     const contentItem = item as ContentItem;
-    
-    // Create drag data for the content item
+
     const dragData = {
-      source: 'sidebar',
-      type: 'content',
+      source: "sidebar" as const,
+      type: "content" as const,
       contentType: contentItem.type,
       contentId: contentItem.id,
       name: contentItem.name,
@@ -595,30 +682,26 @@ export function ContentManager({
       defaultApp: contentItem.defaultApp,
       isFolder: contentItem.isFolder,
       useDefaultApp: true,
-      // For creating new app instances
       createNewApp: true,
-      associatedApp: contentItem.defaultApp
+      associatedApp: contentItem.defaultApp,
     };
-    
-    // Create preview element
-    const preview = (
-      <div className="flex items-center gap-2">
-        {getContentIcon(contentItem)}
-        <span className="text-white font-medium">{contentItem.name}</span>
-      </div>
+
+    const preview = renderOpensWithDragPreview(
+      contentItem.defaultApp,
+      contentItem.name,
+      installedAppsCatalog,
     );
-    
+
     onCustomDragStart(
       dragData,
-      'sidebar',
-      'content',
+      "sidebar",
+      "content",
       { x: clientX, y: clientY },
-      preview
+      preview,
     );
-    
-    // Remove click detection listeners
-    document.removeEventListener('mousemove', handleMouseMoveForClickDetection);
-    document.removeEventListener('mouseup', handleMouseUpForClickDetection);
+
+    document.removeEventListener("mousemove", handleMouseMoveForClickDetection);
+    document.removeEventListener("mouseup", handleMouseUpForClickDetection);
   };
 
   const handleContentClick = (item: ContentItem | ContentFolder | null) => {
@@ -994,12 +1077,14 @@ export function ContentManager({
         <div key={folder.id} className={baseClasses}>
           <div className="flow-card-quiet min-w-0 rounded-lg">
             <div
-              className={`flex cursor-pointer gap-3 ${rowPad} ${
+              className={`flex cursor-grab gap-3 ${rowPad} active:cursor-grabbing ${
                 isGrid
                   ? "min-w-0 flex-col items-center text-center"
                   : "items-center"
               }`}
-              onClick={() => handleContentClick(folder)}
+              onMouseDown={(e) => handleMouseDown(e, folder)}
+              onMouseEnter={() => setHoveredItem(folder.id)}
+              onMouseLeave={() => setHoveredItem(null)}
             >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
                 <Folder className="h-4 w-4 text-amber-400" aria-hidden />

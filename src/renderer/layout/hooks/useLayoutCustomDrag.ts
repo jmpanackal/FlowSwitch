@@ -1,5 +1,6 @@
 import {
   useCallback,
+  useRef,
   type Dispatch,
   type MutableRefObject,
   type ReactNode,
@@ -24,6 +25,17 @@ import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
+import { createDragFrameScheduler } from "../utils/dragFrameScheduler";
+import { createLayoutDragMoveEvent } from "../utils/layoutDragMoveEvents";
+import { resolveDropTargetFromEventStack } from "../utils/layoutHitTesting";
+import type { ContentFolder } from "../components/ContentManager";
+import type { InstalledApp } from "../../hooks/useInstalledApps";
+
+/** Sidebar drag-drop for library folders (wired from MainLayout; uses global `contentLibrary`). */
+export type LibraryFolderPlacementActions = {
+  placeOnMonitor: (monitorId: string, folder: ContentFolder) => void;
+  placeOnMinimized: (folder: ContentFolder) => void;
+};
 
 export type ProfileLayoutDragActions = {
   updateApp: (
@@ -87,7 +99,25 @@ type UseLayoutCustomDragOptions = {
   isEditModeRef: MutableRefObject<boolean>;
   currentProfileRef: MutableRefObject<FlowProfile | null>;
   profileDragActionsRef: MutableRefObject<ProfileLayoutDragActions | null>;
+  libraryFolderPlacementRef?: MutableRefObject<LibraryFolderPlacementActions | null>;
+  installedAppsCatalogRef?: MutableRefObject<InstalledApp[] | null>;
 };
+
+function resolveInstalledCatalogIconPath(
+  catalog: InstalledApp[] | null | undefined,
+  appName: string,
+): string | null {
+  if (!catalog?.length || !appName.trim()) return null;
+  const t = appName.trim();
+  const tl = t.toLowerCase();
+  const byExact = catalog.find((a) => a.name.trim().toLowerCase() === tl);
+  if (byExact?.iconPath) return byExact.iconPath;
+  const byPartial = catalog.find((a) => {
+    const al = a.name.trim().toLowerCase();
+    return al.includes(tl) || tl.includes(al);
+  });
+  return byPartial?.iconPath ?? null;
+}
 
 /**
  * In-editor custom drag/drop: global mouse listeners, monitor/minimized targets, and profile
@@ -101,7 +131,18 @@ export function useLayoutCustomDrag({
   isEditModeRef,
   currentProfileRef,
   profileDragActionsRef,
+  libraryFolderPlacementRef,
+  installedAppsCatalogRef,
 }: UseLayoutCustomDragOptions) {
+  const dragMoveFrameRef = useRef(
+    createDragFrameScheduler<{ x: number; y: number }>((position) => {
+      setDragState((prev) => ({
+        ...prev,
+        currentPosition: position,
+      }));
+    }),
+  );
+
   const handleDropOnMonitor = useCallback(
     (
       dragData: any,
@@ -220,6 +261,21 @@ export function useLayoutCustomDrag({
         }
       }
 
+      if (
+        dragData.source === "sidebar"
+        && dragData.type === "libraryFolder"
+        && dragData.folder
+      ) {
+        const place = libraryFolderPlacementRef?.current;
+        if (
+          place
+          && currentProfile.monitors?.some((m: { id: string }) => m.id === targetMonitorId)
+        ) {
+          place.placeOnMonitor(targetMonitorId, dragData.folder as ContentFolder);
+        }
+        return;
+      }
+
       const monitorElement = document.querySelector(
         `[data-monitor-id="${targetMonitorId}"].monitor-container`,
       );
@@ -237,6 +293,13 @@ export function useLayoutCustomDrag({
       if (!targetMonitor) return;
 
       const sourceMonitorId = dragData.sourceMonitorId || dragData.monitorId || null;
+      if (
+        dragData.type === "app"
+        && dragData.source === "monitor"
+        && sourceMonitorId === targetMonitorId
+      ) {
+        return;
+      }
       const isIncomingApp = dragData.type === "app"
         && (dragData.source === "sidebar"
           || dragData.source === "minimized"
@@ -310,6 +373,16 @@ export function useLayoutCustomDrag({
             dragData,
           );
 
+          const defaultAppLabel = (
+            dragData.defaultApp
+            || dragData.associatedApp
+            || "File Viewer"
+          );
+          const resolvedIconPath = resolveInstalledCatalogIconPath(
+            installedAppsCatalogRef?.current,
+            defaultAppLabel,
+          );
+
           if (
             dragData.contentType === "link"
             || (dragData.type === "content" && dragData.url)
@@ -317,6 +390,7 @@ export function useLayoutCustomDrag({
             const newApp: any = {
               name: dragData.defaultApp,
               icon: getBrowserIcon(dragData.defaultApp),
+              iconPath: resolvedIconPath,
               color: getBrowserColor(dragData.defaultApp),
               position,
               size: { width: 60, height: 60 },
@@ -345,20 +419,10 @@ export function useLayoutCustomDrag({
             addBrowserTab(currentProfile.id, newTab);
           } else {
             const newApp: any = {
-              name:
-                dragData.defaultApp
-                || dragData.associatedApp
-                || "File Viewer",
-              icon: getAppIcon(
-                dragData.defaultApp
-                  || dragData.associatedApp
-                  || "File Viewer",
-              ),
-              color: getAppColor(
-                dragData.defaultApp
-                  || dragData.associatedApp
-                  || "File Viewer",
-              ),
+              name: defaultAppLabel,
+              icon: getAppIcon(defaultAppLabel),
+              iconPath: resolvedIconPath,
+              color: getAppColor(defaultAppLabel),
               position,
               size: { width: 60, height: 60 },
               volume: 50,
@@ -456,7 +520,7 @@ export function useLayoutCustomDrag({
         );
       }
     },
-    [currentProfileRef, profileDragActionsRef],
+    [currentProfileRef, profileDragActionsRef, libraryFolderPlacementRef],
   );
 
   const handleDropOnMinimized = useCallback(
@@ -512,27 +576,33 @@ export function useLayoutCustomDrag({
       } else if (dragData.source === "sidebar") {
         const sidebarMinimizedMonitorId =
           minimizedDropMonitorId || primaryMonitorId;
+        if (dragData.type === "libraryFolder" && dragData.folder) {
+          libraryFolderPlacementRef?.current?.placeOnMinimized(
+            dragData.folder as ContentFolder,
+          );
+          return;
+        }
         if (dragData.type === "content" || dragData.type === "file") {
           console.log(
             "🚀 CREATING MINIMIZED APP INSTANCE FOR CONTENT/FILE:",
             dragData,
           );
 
+          const defaultAppLabel = (
+            dragData.defaultApp
+            || dragData.associatedApp
+            || "File Viewer"
+          );
+          const resolvedIconPath = resolveInstalledCatalogIconPath(
+            installedAppsCatalogRef?.current,
+            defaultAppLabel,
+          );
+
           const newApp: any = {
-            name:
-              dragData.defaultApp
-              || dragData.associatedApp
-              || "File Viewer",
-            icon: getAppIcon(
-              dragData.defaultApp
-                || dragData.associatedApp
-                || "File Viewer",
-            ),
-            color: getAppColor(
-              dragData.defaultApp
-                || dragData.associatedApp
-                || "File Viewer",
-            ),
+            name: defaultAppLabel,
+            icon: getAppIcon(defaultAppLabel),
+            iconPath: resolvedIconPath,
+            color: getAppColor(defaultAppLabel),
             volume: 50,
             launchBehavior: "minimize" as const,
             targetMonitor: sidebarMinimizedMonitorId,
@@ -591,7 +661,12 @@ export function useLayoutCustomDrag({
         }
       }
     },
-    [currentProfileRef, profileDragActionsRef],
+    [
+      currentProfileRef,
+      profileDragActionsRef,
+      libraryFolderPlacementRef,
+      installedAppsCatalogRef,
+    ],
   );
 
   const handleCustomDrop = useCallback(
@@ -631,11 +706,10 @@ export function useLayoutCustomDrag({
     if (!dragStateRef.current.isDragging) return;
     if (e instanceof PointerEvent && !e.isPrimary) return;
 
-    setDragState((prev) => ({
-      ...prev,
-      currentPosition: { x: e.clientX, y: e.clientY },
-    }));
-  }, [dragStateRef, setDragState]);
+    const position = { x: e.clientX, y: e.clientY };
+    document.dispatchEvent(createLayoutDragMoveEvent(position));
+    dragMoveFrameRef.current.schedule(position);
+  }, [dragStateRef]);
 
   /**
    * End custom drag on mouse *or* pointer release. Sidebar rows use Pointer Events
@@ -650,28 +724,19 @@ export function useLayoutCustomDrag({
       const currentProfile = currentProfileRef.current;
 
       if (hadActiveLayoutDrag) {
-        const elementBelow = document.elementFromPoint(
-          e.clientX,
-          e.clientY,
-        );
-        const dropTarget = elementBelow?.closest(
-          "[data-drop-target]",
-        );
+        dragMoveFrameRef.current.flush();
+        const stack = document.elementsFromPoint(e.clientX, e.clientY);
+        const dropTarget = resolveDropTargetFromEventStack(stack);
 
         if (
           dropTarget
           && dragStateRef.current.dragData
           && currentProfile
         ) {
-          const targetType = dropTarget.getAttribute(
-            "data-drop-target",
-          );
-          const targetId = dropTarget.getAttribute("data-target-id");
-
           handleCustomDrop(
             dragStateRef.current.dragData,
-            targetType,
-            targetId,
+            dropTarget.targetType,
+            dropTarget.targetId,
             { x: e.clientX, y: e.clientY },
           );
         }
@@ -692,6 +757,7 @@ export function useLayoutCustomDrag({
           );
         });
       }
+      dragMoveFrameRef.current.cancel();
 
       // `flowswitch:dragend` may clear layout drag before this runs; still detach.
       document.removeEventListener(
@@ -754,6 +820,8 @@ export function useLayoutCustomDrag({
         sourceId,
         dragPreview: preview || null,
       });
+      dragMoveFrameRef.current.cancel();
+      document.dispatchEvent(createLayoutDragMoveEvent(startPos));
 
       document.addEventListener(
         "mousemove",

@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { Settings, Grid3X3, Check, X, Monitor, ChevronDown } from "lucide-react";
+import { Grid3X3, Check, ChevronDown } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
 
 interface MonitorLayoutConfigProps {
@@ -268,22 +268,22 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
     onLayoutChange(monitor.id, layoutKey);
     setIsOpen(false);
   };
+
+  const layoutEntries = Object.entries(layouts);
   
   return (
     <div className="relative">
-      <FlowTooltip label="Configure Layout">
+      <FlowTooltip label="Choose layout pattern">
         <button
           type="button"
           onClick={() => setIsOpen(!isOpen)}
-          className={`inline-flex items-center gap-1 px-2 py-1 text-xs rounded transition-all duration-200 ${
-            isDropdown 
-              ? 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
-              : 'bg-flow-surface border border-flow-border text-flow-text-secondary hover:bg-flow-surface-elevated hover:text-flow-text-primary hover:border-flow-border-accent'
+          className={`inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-white/90 transition-colors hover:bg-white/[0.12] ${
+            isDropdown ? "" : ""
           }`}
         >
           <Grid3X3 className="w-3 h-3" />
           <span>{currentLayout?.name || 'Dynamic'}</span>
-          {isDropdown && <ChevronDown className="w-3 h-3" />}
+          <ChevronDown className={`h-3 w-3 transition-transform ${isOpen ? "rotate-180" : ""}`} />
         </button>
       </FlowTooltip>
       
@@ -295,90 +295,75 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
             onClick={() => setIsOpen(false)}
           />
           
-          {/* Layout Selection Menu */}
-          <div className="absolute left-0 top-full z-50 mt-2 w-80 rounded-lg border border-flow-border bg-flow-surface-elevated p-4 shadow-lg flow-modal-panel-enter">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Monitor className="w-4 h-4 text-flow-text-secondary" />
-                <span className="text-flow-text-primary font-medium text-sm">
-                  {monitor.name} Layout
-                </span>
-                <span className="text-flow-text-muted text-xs">
-                  ({monitor.orientation})
-                </span>
+          {/* Layout Selection Popup */}
+          <div className="absolute left-1/2 top-full z-50 mt-2 w-[26rem] -translate-x-1/2 rounded-xl border border-white/15 bg-flow-bg-secondary/95 p-3 shadow-xl backdrop-blur-md flow-modal-panel-enter">
+            <div className="mb-3 flex items-center justify-between">
+              <div>
+                <div className="text-xs font-semibold uppercase tracking-wide text-flow-text-muted">
+                  Layout Presets
+                </div>
+                <div className="text-[11px] text-flow-text-muted/90">
+                  {monitor.orientation === "portrait" ? "Portrait" : "Landscape"} monitor
+                </div>
               </div>
-              <button
-                onClick={() => setIsOpen(false)}
-                className="p-1 hover:bg-flow-surface rounded transition-colors"
-              >
-                <X className="w-4 h-4 text-flow-text-muted" />
-              </button>
             </div>
-            
-            {/* Dynamic Layout Option */}
-            <div className="mb-4">
+
+            <div className="grid max-h-[21rem] grid-cols-4 gap-2 overflow-y-auto pr-1 scrollbar-elegant">
               <button
                 onClick={() => handleLayoutSelect(null)}
-                className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 ${
+                className={`rounded-lg border p-2 text-left transition-colors ${
                   !monitor.predefinedLayout 
-                    ? 'bg-flow-accent-blue/20 border border-flow-accent-blue/30' 
-                    : 'bg-flow-surface hover:bg-flow-surface-elevated border border-flow-border'
+                    ? 'border-flow-accent-blue/55 bg-flow-accent-blue/18' 
+                    : 'border-white/10 bg-black/20 hover:border-flow-accent-blue/40 hover:bg-black/30'
                 }`}
               >
-                <div className={`w-12 h-8 bg-flow-bg-tertiary border-2 rounded flex items-center justify-center transition-all duration-200 ${
-                  !monitor.predefinedLayout ? 'border-flow-accent-blue' : 'border-flow-border'
+                <div className={`mb-1.5 flex h-10 w-full items-center justify-center rounded border text-[11px] ${
+                  !monitor.predefinedLayout ? "border-flow-accent-blue text-flow-accent-blue" : "border-white/20 text-flow-text-muted"
                 }`}>
-                  <div className="text-flow-text-muted text-xs">Auto</div>
+                  Auto
                 </div>
-                <div className="flex-1 text-left">
-                  <div className={`text-sm font-medium ${
-                    !monitor.predefinedLayout ? 'text-flow-accent-blue' : 'text-flow-text-primary'
+                <div className="flex items-center justify-between gap-1">
+                  <span className={`truncate text-[11px] font-medium ${
+                    !monitor.predefinedLayout ? "text-flow-accent-blue" : "text-flow-text-primary"
                   }`}>
-                    Dynamic Layout
-                  </div>
-                  <div className="text-flow-text-muted text-xs">
-                    Automatically arranges apps
-                  </div>
+                    Dynamic
+                  </span>
+                  {!monitor.predefinedLayout ? (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" />
+                  ) : null}
                 </div>
-                {!monitor.predefinedLayout && (
-                  <Check className="w-4 h-4 text-flow-accent-blue" />
-                )}
               </button>
-            </div>
-            
-            {/* Predefined Layouts */}
-            <div className="scrollbar-elegant max-h-64 space-y-2 overflow-y-auto">
-              <div className="text-flow-text-secondary text-xs font-medium mb-2 uppercase tracking-wide">
-                Predefined Layouts
-              </div>
-              {Object.entries(layouts).map(([key, layout]) => (
+
+              {layoutEntries.map(([key, layout]) => (
                 <button
                   key={key}
                   onClick={() => handleLayoutSelect(key)}
-                  className={`w-full flex items-center gap-3 p-3 rounded-lg transition-all duration-200 ${
+                  className={`rounded-lg border p-2 text-left transition-colors ${
                     monitor.predefinedLayout === key
-                      ? 'bg-flow-accent-blue/20 border border-flow-accent-blue/30' 
-                      : 'bg-flow-surface hover:bg-flow-surface-elevated border border-flow-border'
+                      ? 'border-flow-accent-blue/55 bg-flow-accent-blue/18' 
+                      : 'border-white/10 bg-black/20 hover:border-flow-accent-blue/40 hover:bg-black/30'
                   }`}
                 >
-                  <LayoutPreview 
-                    layout={layout} 
-                    orientation={monitor.orientation}
-                    isSelected={monitor.predefinedLayout === key}
-                  />
-                  <div className="flex-1 text-left">
-                    <div className={`text-sm font-medium ${
+                  <div className="mb-1.5 flex justify-center">
+                    <LayoutPreview 
+                      layout={layout} 
+                      orientation={monitor.orientation}
+                      isSelected={monitor.predefinedLayout === key}
+                    />
+                  </div>
+                  <div className="flex items-center justify-between gap-1">
+                    <span className={`truncate text-[11px] font-medium ${
                       monitor.predefinedLayout === key ? 'text-flow-accent-blue' : 'text-flow-text-primary'
                     }`}>
                       {layout.name}
-                    </div>
-                    <div className="text-flow-text-muted text-xs">
-                      {layout.maxApps} app{layout.maxApps === 1 ? '' : 's'} max
-                    </div>
+                    </span>
+                    {monitor.predefinedLayout === key ? (
+                      <Check className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" />
+                    ) : null}
                   </div>
-                  {monitor.predefinedLayout === key && (
-                    <Check className="w-4 h-4 text-flow-accent-blue" />
-                  )}
+                  <div className="truncate text-[10px] text-flow-text-muted">
+                    {layout.maxApps} app{layout.maxApps === 1 ? '' : 's'}
+                  </div>
                 </button>
               ))}
             </div>

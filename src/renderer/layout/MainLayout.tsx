@@ -94,12 +94,17 @@ import { useProfileLaunch } from "./hooks/useProfileLaunch";
 import { useNativeAppDragBridge } from "./hooks/useNativeAppDragBridge";
 import {
   useLayoutCustomDrag,
+  type LibraryFolderPlacementActions,
   type ProfileLayoutDragActions,
 } from "./hooks/useLayoutCustomDrag";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
 } from "./utils/documentTextSelection";
+import {
+  FLOW_LAYOUT_DRAG_MOVE_EVENT,
+  isLayoutDragMoveEvent,
+} from "./utils/layoutDragMoveEvents";
 import {
   useMainLayoutProfileMutations,
   type MainLayoutSelectedApp,
@@ -250,6 +255,25 @@ export default function App() {
 
   const dragStateRef = useRef<DragState>(dragState);
   dragStateRef.current = dragState;
+  const dragOverlayRef = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!dragState.isDragging) return;
+    const moveOverlay = (position: { x: number; y: number }) => {
+      const overlay = dragOverlayRef.current;
+      if (!overlay) return;
+      overlay.style.transform = `translate3d(${position.x + 12}px, ${position.y - 20}px, 0)`;
+    };
+    moveOverlay(dragStateRef.current.currentPosition);
+    const onMove = (event: Event) => {
+      if (!isLayoutDragMoveEvent(event)) return;
+      moveOverlay(event.detail);
+    };
+    document.addEventListener(FLOW_LAYOUT_DRAG_MOVE_EVENT, onMove);
+    return () => {
+      document.removeEventListener(FLOW_LAYOUT_DRAG_MOVE_EVENT, onMove);
+    };
+  }, [dragState.isDragging]);
 
   useNativeAppDragBridge({
     dragStateRef,
@@ -306,6 +330,10 @@ export default function App() {
   }, [currentView]);
 
   const { apps: installedCatalogApps } = useInstalledApps();
+  const installedAppsCatalogRef = useRef<
+    { name: string; iconPath: string | null }[] | null
+  >(null);
+  installedAppsCatalogRef.current = installedCatalogApps;
 
   const contentLibraryEntryCount = useMemo(() => {
     const items = contentLibrary.items as ContentItem[];
@@ -506,6 +534,9 @@ export default function App() {
   currentProfileRef.current = currentProfile;
   isEditModeRef.current = isEditMode;
   const profileDragActionsRef = useRef<ProfileLayoutDragActions | null>(null);
+  const libraryFolderPlacementRef = useRef<LibraryFolderPlacementActions | null>(
+    null,
+  );
 
   const { handleCustomDragStart } = useLayoutCustomDrag({
     dragStateRef,
@@ -514,6 +545,8 @@ export default function App() {
     isEditModeRef,
     currentProfileRef,
     profileDragActionsRef,
+    libraryFolderPlacementRef,
+    installedAppsCatalogRef,
   });
 
   const {
@@ -550,6 +583,32 @@ export default function App() {
     currentProfile,
     profileDragActionsRef,
   });
+
+  libraryFolderPlacementRef.current = currentProfile
+    ? {
+        placeOnMonitor: (monitorId, folder) => {
+          placeSidebarLibraryFolderOnMonitor({
+            profile: currentProfile,
+            monitorId,
+            folder,
+            folders: contentLibrary.folders as ContentFolder[],
+            libraryItems: contentLibrary.items as ContentItem[],
+            installedAppsCatalog: installedCatalogApps,
+            addApp,
+          });
+        },
+        placeOnMinimized: (folder) => {
+          placeSidebarLibraryFolderOnMinimized({
+            profile: currentProfile,
+            folder,
+            folders: contentLibrary.folders as ContentFolder[],
+            libraryItems: contentLibrary.items as ContentItem[],
+            installedAppsCatalog: installedCatalogApps,
+            addAppToMinimized,
+          });
+        },
+      }
+    : null;
 
   const scheduleLaunchFeedbackClear = useCallback(() => {
     if (launchFeedbackTimeoutRef.current) {
@@ -791,11 +850,12 @@ export default function App() {
         profile: currentProfile,
         monitorId,
         item,
+        installedAppsCatalog: installedCatalogApps,
         addApp,
         addBrowserTab,
       });
     },
-    [currentProfile, addApp, addBrowserTab],
+    [currentProfile, installedCatalogApps, addApp, addBrowserTab],
   );
 
   const handlePlaceContentOnMinimized = useCallback(
@@ -804,11 +864,12 @@ export default function App() {
       placeSidebarContentOnMinimized({
         profile: currentProfile,
         item,
+        installedAppsCatalog: installedCatalogApps,
         addAppToMinimized,
         addBrowserTab,
       });
     },
-    [currentProfile, addAppToMinimized, addBrowserTab],
+    [currentProfile, installedCatalogApps, addAppToMinimized, addBrowserTab],
   );
 
   const handleConsumedOpenLibraryFolder = useCallback(() => {
@@ -861,6 +922,7 @@ export default function App() {
           profile: currentProfile,
           monitorId,
           item: contentInspectorSelection.item,
+          installedAppsCatalog: installedCatalogApps,
           addApp,
           addBrowserTab,
         });
@@ -871,6 +933,7 @@ export default function App() {
           folder: contentInspectorSelection.folder,
           folders: contentLibrary.folders as ContentFolder[],
           libraryItems: contentLibrary.items as ContentItem[],
+          installedAppsCatalog: installedCatalogApps,
           addApp,
         });
       }
@@ -883,6 +946,7 @@ export default function App() {
       contentLibrary.items,
       addApp,
       addBrowserTab,
+      installedCatalogApps,
       clearInspectorSelection,
     ],
   );
@@ -893,6 +957,7 @@ export default function App() {
       placeSidebarContentOnMinimized({
         profile: currentProfile,
         item: contentInspectorSelection.item,
+        installedAppsCatalog: installedCatalogApps,
         addAppToMinimized,
         addBrowserTab,
       });
@@ -902,6 +967,7 @@ export default function App() {
         folder: contentInspectorSelection.folder,
         folders: contentLibrary.folders as ContentFolder[],
         libraryItems: contentLibrary.items as ContentItem[],
+        installedAppsCatalog: installedCatalogApps,
         addAppToMinimized,
       });
     }
@@ -913,6 +979,7 @@ export default function App() {
     contentLibrary.items,
     addAppToMinimized,
     addBrowserTab,
+    installedCatalogApps,
     clearInspectorSelection,
   ]);
 
@@ -2007,6 +2074,7 @@ export default function App() {
                       folder,
                       folders: contentLibrary.folders as ContentFolder[],
                       libraryItems: contentLibrary.items as ContentItem[],
+                      installedAppsCatalog: installedCatalogApps,
                       addApp,
                     });
                   }}
@@ -2017,6 +2085,7 @@ export default function App() {
                       folder,
                       folders: contentLibrary.folders as ContentFolder[],
                       libraryItems: contentLibrary.items as ContentItem[],
+                      installedAppsCatalog: installedCatalogApps,
                       addAppToMinimized,
                     });
                   }}
@@ -2026,6 +2095,7 @@ export default function App() {
                   externalContentItems={contentLibrary.items as ContentItem[]}
                   externalContentFolders={contentLibrary.folders as ContentFolder[]}
                   excludedContentIds={Array.from(excludedContentIdSet)}
+                  installedAppsCatalog={installedCatalogApps}
                   onPersistContentLibrary={handlePersistContentLibrary}
                   compact={true}
                   sidebarSearchQuery={sidebarSearchQuery}
@@ -2649,16 +2719,18 @@ export default function App() {
         )}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
-        {dragState.isDragging && dragState.dragData && (
+        {dragState.isDragging
+          && dragState.dragData && (
           <div
+            ref={dragOverlayRef}
             data-app-drag-overlay="true"
-            className="fixed pointer-events-none z-[9999] select-none"
+            className="fixed left-0 top-0 pointer-events-none z-[9999] select-none"
             style={{
-              left: dragState.currentPosition.x + 12,
-              top: dragState.currentPosition.y - 20,
+              transform: `translate3d(${dragState.currentPosition.x + 12}px, ${dragState.currentPosition.y - 20}px, 0)`,
+              willChange: "transform",
             }}
           >
-            <div className="relative animate-in fade-in-0 zoom-in-95 duration-200">
+            <div className="relative">
               {/* Item icon */}
               <div
                 className="w-8 h-8 rounded-lg flex items-center justify-center border border-white/30 shadow-lg backdrop-blur-sm"

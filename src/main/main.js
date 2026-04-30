@@ -64,6 +64,10 @@ const {
   parseProfileLaunchIdFromArgv,
 } = require('./services/profile-access-shell');
 const { createProfileScheduleRunner } = require('./services/profile-schedule-runner');
+const {
+  applySoftwareRenderingWorkaround,
+  shouldForceSoftwareRendering,
+} = require('./utils/software-rendering-flags');
 
 const shouldBootstrapElectronMain = (
   Boolean(app)
@@ -82,20 +86,10 @@ if (shouldBootstrapElectronMain) {
     app.setAppUserModelId('app.flowswitch.desktop');
   }
 
-  // GPU process can crash on some Windows driver stacks (seen as 0xC0000409),
-  // which leads to renderer blackscreens. Force software rendering path.
-  app.disableHardwareAcceleration();
-  app.commandLine.appendSwitch('disable-gpu');
-  app.commandLine.appendSwitch('disable-gpu-compositing');
-  app.commandLine.appendSwitch('in-process-gpu');
-  app.commandLine.appendSwitch('use-angle', 'swiftshader');
-  app.commandLine.appendSwitch('use-gl', 'swiftshader');
-  app.commandLine.appendSwitch('disable-direct-composition');
-  app.commandLine.appendSwitch('disable-d3d11');
-  app.commandLine.appendSwitch(
-    'disable-features',
-    'UseSkiaRenderer,Vulkan,CanvasOopRasterization,VizDisplayCompositor,Accelerated2dCanvas,FluentScrollbar',
-  );
+  if (shouldForceSoftwareRendering()) {
+    // Opt-in fallback for Windows driver stacks that crash the GPU process.
+    applySoftwareRenderingWorkaround(app);
+  }
 }
 
 const iconDataUrlCache = new Map();
