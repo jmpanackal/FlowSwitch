@@ -2,6 +2,9 @@
  * Builds profile → launch-item lists for the main launch pipeline.
  * Injected dependencies keep this module free of main.js ordering / closure coupling.
  */
+const fs = require('fs');
+const path = require('path');
+
 const createProfileLaunchGatherers = ({
   buildSystemMonitorSnapshot,
   sortMonitorsByLayout,
@@ -43,11 +46,52 @@ const createProfileLaunchGatherers = ({
       }
 
       const rawExe = app?.executablePath || app?.path || '';
-      const executablePath = extractExecutablePath(rawExe) || null;
+      let executablePath = extractExecutablePath(rawExe) || null;
       const shortcutPath = resolveShortcutPathForLaunch(app?.shortcutPath);
       const launchUrl = (typeof app?.launchUrl === 'string' && isSafeAppLaunchUrl(app.launchUrl))
         ? safeLimitedString(app.launchUrl, maxUrlLength)
         : '';
+
+      const resolveWindowsFolderTargetPath = (folderEntry) => {
+        if (!folderEntry || process.platform !== 'win32') return '';
+        let fp = String(folderEntry.path || '').trim().replace(/\//g, '\\');
+        try {
+          fp = path.normalize(fp);
+        } catch {
+          return '';
+        }
+        if (!fp || fp.includes('..') || !/^([a-zA-Z]:|\\\\)/.test(fp)) return '';
+        try {
+          if (!fs.existsSync(fp) || !fs.statSync(fp).isDirectory()) return '';
+        } catch {
+          return '';
+        }
+        return fp;
+      };
+
+      let spawnArgsForExecutable = null;
+      const af = Array.isArray(app?.associatedFiles) ? app.associatedFiles : [];
+      const folderEntry = af.find((f) => f && String(f.type || '').toLowerCase() === 'folder'
+        && String(f.path || '').trim());
+      const folderTarget = folderEntry ? resolveWindowsFolderTargetPath(folderEntry) : '';
+
+      if (folderTarget && executablePath) {
+        // Host .exe (Explorer, VS Code, etc.) should receive the folder path so it opens the content.
+        spawnArgsForExecutable = [folderTarget];
+      }
+
+      if (!executablePath && !shortcutPath && !launchUrl && process.platform === 'win32' && folderTarget) {
+        const windir = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+        const explorerExe = path.join(windir, 'explorer.exe');
+        try {
+          if (fs.existsSync(explorerExe) && fs.statSync(explorerExe).isFile()) {
+            executablePath = explorerExe;
+            spawnArgsForExecutable = [folderTarget];
+          }
+        } catch {
+          // ignore
+        }
+      }
 
       if (!executablePath && !shortcutPath && !launchUrl) {
         skippedApps.push({
@@ -79,6 +123,7 @@ const createProfileLaunchGatherers = ({
         launchSequence: seq,
         monitor,
         app,
+        ...(spawnArgsForExecutable ? { spawnArgsForExecutable } : {}),
       });
     };
 

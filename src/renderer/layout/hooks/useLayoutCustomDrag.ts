@@ -30,6 +30,7 @@ import { createLayoutDragMoveEvent } from "../utils/layoutDragMoveEvents";
 import { resolveDropTargetFromEventStack } from "../utils/layoutHitTesting";
 import type { ContentFolder } from "../components/ContentManager";
 import type { InstalledApp } from "../../hooks/useInstalledApps";
+import { resolveHostExecutableForCatalogLabel } from "../utils/catalogHostResolve";
 
 /** Sidebar drag-drop for library folders (wired from MainLayout; uses global `contentLibrary`). */
 export type LibraryFolderPlacementActions = {
@@ -378,8 +379,13 @@ export function useLayoutCustomDrag({
             || dragData.associatedApp
             || "File Viewer"
           );
+          const catalogSnap = installedAppsCatalogRef?.current;
           const resolvedIconPath = resolveInstalledCatalogIconPath(
-            installedAppsCatalogRef?.current,
+            catalogSnap,
+            defaultAppLabel,
+          );
+          const hostExe = resolveHostExecutableForCatalogLabel(
+            catalogSnap,
             defaultAppLabel,
           );
 
@@ -422,6 +428,7 @@ export function useLayoutCustomDrag({
               name: defaultAppLabel,
               icon: getAppIcon(defaultAppLabel),
               iconPath: resolvedIconPath,
+              ...(hostExe ? { executablePath: hostExe } : {}),
               color: getAppColor(defaultAppLabel),
               position,
               size: { width: 60, height: 60 },
@@ -593,8 +600,13 @@ export function useLayoutCustomDrag({
             || dragData.associatedApp
             || "File Viewer"
           );
+          const catalogSnapMin = installedAppsCatalogRef?.current;
           const resolvedIconPath = resolveInstalledCatalogIconPath(
-            installedAppsCatalogRef?.current,
+            catalogSnapMin,
+            defaultAppLabel,
+          );
+          const hostExeMin = resolveHostExecutableForCatalogLabel(
+            catalogSnapMin,
             defaultAppLabel,
           );
 
@@ -602,6 +614,7 @@ export function useLayoutCustomDrag({
             name: defaultAppLabel,
             icon: getAppIcon(defaultAppLabel),
             iconPath: resolvedIconPath,
+            ...(hostExeMin ? { executablePath: hostExeMin } : {}),
             color: getAppColor(defaultAppLabel),
             volume: 50,
             launchBehavior: "minimize" as const,

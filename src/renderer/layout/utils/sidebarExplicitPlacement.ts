@@ -6,6 +6,7 @@ import {
   getBrowserColor,
   getBrowserIcon,
 } from "./layoutDropPresentation";
+import { resolveHostExecutableForCatalogLabel } from "./catalogHostResolve";
 
 export type SidebarContentItemInput = {
   id: string;
@@ -24,7 +25,7 @@ export type InstalledSidebarAppInput = {
   executablePath?: string | null;
 };
 
-type InstalledCatalogEntry = { name: string; iconPath: string | null };
+type InstalledCatalogEntry = { name: string; iconPath: string | null; executablePath?: string | null };
 
 /** Prefer `getInstalledAppsCatalog` (call-time snapshot) over a captured array. */
 function catalogForPlacement(
@@ -151,11 +152,13 @@ export function placeSidebarContentOnMonitor(args: {
   const appLabel = item.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
   const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+  const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
   const newApp: Record<string, unknown> = {
     instanceId,
     name: appLabel,
     icon: getAppIcon(appLabel),
     iconPath,
+    ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
     position: snapped.position,
     size: snapped.size,
@@ -239,11 +242,13 @@ export function placeSidebarContentOnMinimized(args: {
   const appLabel = item.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
   const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+  const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
   const newApp: Record<string, unknown> = {
     instanceId,
     name: appLabel,
     icon: getAppIcon(appLabel),
     iconPath,
+    ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
     volume: 50,
     launchBehavior: "minimize",
@@ -439,11 +444,13 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
   const appLabel = folder.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
   const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+  const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
   addApp(profile.id, monitorId, {
     instanceId,
     name: appLabel,
     icon: getAppIcon(appLabel),
     iconPath,
+    ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
     position: snapped.position,
     size: snapped.size,
@@ -493,11 +500,13 @@ export function placeSidebarLibraryFolderOnMinimized(args: {
   const appLabel = folder.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
   const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+  const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
   addAppToMinimized(profile.id, {
     instanceId,
     name: appLabel,
     icon: getAppIcon(appLabel),
     iconPath,
+    ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
     volume: 50,
     launchBehavior: "minimize",

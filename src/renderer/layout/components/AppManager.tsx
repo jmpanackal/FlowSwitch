@@ -481,6 +481,29 @@ export function AppManager({
     setOverflowMenuOpen(null);
   };
 
+  const handleTestLaunchCatalogApp = useCallback(
+    async (app: AppType) => {
+      if (!window.electron?.testLaunchCatalogApp) {
+        pushSnackbar("Test launch is not available in this build.", {
+          variant: "error",
+        });
+        return;
+      }
+      const r = await window.electron.testLaunchCatalogApp({
+        name: app.name,
+        executablePath: app.executablePath ?? "",
+        shortcutPath: app.shortcutPath ?? "",
+        launchUrl: app.launchUrl ?? "",
+      });
+      if (r.ok) {
+        pushSnackbar(`Started “${app.name}”.`);
+      } else {
+        pushSnackbar(r.error || "Test launch failed.", { variant: "error" });
+      }
+    },
+    [pushSnackbar],
+  );
+
   if (compact) {
     const appsListLayoutClass =
       appsLibraryView === "grid"
@@ -888,6 +911,26 @@ export function AppManager({
                               </div>
                             </SidebarOverlayMenu>
                           ) : null}
+                          <div
+                            className="my-0.5 h-px bg-flow-border/60"
+                            role="separator"
+                            aria-hidden
+                          />
+                          <div className="px-1 py-0.5">
+                            <button
+                              type="button"
+                              role="menuitem"
+                              className="flow-menu-item w-full text-left text-xs"
+                              onClick={(e) => {
+                                stopRowPointerForDrag(e);
+                                void handleTestLaunchCatalogApp(app);
+                                setAddToSubmenuOpen(null);
+                                setOverflowMenuOpen(null);
+                              }}
+                            >
+                              Test launch
+                            </button>
+                          </div>
                           <div
                             className="my-1 h-px bg-flow-border/60"
                             role="separator"

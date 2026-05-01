@@ -122,10 +122,46 @@ declare global {
         executablePath?: string | null;
         shortcutPath?: string | null;
         launchUrl?: string | null;
+        /** Present when catalog launch uses a user-saved .exe override (Windows). */
+        catalogLaunchExeOverrideActive?: boolean;
       }[]>;
       /** Windows: pick a `.exe` and persist it in the Apps sidebar catalog. */
       addUserCatalogExe: () => Promise<
         | { ok: true; path: string }
+        | { ok: false; canceled?: boolean; error?: string }
+      >;
+      testLaunchCatalogApp: (payload: {
+        name?: string;
+        executablePath?: string | null;
+        shortcutPath?: string | null;
+        launchUrl?: string | null;
+        executablePathOverride?: string | null;
+        /** Windows: optional spawn arguments after the .exe (e.g. content folder path for VS Code). */
+        spawnArgsForExecutable?: string[];
+      }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+      setCatalogLaunchExeOverride: (payload: {
+        name: string;
+        shortcutPath?: string | null;
+        launchUrl?: string | null;
+        /** Empty string clears the override for this catalog identity. */
+        executablePath: string;
+      }) => Promise<{ ok: true } | { ok: false; error?: string }>;
+      pickCatalogLaunchExeOverride: (payload: {
+        name: string;
+        shortcutPath?: string | null;
+        launchUrl?: string | null;
+        /** Hint for initial folder in the file picker. */
+        executablePath?: string | null;
+      }) => Promise<
+        | { ok: true; path: string }
+        | { ok: false; canceled?: boolean; error?: string }
+      >;
+      clearCatalogLaunchExeOverride: (payload: {
+        name: string;
+        shortcutPath?: string | null;
+        launchUrl?: string | null;
+      }) => Promise<
+        | { ok: true; noOp?: boolean }
         | { ok: false; canceled?: boolean; error?: string }
       >;
       captureRunningAppLayout: () => Promise<{

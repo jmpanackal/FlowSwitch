@@ -67,7 +67,10 @@ import {
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
-import type { InstalledAppCatalogKeySource } from "../utils/installedAppCatalogKey";
+import {
+  getCatalogLaunchIdentityKey,
+  type InstalledAppCatalogKeySource,
+} from "../utils/installedAppCatalogKey";
 import type { LaunchProgressSnapshot } from "./hooks/useLaunchFeedback";
 import { progressFromLaunchStatus } from "./utils/launchProgressFromStatus";
 import {
@@ -115,6 +118,7 @@ import { formatUnit } from "../utils/pluralize";
 import {
   prefetchInstalledAppsCatalog,
   useInstalledApps,
+  invalidateInstalledAppsCache,
 } from "../hooks/useInstalledApps";
 import type { MemoryCapture } from "./utils/buildNewProfile";
 import {
@@ -1133,6 +1137,7 @@ export default function App() {
       launchUrl?: string | null;
       color?: string;
       category?: string;
+      catalogLaunchExeOverrideActive?: boolean;
     }) => {
       if (!currentProfile) return;
       setLibrarySelection(null);
@@ -1158,12 +1163,43 @@ export default function App() {
           color: app.color,
           category: app.category,
           browserTabs: [],
+          catalogLaunchExeOverrideActive: Boolean(app.catalogLaunchExeOverrideActive),
         },
       });
       setRightSidebarOpen(true);
     },
     [currentProfile],
   );
+
+  const handleAfterCatalogLaunchExeChanged = useCallback(async () => {
+    invalidateInstalledAppsCache();
+    if (!window.electron?.getInstalledApps) return;
+    const apps = await window.electron.getInstalledApps({ force: true });
+    setSelectedApp((prev) => {
+      if (!prev || prev.source !== "sidebar") return prev;
+      const key = getCatalogLaunchIdentityKey({
+        name: String(prev.data?.name ?? ""),
+        shortcutPath: prev.data?.shortcutPath ?? null,
+        launchUrl: prev.data?.launchUrl ?? null,
+      });
+      const row = apps.find((a) => getCatalogLaunchIdentityKey(a) === key);
+      if (!row) return prev;
+      return {
+        ...prev,
+        data: {
+          ...prev.data,
+          name: row.name,
+          iconPath: row.iconPath,
+          executablePath: row.executablePath ?? null,
+          shortcutPath: row.shortcutPath ?? null,
+          launchUrl: row.launchUrl ?? null,
+          catalogLaunchExeOverrideActive: Boolean(
+            (row as { catalogLaunchExeOverrideActive?: boolean }).catalogLaunchExeOverrideActive,
+          ),
+        },
+      };
+    });
+  }, []);
 
   const handleSetInstalledAppLibraryCategory = useCallback(
     (source: InstalledAppCatalogKeySource, category: string) => {
@@ -2780,6 +2816,7 @@ export default function App() {
                   onSetInstalledAppLibraryCategory={
                     handleSetInstalledAppLibraryCategory
                   }
+                  onCatalogLaunchExeChanged={handleAfterCatalogLaunchExeChanged}
                 />
               ) : null}
             </div>

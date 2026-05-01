@@ -1,6 +1,14 @@
-import { useState } from "react";
-import { Grid3X3, Check, ChevronDown } from "lucide-react";
+import { useState, useRef, useLayoutEffect } from "react";
+import { createPortal } from "react-dom";
+import { Grid3X3, ChevronDown } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
+
+/** Preset panel width matches `min(26rem, …)` for viewport clamp math. */
+const PRESET_PANEL_WIDTH_PX = 416;
+const PRESET_PANEL_MARGIN = 12;
+/** Title row + padding + divider (approx.) before the scrollable grid. */
+const PRESET_PANEL_HEADER_PX = 72;
+const PRESET_GRID_MAX_PX = 21 * 16;
 
 interface MonitorLayoutConfigProps {
   monitor: {
@@ -14,25 +22,25 @@ interface MonitorLayoutConfigProps {
   isDropdown?: boolean;
 }
 
-// Visual Layout Preview Component
-function LayoutPreview({ layout, orientation, isSelected }: { 
-  layout: any; 
-  orientation: 'landscape' | 'portrait';
-  isSelected: boolean;
+// Visual Layout Preview Component (card selection is shown only on the outer preset tile)
+function LayoutPreview({
+  layout,
+  orientation,
+}: {
+  layout: any;
+  orientation: "landscape" | "portrait";
 }) {
-  const isPortrait = orientation === 'portrait';
-  const containerClass = isPortrait ? 'w-8 h-12' : 'w-12 h-8';
-  
+  const isPortrait = orientation === "portrait";
+  const containerClass = isPortrait ? "w-8 h-12" : "w-12 h-8";
+
   return (
-    <div className={`relative ${containerClass} bg-flow-bg-tertiary border-2 rounded transition-all duration-200 ${
-      isSelected ? 'border-flow-accent-blue' : 'border-flow-border'
-    }`}>
+    <div
+      className={`relative ${containerClass} rounded border-2 border-white/[0.22] bg-flow-bg-tertiary/90 shadow-inner shadow-black/20 transition-all duration-200`}
+    >
       {layout.slots.map((slot: any, index: number) => (
         <div
           key={index}
-          className={`absolute bg-flow-accent-blue/40 border border-flow-accent-blue/60 rounded-sm transition-all duration-200 ${
-            isSelected ? 'bg-flow-accent-blue/60' : ''
-          }`}
+          className="absolute rounded-sm border border-white/30 bg-flow-accent-blue/35 transition-all duration-200"
           style={{
             left: `${slot.position.x - slot.size.width/2}%`,
             top: `${slot.position.y - slot.size.height/2}%`,
@@ -258,9 +266,92 @@ const PORTRAIT_LAYOUTS = {
   }
 };
 
+type PresetPanelPlacement = "below" | "above";
+
+type PresetPanelRect = {
+  top: number;
+  left: number;
+  width: number;
+  gridMaxHeight: number;
+  /** Horizontal center of caret from panel’s left edge (viewport px). */
+  caretOffsetPx: number;
+  placement: PresetPanelPlacement;
+};
+
+const PRESET_TRIGGER_GAP_PX = 8;
+const PRESET_GRID_MIN_PX = 120;
+
+/**
+ * Anchor the panel to the layout trigger like a dropdown: centered on the
+ * button horizontally, opening below when possible else above — never
+ * detached to the viewport top. Caret offset ties the panel to the trigger.
+ */
+function computePresetPanelPosition(triggerRect: DOMRect): PresetPanelRect {
+  const vw = window.innerWidth;
+  const vh = window.innerHeight;
+  const m = PRESET_PANEL_MARGIN;
+  const width = Math.min(PRESET_PANEL_WIDTH_PX, vw - m * 2);
+
+  let left = triggerRect.left + triggerRect.width / 2 - width / 2;
+  left = Math.max(m, Math.min(left, vw - width - m));
+
+  const header = PRESET_PANEL_HEADER_PX;
+  const maxGridCap = PRESET_GRID_MAX_PX;
+
+  const belowTop = triggerRect.bottom + PRESET_TRIGGER_GAP_PX;
+  const maxBelowGrid = vh - m - belowTop - header;
+
+  const spaceAbove = triggerRect.top - m - PRESET_TRIGGER_GAP_PX;
+  const maxAboveGrid = spaceAbove - header;
+
+  let top: number;
+  let placement: PresetPanelPlacement;
+  let gridMaxHeight: number;
+
+  const preferBelow =
+    maxBelowGrid >= PRESET_GRID_MIN_PX || maxBelowGrid >= maxAboveGrid;
+
+  if (preferBelow && maxBelowGrid >= PRESET_GRID_MIN_PX) {
+    placement = "below";
+    top = belowTop;
+    gridMaxHeight = Math.max(
+      PRESET_GRID_MIN_PX,
+      Math.min(maxGridCap, maxBelowGrid),
+    );
+  } else if (maxAboveGrid >= PRESET_GRID_MIN_PX) {
+    placement = "above";
+    gridMaxHeight = Math.max(
+      PRESET_GRID_MIN_PX,
+      Math.min(maxGridCap, maxAboveGrid),
+    );
+    const totalH = header + gridMaxHeight;
+    top = triggerRect.top - PRESET_TRIGGER_GAP_PX - totalH;
+    top = Math.max(m, top);
+  } else {
+    placement = "below";
+    top = belowTop;
+    gridMaxHeight = Math.max(
+      PRESET_GRID_MIN_PX,
+      Math.min(maxGridCap, Math.max(0, maxBelowGrid)),
+    );
+  }
+
+  const triggerMidX = triggerRect.left + triggerRect.width / 2;
+  const caretCenterX = triggerMidX - left;
+  const caretClamp = 18;
+  const caretOffsetPx = Math.min(
+    width - caretClamp,
+    Math.max(caretClamp, caretCenterX),
+  );
+
+  return { top, left, width, gridMaxHeight, caretOffsetPx, placement };
+}
+
 export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = false }: MonitorLayoutConfigProps) {
   const [isOpen, setIsOpen] = useState(false);
-  
+  const [panelRect, setPanelRect] = useState<PresetPanelRect | null>(null);
+  const triggerRef = useRef<HTMLButtonElement>(null);
+
   const layouts = monitor.orientation === 'portrait' ? PORTRAIT_LAYOUTS : LANDSCAPE_LAYOUTS;
   const currentLayout = monitor.predefinedLayout ? layouts[monitor.predefinedLayout as keyof typeof layouts] : null;
   
@@ -270,11 +361,33 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
   };
 
   const layoutEntries = Object.entries(layouts);
+
+  useLayoutEffect(() => {
+    if (!isOpen) {
+      setPanelRect(null);
+      return;
+    }
+    const run = () => {
+      const el = triggerRef.current;
+      if (!el) return;
+      setPanelRect(computePresetPanelPosition(el.getBoundingClientRect()));
+    };
+    run();
+    const raf = requestAnimationFrame(run);
+    window.addEventListener("resize", run);
+    window.addEventListener("scroll", run, true);
+    return () => {
+      cancelAnimationFrame(raf);
+      window.removeEventListener("resize", run);
+      window.removeEventListener("scroll", run, true);
+    };
+  }, [isOpen]);
   
   return (
     <div className="relative">
       <FlowTooltip label="Choose layout pattern">
         <button
+          ref={triggerRef}
           type="button"
           onClick={() => setIsOpen(!isOpen)}
           className={`inline-flex items-center gap-1.5 rounded-md border border-white/15 bg-white/[0.06] px-2.5 py-1 text-xs font-medium text-white/90 transition-colors hover:bg-white/[0.12] ${
@@ -287,17 +400,48 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
         </button>
       </FlowTooltip>
       
-      {isOpen && (
-        <>
-          {/* Backdrop */}
-          <div 
-            className="fixed inset-0 z-40" 
-            onClick={() => setIsOpen(false)}
-          />
-          
-          {/* Layout Selection Popup */}
-          <div className="absolute left-1/2 top-full z-50 mt-2 w-[26rem] -translate-x-1/2 rounded-xl border border-white/15 bg-flow-bg-secondary/95 p-3 shadow-xl backdrop-blur-md flow-modal-panel-enter">
-            <div className="mb-3 flex items-center justify-between">
+      {isOpen &&
+        createPortal(
+          <>
+            {/* Portal to body: monitor previews use CSS transform; fixed descendants would mis-align with viewport rects */}
+            <div
+              className="fixed inset-0 z-[8000] bg-black/45"
+              aria-hidden
+              onClick={() => setIsOpen(false)}
+            />
+
+            {panelRect ? (
+              <div
+                style={{
+                  position: "fixed",
+                  top: panelRect.top,
+                  left: panelRect.left,
+                  width: panelRect.width,
+                  zIndex: 8001,
+                }}
+                className="relative flow-modal-panel-enter overflow-visible"
+              >
+                {panelRect.placement === "below" ? (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -top-2 z-10"
+                    style={{
+                      left: panelRect.caretOffsetPx,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <div
+                      className="h-0 w-0 border-x-[7px] border-x-transparent border-b-[8px] border-b-flow-bg-secondary border-t-0"
+                      style={{
+                        filter:
+                          "drop-shadow(0 -1px 0 rgba(255,255,255,0.14))",
+                      }}
+                    />
+                  </div>
+                ) : null}
+
+                <div className="rounded-xl border border-white/[0.22] bg-flow-bg-secondary p-3 shadow-2xl shadow-black/50 ring-1 ring-black/30">
+            <div className="mb-3 flex items-center justify-between border-b border-white/[0.08] pb-2.5">
               <div>
                 <div className="text-xs font-semibold uppercase tracking-wide text-flow-text-muted">
                   Layout Presets
@@ -308,58 +452,52 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
               </div>
             </div>
 
-            <div className="grid max-h-[21rem] grid-cols-4 gap-2 overflow-y-auto pr-1 scrollbar-elegant">
+            <div
+              className="grid grid-cols-4 gap-3 overflow-y-auto px-1.5 py-1 pr-2 scrollbar-elegant"
+              style={{ maxHeight: panelRect.gridMaxHeight }}
+            >
               <button
+                type="button"
                 onClick={() => handleLayoutSelect(null)}
-                className={`rounded-lg border p-2 text-left transition-colors ${
-                  !monitor.predefinedLayout 
-                    ? 'border-flow-accent-blue/55 bg-flow-accent-blue/18' 
-                    : 'border-white/10 bg-black/20 hover:border-flow-accent-blue/40 hover:bg-black/30'
+                className={`rounded-lg border-2 p-2.5 text-left shadow-sm transition-colors ${
+                  !monitor.predefinedLayout
+                    ? "border-flow-accent-blue bg-flow-bg-tertiary"
+                    : "border-white/[0.18] bg-flow-bg-tertiary hover:border-flow-accent-blue/45"
                 }`}
               >
-                <div className={`mb-1.5 flex h-10 w-full items-center justify-center rounded border text-[11px] ${
-                  !monitor.predefinedLayout ? "border-flow-accent-blue text-flow-accent-blue" : "border-white/20 text-flow-text-muted"
-                }`}>
+                <div
+                  className="mb-1.5 flex h-10 w-full items-center justify-center rounded-md border border-white/[0.22] bg-black/40 text-[11px] font-medium text-flow-text-muted"
+                >
                   Auto
                 </div>
-                <div className="flex items-center justify-between gap-1">
-                  <span className={`truncate text-[11px] font-medium ${
-                    !monitor.predefinedLayout ? "text-flow-accent-blue" : "text-flow-text-primary"
-                  }`}>
+                <div className="flex items-center gap-1">
+                  <span className="truncate text-[11px] font-medium text-flow-text-primary">
                     Dynamic
                   </span>
-                  {!monitor.predefinedLayout ? (
-                    <Check className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" />
-                  ) : null}
                 </div>
               </button>
 
               {layoutEntries.map(([key, layout]) => (
                 <button
+                  type="button"
                   key={key}
                   onClick={() => handleLayoutSelect(key)}
-                  className={`rounded-lg border p-2 text-left transition-colors ${
+                  className={`rounded-lg border-2 p-2.5 text-left shadow-sm transition-colors ${
                     monitor.predefinedLayout === key
-                      ? 'border-flow-accent-blue/55 bg-flow-accent-blue/18' 
-                      : 'border-white/10 bg-black/20 hover:border-flow-accent-blue/40 hover:bg-black/30'
+                      ? "border-flow-accent-blue bg-flow-bg-tertiary"
+                      : "border-white/[0.18] bg-flow-bg-tertiary hover:border-flow-accent-blue/45"
                   }`}
                 >
                   <div className="mb-1.5 flex justify-center">
-                    <LayoutPreview 
-                      layout={layout} 
+                    <LayoutPreview
+                      layout={layout}
                       orientation={monitor.orientation}
-                      isSelected={monitor.predefinedLayout === key}
                     />
                   </div>
-                  <div className="flex items-center justify-between gap-1">
-                    <span className={`truncate text-[11px] font-medium ${
-                      monitor.predefinedLayout === key ? 'text-flow-accent-blue' : 'text-flow-text-primary'
-                    }`}>
+                  <div className="flex items-center gap-1">
+                    <span className="truncate text-[11px] font-medium text-flow-text-primary">
                       {layout.name}
                     </span>
-                    {monitor.predefinedLayout === key ? (
-                      <Check className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" />
-                    ) : null}
                   </div>
                   <div className="truncate text-[10px] text-flow-text-muted">
                     {layout.maxApps} app{layout.maxApps === 1 ? '' : 's'}
@@ -367,9 +505,30 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
                 </button>
               ))}
             </div>
-          </div>
-        </>
-      )}
+                </div>
+
+                {panelRect.placement === "above" ? (
+                  <div
+                    aria-hidden
+                    className="pointer-events-none absolute -bottom-2 z-10"
+                    style={{
+                      left: panelRect.caretOffsetPx,
+                      transform: "translateX(-50%)",
+                    }}
+                  >
+                    <div
+                      className="h-0 w-0 border-x-[7px] border-x-transparent border-b-0 border-t-[8px] border-t-flow-bg-secondary"
+                      style={{
+                        filter: "drop-shadow(0 1px 0 rgba(255,255,255,0.14))",
+                      }}
+                    />
+                  </div>
+                ) : null}
+              </div>
+            ) : null}
+          </>,
+          document.body,
+        )}
     </div>
   );
 }
