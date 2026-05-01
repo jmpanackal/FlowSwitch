@@ -123,6 +123,11 @@ declare global {
         shortcutPath?: string | null;
         launchUrl?: string | null;
       }[]>;
+      /** Windows: pick a `.exe` and persist it in the Apps sidebar catalog. */
+      addUserCatalogExe: () => Promise<
+        | { ok: true; path: string }
+        | { ok: false; canceled?: boolean; error?: string }
+      >;
       captureRunningAppLayout: () => Promise<{
         capturedAt: number;
         appCount: number;

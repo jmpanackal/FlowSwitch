@@ -28,6 +28,7 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)
   getInstalledApps: (opts) => ipcRenderer.invoke('get-installed-apps', opts ?? {}),
+  addUserCatalogExe: () => ipcRenderer.invoke('installed-apps:add-user-exe'),
 
   // Capture running app layout from main process
   captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout'),

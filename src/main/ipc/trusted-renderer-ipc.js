@@ -10,6 +10,7 @@ const {
 const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 const { readAppPreferences, writeAppPreferences } = require('../services/app-preferences-store');
+const { getSteamAppsCommonRootDirsSync } = require('../services/steam-library-roots');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
@@ -203,6 +204,44 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     return pack(r);
   });
 
+  handleTrustedIpc('installed-apps:add-user-exe', async (event) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Only available on Windows' };
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const r = await dialog.showOpenDialog(win || undefined, {
+      title: 'Add application to Apps library',
+      properties: ['openFile'],
+      filters: [{ name: 'Applications', extensions: ['exe'] }],
+    });
+    if (r.canceled || !r.filePaths?.length) {
+      return { ok: false, canceled: true };
+    }
+    const raw = String(r.filePaths[0] || '').trim();
+    if (!raw.toLowerCase().endsWith('.exe')) {
+      return { ok: false, error: 'Select a .exe file' };
+    }
+    let norm;
+    try {
+      norm = path.normalize(raw.replace(/\//g, '\\'));
+      if (norm.includes('..')) return { ok: false, error: 'Invalid path' };
+      if (!fs.existsSync(norm) || !fs.statSync(norm).isFile()) {
+        return { ok: false, error: 'File not found' };
+      }
+    } catch {
+      return { ok: false, error: 'Invalid path' };
+    }
+    const cur = readAppPreferences();
+    const list = Array.isArray(cur.userCatalogExePaths) ? [...cur.userCatalogExePaths] : [];
+    const lc = norm.toLowerCase();
+    if (!list.some((p) => path.normalize(String(p).replace(/\//g, '\\')).toLowerCase() === lc)) {
+      list.push(norm);
+      writeAppPreferences({ userCatalogExePaths: list });
+    }
+    installedAppsCatalogCache = null;
+    return { ok: true, path: norm };
+  });
+
   const MAX_BROWSE_FOLDER_ENTRIES = 500;
 
   handleTrustedIpc('open-path-in-explorer', async (_event, rawPath) => {
@@ -375,6 +414,8 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       'start-menu-shortcut': 3,
       'start-menu-url': 3,
       registry: 2,
+      'pf-windowsapps-pfn-scan': 2,
+      'user-catalog-exe': 2,
       'windows-apps-shim': 1,
       'exe-scan': 1,
     };
@@ -623,6 +664,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       const canonicalKey = getCanonicalAppKey(appMeta.name);
       if (seenStartMenuKeys.has(canonicalKey)) return true;
 
+      const displayLc = String(appMeta.name || '').trim().toLowerCase();
+      if (displayLc.includes('codex') && displayLc.includes('openai')) return true;
+
       // Include registry-only apps only when they look like user-launchable GUI apps.
       const source = String(iconSourcePath || '').toLowerCase();
       if (!source) return false;
@@ -654,6 +698,16 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         '\\windows\\systemapps\\',
         '\\appdata\\local\\packages\\',
         '\\appdata\\local\\microsoft\\windowsapps\\',
+        '\\microsoft\\winget\\packages\\',
+        '\\scoop\\apps\\',
+        '\\appdata\\local\\scoop\\apps\\',
+        '\\steam\\steamapps\\',
+        '\\steamapps\\',
+        '\\epic games\\',
+        '\\gog galaxy\\games\\',
+        '\\ubisoft\\',
+        '\\riot games\\',
+        '\\battle.net\\',
       ];
       if (registryGlobalInstallPrefixes.some((m) => source.includes(m))) {
         return true;
@@ -941,8 +995,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       if (installProbeExe) {
         haystackParts.push(installProbeExe);
       }
-      const registryHaystack = haystackParts.join('\n');
-      if (!registryHaystack.trim()) {
+      let registryHaystack = haystackParts.join('\n').trim();
+      const nm = String(app.name || '').trim();
+      const nmLc = nm.toLowerCase();
+      if (!registryHaystack && nmLc.includes('codex') && nmLc.includes('openai')) {
+        registryHaystack = nm;
+      }
+      if (!registryHaystack) {
         continue;
       }
 
@@ -1059,7 +1118,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         stemLc === 'codex'
         || stemLc.startsWith('openai.codex')
         || stemLc.startsWith('openaicodex')
+        || stemLc.startsWith('openai-codex')
         || /^openai\.codex_/i.test(stemRaw)
+        || (stemLc.includes('codex') && stemLc.includes('openai'))
       ) {
         return 'Codex';
       }
@@ -1129,6 +1190,11 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           }
         }
       }
+      for (const steamCommon of getSteamAppsCommonRootDirsSync()) {
+        if (steamCommon && !exeDirs.some((d) => d.toLowerCase() === steamCommon.toLowerCase())) {
+          exeDirs.push(steamCommon);
+        }
+      }
       const exeFiles = scanForExeFiles(exeDirs, 3); // limit depth for perf
       for (const exePath of exeFiles) {
         const name = path.basename(exePath, '.exe');
@@ -1157,6 +1223,101 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         `[InstalledApps] Icon extraction failures (shortcut=${iconFailureSummary.shortcut}, registry=${iconFailureSummary.registry}).`,
       );
     }
+
+    // OpenAI Codex (MSIX) often omits Start Menu / ARP signals we trust; listing
+    // `Program Files\\WindowsApps\\OpenAI.Codex_*` usually works even when deeper reads fail.
+    const scanOpenAiCodexProgramFilesWindowsApps = async () => {
+      if (process.platform !== 'win32') return;
+      const roots = [];
+      const pf = process.env.ProgramFiles || '';
+      const pfx86 = process.env['ProgramFiles(x86)'] || '';
+      if (pf) roots.push(path.join(pf, 'WindowsApps'));
+      if (pfx86) roots.push(path.join(pfx86, 'WindowsApps'));
+      const tasks = [];
+      for (const root of [...new Set(roots)]) {
+        let dirents;
+        try {
+          dirents = fs.readdirSync(root, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const d of dirents) {
+          if (!d.isDirectory()) continue;
+          if (!/^OpenAI\.Codex_/i.test(d.name)) continue;
+          const pkgDir = path.join(root, d.name);
+          tasks.push(async () => {
+            const shimExe = inferMsixUserWindowsAppsShimFromPackageDir(pkgDir);
+            const probed = probeInstallFolderForWindowsExe(pkgDir);
+            const targetExe = shimExe || probed;
+            if (!targetExe) return;
+            let iconPath = null;
+            try {
+              const codexAumid = appxUserLookup?.getPreferredAppUserModelIdForExe?.(targetExe);
+              const codexMoniker = toAppsFolderShellMoniker(codexAumid);
+              if (codexMoniker) {
+                iconPath = await getSafeIconDataUrl(codexMoniker);
+              }
+              if (!iconPath) {
+                const iconSources = [...new Set([shimExe, probed].filter(Boolean))];
+                for (const src of iconSources) {
+                  iconPath = await getSafeIconDataUrl(src);
+                  if (iconPath) break;
+                }
+              }
+            } catch {
+              iconPath = null;
+            }
+            upsertDiscoveredApp('Codex', iconPath, targetExe, {
+              source: 'pf-windowsapps-pfn-scan',
+              targetExe,
+            });
+          });
+        }
+      }
+      if (tasks.length) await runWithConcurrencyLimit(tasks, 4);
+    };
+    await scanOpenAiCodexProgramFilesWindowsApps();
+
+    const prefsForCatalog = readAppPreferences();
+    const userCatalogExePaths = Array.isArray(prefsForCatalog.userCatalogExePaths)
+      ? prefsForCatalog.userCatalogExePaths
+      : [];
+    const userCatalogExeTasks = userCatalogExePaths.map((rawPath) => async () => {
+      const expanded = path.normalize(
+        String(rawPath || '').trim().replace(/\//g, '\\'),
+      );
+      if (!expanded || expanded.includes('..')) return;
+      if (!expanded.toLowerCase().endsWith('.exe')) return;
+      try {
+        if (!fs.existsSync(expanded) || !fs.statSync(expanded).isFile()) return;
+      } catch {
+        return;
+      }
+      const displayName = normalizeCatalogDisplayName(
+        path.basename(expanded, path.extname(expanded)),
+      );
+      if (!displayName) return;
+      if (!isLikelyUserApp(displayName, expanded, {
+        source: 'user-catalog-exe',
+        targetExe: expanded,
+      })) {
+        return;
+      }
+      let iconPath = null;
+      try {
+        iconPath = await getSafeIconDataUrl(expanded);
+      } catch {
+        iconPath = null;
+      }
+      upsertDiscoveredApp(displayName, iconPath, expanded, {
+        source: 'user-catalog-exe',
+        targetExe: expanded,
+      });
+    });
+    if (userCatalogExeTasks.length) {
+      await runWithConcurrencyLimit(userCatalogExeTasks, 8);
+    }
+
     return Array.from(appMap.values())
       .map((entry) => ({
         name: entry.name,

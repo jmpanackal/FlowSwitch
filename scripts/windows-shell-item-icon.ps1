@@ -106,6 +106,67 @@ public static class FlowSwitchShellItemIcon
         }
     }
 
+    static bool PathHintsGameLauncherMultiIcon(string path)
+    {
+        if (string.IsNullOrWhiteSpace(path)) return false;
+        string p = path.ToLowerInvariant();
+        return p.Contains("steam") || p.Contains("steamapps") || p.Contains("epic games")
+            || p.Contains("gog galaxy") || p.Contains("ubisoft") || p.Contains("riot games")
+            || p.Contains("battle.net") || p.Contains("ea games") || p.Contains("electronic arts");
+    }
+
+    static byte[] TryBestPrivateExtractIcons(string path, int sizePx)
+    {
+        int bestArea = 0;
+        byte[] best = null;
+        for (int idx = 0; idx < 56; idx++)
+        {
+            IntPtr[] phicon = new IntPtr[1];
+            int[] piconid = new int[1];
+            int n = PrivateExtractIcons(path, idx, sizePx, sizePx, phicon, piconid, 1, 0);
+            if (n <= 0 || phicon[0] == IntPtr.Zero) break;
+            IntPtr hIcon = phicon[0];
+            try
+            {
+                using (Icon ico = (Icon)Icon.FromHandle(hIcon).Clone())
+                {
+                    DestroyIcon(hIcon);
+                    hIcon = IntPtr.Zero;
+                    using (Bitmap src = ico.ToBitmap())
+                    {
+                        int area = src.Width * src.Height;
+                        if (area >= bestArea)
+                        {
+                            bestArea = area;
+                            using (Bitmap scaled = new Bitmap(sizePx, sizePx, PixelFormat.Format32bppArgb))
+                            using (Graphics g = Graphics.FromImage(scaled))
+                            {
+                                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+                                g.SmoothingMode = SmoothingMode.HighQuality;
+                                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+                                g.Clear(Color.Transparent);
+                                g.DrawImage(src, new Rectangle(0, 0, sizePx, sizePx));
+                                using (MemoryStream ms = new MemoryStream())
+                                {
+                                    scaled.Save(ms, ImageFormat.Png);
+                                    best = ms.ToArray();
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
+            finally
+            {
+                if (hIcon != IntPtr.Zero) DestroyIcon(hIcon);
+            }
+        }
+        return best;
+    }
+
     public static byte[] GetPng(string path, int sizePx)
     {
         SHFILEINFO sfi = new SHFILEINFO();
@@ -139,6 +200,11 @@ public static class FlowSwitchShellItemIcon
                     if (ext != null && (ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)
                         || ext.Equals(".dll", StringComparison.OrdinalIgnoreCase)))
                     {
+                        if (PathHintsGameLauncherMultiIcon(path))
+                        {
+                            byte[] multi = TryBestPrivateExtractIcons(path, sizePx);
+                            if (multi != null) return multi;
+                        }
                         IntPtr[] phicon = new IntPtr[1];
                         int[] piconid = new int[1];
                         int n = PrivateExtractIcons(path, 0, sizePx, sizePx, phicon, piconid, 1, 0);

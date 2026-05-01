@@ -230,6 +230,42 @@ test('isLikelyUserApp still allows Visual Studio Code (not VC++ redistributable)
   );
 });
 
+test('isLikelyUserApp allows user-catalog-exe for a normal app path', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'MyTool',
+      'D:\\Tools\\MyTool.exe',
+      { source: 'user-catalog-exe', targetExe: 'D:\\Tools\\MyTool.exe' },
+    ),
+    true,
+  );
+});
+
+test('isLikelyUserApp rejects user-catalog-exe for installer-like exe', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'Setup',
+      'C:\\Temp\\setup.exe',
+      { source: 'user-catalog-exe', targetExe: 'C:\\Temp\\setup.exe' },
+    ),
+    false,
+  );
+});
+
+test('isLikelyUserApp allows pf-windowsapps-pfn-scan Codex entry from Program Files package path', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'Codex',
+      'C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__abc\\Codex.exe',
+      {
+        source: 'pf-windowsapps-pfn-scan',
+        targetExe: 'C:\\Program Files\\WindowsApps\\OpenAI.Codex_1.0.0.0_x64__abc\\Codex.exe',
+      },
+    ),
+    true,
+  );
+});
+
 test('isLikelyUserApp allows OpenAI Codex registry row despite parentKeyName and update releaseType', () => {
   assert.equal(
     helpers.isLikelyUserApp(
@@ -332,6 +368,31 @@ test('inferMsixUserWindowsAppsShimFromPackageDir maps Program Files package dir 
   }
 });
 
+test('inferMsixUserWindowsAppsShimFromPackageDir prefers exact PFN shim exe name (win32 only)', () => {
+  if (process.platform !== 'win32') return;
+  const fakeLocal = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-msix-pfn-shim-'));
+  try {
+    const wa = path.join(fakeLocal, 'Microsoft', 'WindowsApps');
+    fs.mkdirSync(wa, { recursive: true });
+    const pfn = 'OpenAI.Codex_26.429.2026.0_x64__2p2nqsd0c76g0';
+    const shimPath = path.join(wa, `${pfn}.exe`);
+    fs.writeFileSync(shimPath, 'x');
+    const prev = process.env.LOCALAPPDATA;
+    process.env.LOCALAPPDATA = fakeLocal;
+    try {
+      const installFull = `C:\\Program Files\\WindowsApps\\${pfn}`;
+      assert.equal(
+        helpers.inferMsixUserWindowsAppsShimFromPackageDir(installFull),
+        path.normalize(shimPath),
+      );
+    } finally {
+      process.env.LOCALAPPDATA = prev;
+    }
+  } finally {
+    fs.rmSync(fakeLocal, { recursive: true, force: true });
+  }
+});
+
 test('isLikelyUserApp allows Store-style ARP when targetExe is only System32 msiexec', () => {
   assert.equal(
     helpers.isLikelyUserApp(
@@ -385,6 +446,24 @@ test('probeInstallFolderForWindowsExe prefers main exe over Update.exe (win32 on
     );
   } finally {
     fs.rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test('probeInstallFolderForWindowsExe probes app subfolder under WindowsApps package path (win32 only)', () => {
+  if (process.platform !== 'win32') return;
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-wapps-layout-'));
+  try {
+    const pkg = path.join(tmp, 'WindowsApps', 'OpenAI.Codex_1.0.0.0_x64__abc123');
+    const appDir = path.join(pkg, 'app');
+    fs.mkdirSync(appDir, { recursive: true });
+    fs.writeFileSync(path.join(pkg, 'Update.exe'), 'u');
+    fs.writeFileSync(path.join(appDir, 'Codex.exe'), 'x');
+    assert.equal(
+      helpers.probeInstallFolderForWindowsExe(pkg),
+      path.join(appDir, 'Codex.exe'),
+    );
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

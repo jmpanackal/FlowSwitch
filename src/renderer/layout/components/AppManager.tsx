@@ -6,8 +6,14 @@ import {
   Save,
   Info,
   MoreVertical,
+  Plus,
+  ChevronDown,
+  PackagePlus,
 } from "lucide-react";
-import { useInstalledApps } from "../../hooks/useInstalledApps";
+import {
+  invalidateInstalledAppsCache,
+  useInstalledApps,
+} from "../../hooks/useInstalledApps";
 import { useInstalledCatalogExclusions } from "../../hooks/useInstalledCatalogExclusions";
 import { getInstalledAppCatalogKey } from "../../utils/installedAppCatalogKey";
 import { resolveInstalledAppLibraryCategory } from "../../utils/installedAppLibraryCategory";
@@ -21,6 +27,7 @@ import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 import { FlowTooltip } from "./ui/tooltip";
 import {
   FlowLibraryToolbar,
+  FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS,
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
 import {
@@ -69,6 +76,25 @@ const getStableColor = (name: string) => {
 const APPS_SIDEBAR_HELP =
   "Open ⋯ on a row to add to a monitor or minimized row, or change catalog visibility.";
 
+function installedAppMatchesSearchQuery(app: AppType, query: string): boolean {
+  const needle = query.trim().toLowerCase();
+  if (!needle) return true;
+  const hay = [app.name, app.executablePath, app.shortcutPath, app.launchUrl]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase();
+  if (hay.includes(needle)) return true;
+  const base = (p: string | null | undefined) => {
+    if (!p) return "";
+    const parts = p.replace(/\//g, "\\").split("\\");
+    return (parts[parts.length - 1] || "").toLowerCase();
+  };
+  return (
+    base(app.executablePath).includes(needle)
+    || base(app.shortcutPath).includes(needle)
+  );
+}
+
 /** Pixels of pointer movement before a catalog row counts as a drag (not a click). */
 const SIDEBAR_APP_DRAG_THRESHOLD_PX = 6;
 
@@ -107,7 +133,12 @@ export function AppManager({
   } | null>(null);
   const addToSubmenuCloseTimerRef = useRef<number | null>(null);
   const [sortOption, setSortOption] = useState<'name' | 'lastAccessed' | 'size'>('name');
-  const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps();
+  const [catalogListVersion, setCatalogListVersion] = useState(0);
+  const [showExeAddMenu, setShowExeAddMenu] = useState(false);
+  const exeAddMenuWrapRef = useRef<HTMLDivElement | null>(null);
+  const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps({
+    installedListVersion: catalogListVersion,
+  });
   const {
     excludedSet,
     listTab,
@@ -148,9 +179,10 @@ export function AppManager({
   const searchMatchedApps = useMemo(
     () =>
       allApps.filter((app) => {
-        const matchesSearch = app.name
-          .toLowerCase()
-          .includes(effectiveSearchTerm.toLowerCase());
+        const matchesSearch = installedAppMatchesSearchQuery(
+          app,
+          effectiveSearchTerm,
+        );
         const matchesCategory =
           compact
           || !selectedCategory
@@ -205,6 +237,33 @@ export function AppManager({
       setListTab("available");
     }
   }, [hiddenTabCount, listTab, setListTab]);
+
+  useEffect(() => {
+    if (!showExeAddMenu) return;
+    const onDocDown = (e: MouseEvent) => {
+      const el = exeAddMenuWrapRef.current;
+      if (el && !el.contains(e.target as Node)) {
+        setShowExeAddMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocDown);
+    return () => document.removeEventListener("mousedown", onDocDown);
+  }, [showExeAddMenu]);
+
+  const handlePickExeForAppsCatalog = useCallback(async () => {
+    setShowExeAddMenu(false);
+    const bridge = typeof window !== "undefined" ? window.electron : undefined;
+    if (!bridge || typeof bridge.addUserCatalogExe !== "function") return;
+    try {
+      const res = await bridge.addUserCatalogExe();
+      if (res && typeof res === "object" && "ok" in res && res.ok) {
+        invalidateInstalledAppsCache();
+        setCatalogListVersion((v) => v + 1);
+      }
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const monitorsSortedForMenu = useMemo(() => {
     const list = [...(currentProfile?.monitors ?? [])] as {
@@ -478,6 +537,48 @@ export function AppManager({
             viewMode={appsLibraryView}
             onViewModeChange={setAppsLibraryView}
             showViewModes
+            toolbarEnd={
+              <div ref={exeAddMenuWrapRef} className="relative min-w-0">
+                <FlowTooltip label="Add application (.exe) to Apps library">
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      onClick={() => setShowExeAddMenu((open) => !open)}
+                      className={FLOW_LIBRARY_TOOLBAR_ADD_PILL_CLASS}
+                      aria-expanded={showExeAddMenu}
+                      aria-haspopup="menu"
+                      aria-label="Add application to Apps library"
+                    >
+                      <Plus
+                        className="h-3.5 w-3.5 shrink-0"
+                        strokeWidth={2}
+                        aria-hidden
+                      />
+                      <ChevronDown
+                        className={`h-3.5 w-3.5 shrink-0 opacity-80 ${showExeAddMenu ? "rotate-180" : ""} transition-transform duration-150`}
+                        strokeWidth={2}
+                        aria-hidden
+                      />
+                    </button>
+                  </span>
+                </FlowTooltip>
+                {showExeAddMenu ? (
+                  <div className="flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1 w-44 min-w-0 py-0.5">
+                    <button
+                      type="button"
+                      className="flow-menu-item text-xs"
+                      onClick={() => void handlePickExeForAppsCatalog()}
+                    >
+                      <PackagePlus
+                        className="h-3.5 w-3.5 shrink-0 text-violet-400"
+                        aria-hidden
+                      />
+                      Application (.exe)…
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            }
           />
         )}
 

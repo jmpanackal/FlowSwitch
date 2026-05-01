@@ -9,6 +9,8 @@ const FILENAME = 'app-preferences.v1.json';
 const defaultPreferences = () => ({
   /** When true, main window is raised and kept above normal windows during profile launch. */
   pinMainWindowDuringProfileLaunch: true,
+  /** User-added `.exe` paths merged into the installed-apps sidebar catalog (Windows). */
+  userCatalogExePaths: [],
 });
 
 const getPreferencesPath = () => path.join(app.getPath('userData'), FILENAME);
@@ -24,7 +26,11 @@ const readAppPreferences = () => {
     parsed = {};
   }
   if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
-    return { ...defaultPreferences(), ...parsed };
+    const merged = { ...defaultPreferences(), ...parsed };
+    if (!Array.isArray(merged.userCatalogExePaths)) {
+      merged.userCatalogExePaths = [];
+    }
+    return merged;
   }
   return { ...defaultPreferences() };
 };

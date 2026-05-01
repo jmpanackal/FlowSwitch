@@ -40,13 +40,13 @@ Status legend:
    - Current: drag freeze is mostly fixed; minimized-target-on-secondary-monitor bug is fixed.
    - Remaining: first-launch blur root cause and fix (not reproducible yet).
 
-3. App discovery completeness and hygiene (`not_started` — incremental work on `feature/app-discovery-hygiene`)
+3. App discovery completeness and hygiene (`in_progress` — `feature/app-discovery-hygiene`)
    - Improve coverage for missing apps.
    - Filter non-app/system-noise entries.
    - Clarify launchable vs listed entries.
    - Add manual executable path support and test-launch flow.
    - Harden icon/path handling for non-system drives.
-   - **Latest (branch):** stricter catalog filters (VC++ redistributable titles, Java/AMD/Intel installer noise, Package Cache VC paths), inbox shortcut allow-list extended (Codex, Cursor, Windsurf), WindowsApps shim **display-name** fallbacks for Codex/Cursor/Windsurf when WinRT/manifest names are missing, optional exe scan uses `%ProgramFiles%` / `%ProgramFiles(x86)%` and `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS`; matrix doc updated.
+   - **Latest (branch):** Apps sidebar add pill → pick `.exe` → persists `userCatalogExePaths` and merges into catalog (`installed-apps:add-user-exe`); Steam library `common` roots merged into optional deep exe scan; stricter catalog filters (VC++ redistributable titles, Java/AMD/Intel installer noise, Package Cache VC paths), inbox shortcut allow-list extended (Codex, Cursor, Windsurf), WindowsApps shim **display-name** fallbacks when WinRT/manifest names are missing, optional exe scan uses `%ProgramFiles%` / `%ProgramFiles(x86)%` and `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS`; shell icon script tweaks; matrix doc updated.
 
 4. Safe launch guardrails for large profiles (`not_started`)
    - Soft threshold warnings and hard constraints.

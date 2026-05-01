@@ -297,6 +297,10 @@ const createIconPathAndAppHelpers = ({
    * per-user installers (Spotify: %LocalAppData%\Spotify with Spotify.exe inside).
    * Also checks one directory level (and shallow `app-*` children) when the root only has
    * updaters like Update.exe.
+   *
+   * MSIX under `Program Files\\WindowsApps\\<PFN>`: real binaries often live in `app\\` while the
+   * package root is ACL-hostile to Node — probe `app` and `Appx` before the root when the path
+   * looks like a package folder (not already `...\\app` or `...\\Appx`).
    */
   const probeInstallFolderForWindowsExe = (dirRaw) => {
     if (!dirRaw || process.platform !== 'win32') return null;
@@ -304,7 +308,35 @@ const createIconPathAndAppHelpers = ({
     if (!expanded) return null;
     const normalized = normalizePathForWindows(expanded);
     if (normalized.includes('..')) return null;
-    const folderHint = path.basename(normalized.replace(/[/\\]+$/, '')).toLowerCase();
+    const lcWin = normalized.replace(/\//g, '\\').toLowerCase();
+    const isProgramFilesWindowsAppsPkg = lcWin.includes('\\windowsapps\\')
+      && !/[\\/](app|appx)$/i.test(normalized);
+    if (isProgramFilesWindowsAppsPkg) {
+      for (const sub of ['app', 'Appx']) {
+        const alt = path.join(normalized, sub);
+        try {
+          if (fs.statSync(alt).isDirectory()) {
+            const nested = probeInstallFolderForWindowsExe(alt);
+            if (nested) return nested;
+          }
+        } catch {
+          /* ACL or missing */
+        }
+      }
+    }
+
+    const probeBase = path.basename(normalized.replace(/[/\\]+$/, '')).toLowerCase();
+    let folderHint = probeBase;
+    if (probeBase === 'app' || probeBase === 'appx') {
+      const parentPkg = path.basename(path.dirname(normalized));
+      const neutral = parentPkg.split('__')[0] || parentPkg;
+      const fam = neutral.replace(
+        /_\d+(?:\.\d+)+(?:_(?:x64|x86|arm64|arm|neutral))?$/i,
+        '',
+      );
+      const dotParts = fam.split('.');
+      folderHint = (dotParts[dotParts.length - 1] || fam).toLowerCase();
+    }
 
     const deprioritizeFilename = new Set([
       'uninstall.exe',
@@ -450,6 +482,15 @@ const createIconPathAndAppHelpers = ({
     if (!lc.includes('\\windowsapps\\')) return null;
     const base = path.basename(normalized.replace(/[/\\]+$/, ''));
     const waDir = windowsAppsShimDir();
+
+    // Shims are usually `<PackageFullNameFolder>.exe` (e.g. OpenAI.Codex_26…_x64__….exe), not
+    // `<Family>_<publisher>.exe` — try the exact PFN filename first.
+    const exactShimPath = path.join(waDir, `${base}.exe`);
+    try {
+      if (fs.existsSync(exactShimPath) && fs.statSync(exactShimPath).isFile()) return exactShimPath;
+    } catch {
+      // continue
+    }
 
     const pickFromFamilyPrefix = (family) => {
       const fam = String(family || '').trim();
@@ -1224,6 +1265,25 @@ const createIconPathAndAppHelpers = ({
 
     const lowerSourcePath = String(sourcePath || '').toLowerCase().replace(/\//g, '\\');
     const pathHaystack = `${lowerSourcePath}\n${targetExe}`;
+
+    if (context.source === 'pf-windowsapps-pfn-scan') {
+      const lc = pathHaystack.toLowerCase();
+      return (
+        getCanonicalAppKey(safeName) === 'codex'
+        && lc.includes('openai')
+        && lc.includes('codex')
+        && lc.includes('\\windowsapps\\')
+      );
+    }
+
+    if (context.source === 'user-catalog-exe') {
+      const p = (lowerSourcePath || targetExe || '').trim();
+      if (!p.endsWith('.exe')) return false;
+      if (isDeniedNonUserExecutableBasename(p)) return false;
+      if (isInstallerLikeExecutable(p)) return false;
+      if (isLikelyBackgroundBinary(p)) return false;
+      return true;
+    }
 
     if (matchesNonUserAppPathHaystack(pathHaystack)) {
       return false;
