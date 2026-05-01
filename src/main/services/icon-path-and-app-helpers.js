@@ -872,6 +872,7 @@ const createIconPathAndAppHelpers = ({
       || baseName.includes('prereq')
       || baseName === 'vc_redist.x64'
       || baseName === 'vc_redist.x86'
+      || baseName.startsWith('vc_redist')
       || baseName === 'vcredist_x64'
       || baseName === 'vcredist_x86'
       || baseName === 'launcherprereqsetup_x64'
@@ -1041,6 +1042,13 @@ const createIconPathAndAppHelpers = ({
     // Apple Bonjour / mDNS background service rows (not a user-facing desktop app).
     /^bonjour$/i,
     /^bonjour\s+service$/i,
+    // Microsoft VC++ runtime installers clutter the catalog (ARP duplicates).
+    /\bmicrosoft\s+visual\s+c\+\+\s+[^\n]*\bredistributable\b/i,
+    /\bredistributable\s*\(x\d+\)/i,
+    /\bjava\s+auto\s*updater\b/i,
+    /\bjava\s+update\s+scheduler\b/i,
+    /\bamd\s+software\s+installer\b/i,
+    /\bintel\s+driver\s*&\s*support\s+assistant\b/i,
   ];
 
   const isLikelyBackgroundBinary = (filePath = '') => {
@@ -1114,6 +1122,9 @@ const createIconPathAndAppHelpers = ({
       && /\bwindows\s+defender\b/i.test(lc)) {
       return true;
     }
+    if (lc.includes('\\package cache\\') && /\\vc_redist|visual\s*c\+\+\s*runtime|vcruntime/i.test(lc)) {
+      return true;
+    }
     return false;
   };
 
@@ -1171,6 +1182,11 @@ const createIconPathAndAppHelpers = ({
     'Spotify AB',
     'Microsoft Movies & TV',
     'Zune Video',
+    'Codex',
+    'OpenAI Codex',
+    'Cursor',
+    'Cursor (User)',
+    'Windsurf',
   ];
   const INBOX_SHORTCUT_CANONICAL_KEYS = new Set(
     INBOX_START_MENU_APP_LABELS.map((label) => getCanonicalAppKey(label)).filter(Boolean),

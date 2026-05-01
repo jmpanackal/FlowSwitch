@@ -197,6 +197,39 @@ test('isLikelyUserApp rejects WindowsApps winget shim as catalog noise', () => {
   );
 });
 
+test('isLikelyUserApp rejects Microsoft Visual C++ redistributable ARP display names', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'Microsoft Visual C++ 2015-2022 Redistributable (x64) - 14.44.35211',
+      'C:\\ProgramData\\Package Cache\\{abc}\\vc_redist.x64.exe',
+      { source: 'registry', registryMeta: { systemComponent: false, releaseType: '' } },
+    ),
+    false,
+  );
+});
+
+test('isLikelyUserApp rejects generic redistributable (x64) title noise', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'Some Vendor Runtime Redistributable (x86)',
+      'C:\\Apps\\thing.exe',
+      { source: 'registry', registryMeta: { systemComponent: false, releaseType: '' } },
+    ),
+    false,
+  );
+});
+
+test('isLikelyUserApp still allows Visual Studio Code (not VC++ redistributable)', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'Visual Studio Code',
+      'C:\\Users\\Someone\\AppData\\Local\\Programs\\Microsoft VS Code\\Code.exe',
+      { source: 'registry', registryMeta: { systemComponent: false, releaseType: '' } },
+    ),
+    true,
+  );
+});
+
 test('isLikelyUserApp rejects Bonjour display name (Apple mDNS noise)', () => {
   assert.equal(
     helpers.isLikelyUserApp('Bonjour', 'C:\\Program Files\\Bonjour\\mDNSResponder.exe', { source: 'registry' }),

@@ -1046,7 +1046,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       if (fromLookup) return String(fromLookup).trim();
       const fromManifest = readStorePackageDisplayNameFromExePathSync(exeFullPath);
       if (fromManifest) return fromManifest;
-      return String(stem || '').trim();
+      const stemRaw = String(stem || '').trim();
+      const stemLc = stemRaw.toLowerCase();
+      // Fallback when WinRT/manifest names are missing (dev tools often ship as appx-style stems).
+      if (stemLc === 'codex' || stemLc.startsWith('openai.codex')) return 'Codex';
+      if (stemLc === 'windsurf' || stemLc.startsWith('codeium.windsurf')) return 'Windsurf';
+      if (stemLc === 'cursor' || stemLc.startsWith('anysphere.cursor')) return 'Cursor';
+      return stemRaw;
     };
 
     const windowsAppsShimTasks = [];
@@ -1090,10 +1096,26 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     // Enable only for deep discovery troubleshooting:
     //   FLOWSWITCH_ENABLE_EXE_SCAN=1 npm run dev
     if (process.env.FLOWSWITCH_ENABLE_EXE_SCAN === '1') {
-      const exeDirs = [
-        'C:/Program Files',
-        'C:/Program Files (x86)'
-      ];
+      const exeDirs = [];
+      const pf = process.env.ProgramFiles;
+      const pf86 = process.env['ProgramFiles(x86)'];
+      if (pf) exeDirs.push(pf);
+      if (pf86) exeDirs.push(pf86);
+      if (exeDirs.length === 0) {
+        exeDirs.push('C:/Program Files', 'C:/Program Files (x86)');
+      }
+      const extraRoots = String(process.env.FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS || '').trim();
+      if (extraRoots) {
+        for (const raw of extraRoots.split(/[;,]/)) {
+          const p = raw.trim().replace(/^["']|["']$/g, '');
+          if (!p) continue;
+          try {
+            if (fs.existsSync(p)) exeDirs.push(p);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
       const exeFiles = scanForExeFiles(exeDirs, 3); // limit depth for perf
       for (const exePath of exeFiles) {
         const name = path.basename(exePath, '.exe');
