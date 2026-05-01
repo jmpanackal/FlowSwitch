@@ -44,6 +44,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     clearLaunchTaskbarProgress = () => {},
     isLikelyUserApp,
     getCanonicalAppKey,
+    normalizeCatalogDisplayName,
     extractExecutablePath,
     resolveBareSystemExecutableFromShimTarget,
     resolveUpdateStyleProcessStartChildExe,
@@ -558,8 +559,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     };
 
     const upsertDiscoveredApp = (appName, iconPath, sourcePath = '', context = {}) => {
-      if (!isLikelyUserApp(appName, sourcePath, context)) return;
-      const normalizedName = String(appName || '').trim();
+      const normalizedName = normalizeCatalogDisplayName(String(appName || '').trim());
+      if (!normalizedName) return;
+      if (!isLikelyUserApp(normalizedName, sourcePath, context)) return;
       const targetExeRaw = context.targetExe || extractExecutablePath(sourcePath);
       const exeDedupeKey = normalizeExePathDedupeKey(targetExeRaw);
       let key = getCanonicalAppKey(normalizedName) || normalizedName.toLowerCase();
@@ -956,7 +958,11 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           || extractExecutablePath(app.quietUninstallString || '')
           || null
         );
-        if (!isLikelyUserApp(app.name, iconSourceForRegistry, {
+        const catalogRegistryName = normalizeCatalogDisplayName(String(app.name || '').trim());
+        if (!catalogRegistryName) {
+          return;
+        }
+        if (!isLikelyUserApp(catalogRegistryName, iconSourceForRegistry, {
           source: 'registry',
           registryMeta: app,
           targetExe: registryEarlyTargetExe,
@@ -1049,7 +1055,14 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       const stemRaw = String(stem || '').trim();
       const stemLc = stemRaw.toLowerCase();
       // Fallback when WinRT/manifest names are missing (dev tools often ship as appx-style stems).
-      if (stemLc === 'codex' || stemLc.startsWith('openai.codex')) return 'Codex';
+      if (
+        stemLc === 'codex'
+        || stemLc.startsWith('openai.codex')
+        || stemLc.startsWith('openaicodex')
+        || /^openai\.codex_/i.test(stemRaw)
+      ) {
+        return 'Codex';
+      }
       if (stemLc === 'windsurf' || stemLc.startsWith('codeium.windsurf')) return 'Windsurf';
       if (stemLc === 'cursor' || stemLc.startsWith('anysphere.cursor')) return 'Cursor';
       return stemRaw;

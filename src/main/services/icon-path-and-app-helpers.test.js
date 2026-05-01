@@ -230,6 +230,38 @@ test('isLikelyUserApp still allows Visual Studio Code (not VC++ redistributable)
   );
 });
 
+test('isLikelyUserApp allows OpenAI Codex registry row despite parentKeyName and update releaseType', () => {
+  assert.equal(
+    helpers.isLikelyUserApp(
+      'OpenAI Codex',
+      'D:\\Apps\\OpenAI Codex\\Codex.exe',
+      {
+        source: 'registry',
+        registryMeta: {
+          systemComponent: false,
+          parentKeyName: 'SomeParent',
+          releaseType: 'Update',
+          uninstallString: '',
+          installLocation: 'D:\\Apps\\OpenAI Codex',
+          iconSource: 'D:\\Apps\\OpenAI Codex\\Codex.exe',
+        },
+      },
+    ),
+    true,
+  );
+});
+
+test('normalizeCatalogDisplayName strips (User) suffix for catalog display', () => {
+  assert.equal(
+    helpers.normalizeCatalogDisplayName('Cursor (User)'),
+    'Cursor',
+  );
+  assert.equal(
+    helpers.normalizeCatalogDisplayName('Windsurf (User)'),
+    'Windsurf',
+  );
+});
+
 test('isLikelyUserApp rejects Bonjour display name (Apple mDNS noise)', () => {
   assert.equal(
     helpers.isLikelyUserApp('Bonjour', 'C:\\Program Files\\Bonjour\\mDNSResponder.exe', { source: 'registry' }),

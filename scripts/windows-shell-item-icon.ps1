@@ -66,12 +66,45 @@ public static class FlowSwitchShellItemIcon
     [return: MarshalAs(UnmanagedType.Bool)]
     public static extern bool DestroyIcon(IntPtr hIcon);
 
+    [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    public static extern int PrivateExtractIcons(
+        string lpszFile,
+        int nIconIndex,
+        int cxIcon,
+        int cyIcon,
+        IntPtr[] phicon,
+        int[] piconid,
+        int nIcons,
+        int flags);
+
     [DllImport("ole32.dll")]
     public static extern void CoTaskMemFree(IntPtr pv);
 
     const uint SHGFI_ICON = 0x00000100;
     const uint SHGFI_LARGEICON = 0x00000000;
     const uint SHGFI_PIDL = 0x00000008;
+
+    static byte[] RenderScaledPngFromIconHandle(IntPtr hIcon, int sizePx)
+    {
+        Icon ico = (Icon)Icon.FromHandle(hIcon).Clone();
+        DestroyIcon(hIcon);
+        using (ico)
+        using (Bitmap src = ico.ToBitmap())
+        using (Bitmap scaled = new Bitmap(sizePx, sizePx, PixelFormat.Format32bppArgb))
+        using (Graphics g = Graphics.FromImage(scaled))
+        {
+            g.InterpolationMode = InterpolationMode.HighQualityBicubic;
+            g.SmoothingMode = SmoothingMode.HighQuality;
+            g.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            g.Clear(Color.Transparent);
+            g.DrawImage(src, new Rectangle(0, 0, sizePx, sizePx));
+            using (MemoryStream ms = new MemoryStream())
+            {
+                scaled.Save(ms, ImageFormat.Png);
+                return ms.ToArray();
+            }
+        }
+    }
 
     public static byte[] GetPng(string path, int sizePx)
     {
@@ -98,6 +131,27 @@ public static class FlowSwitchShellItemIcon
         }
         if (!usedPidl)
         {
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    string ext = Path.GetExtension(path);
+                    if (ext != null && (ext.Equals(".exe", StringComparison.OrdinalIgnoreCase)
+                        || ext.Equals(".dll", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        IntPtr[] phicon = new IntPtr[1];
+                        int[] piconid = new int[1];
+                        int n = PrivateExtractIcons(path, 0, sizePx, sizePx, phicon, piconid, 1, 0);
+                        if (n > 0 && phicon[0] != IntPtr.Zero)
+                        {
+                            return RenderScaledPngFromIconHandle(phicon[0], sizePx);
+                        }
+                    }
+                }
+            }
+            catch
+            {
+            }
             ret = SHGetFileInfoByPath(path, 0, ref sfi, (uint)Marshal.SizeOf(typeof(SHFILEINFO)), flags);
         }
         if (sfi.hIcon == IntPtr.Zero || ret == IntPtr.Zero)
@@ -107,26 +161,10 @@ public static class FlowSwitchShellItemIcon
         }
         try
         {
-            using (Icon ico = Icon.FromHandle(sfi.hIcon))
-            using (Bitmap src = ico.ToBitmap())
-            using (Bitmap scaled = new Bitmap(sizePx, sizePx, PixelFormat.Format32bppArgb))
-            using (Graphics g = Graphics.FromImage(scaled))
-            {
-                g.InterpolationMode = InterpolationMode.HighQualityBicubic;
-                g.SmoothingMode = SmoothingMode.HighQuality;
-                g.PixelOffsetMode = PixelOffsetMode.HighQuality;
-                g.Clear(Color.Transparent);
-                g.DrawImage(src, new Rectangle(0, 0, sizePx, sizePx));
-                using (MemoryStream ms = new MemoryStream())
-                {
-                    scaled.Save(ms, ImageFormat.Png);
-                    return ms.ToArray();
-                }
-            }
+            return RenderScaledPngFromIconHandle(sfi.hIcon, sizePx);
         }
         finally
         {
-            if (sfi.hIcon != IntPtr.Zero) { DestroyIcon(sfi.hIcon); }
             if (pidl != IntPtr.Zero) { CoTaskMemFree(pidl); }
         }
     }

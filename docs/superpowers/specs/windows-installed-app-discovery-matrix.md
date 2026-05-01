@@ -54,6 +54,11 @@ This document maps **where user-launchable Windows applications can appear** and
 - `FLOWSWITCH_ENABLE_EXE_SCAN=1` — enables shallow `.exe` enumeration under Program Files roots (see `collectInstalledAppsCatalog` in `trusted-renderer-ipc.js`).
 - `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS` — additional **existing** directories to include in that scan (comma or semicolon separated), for example games or tools installed outside the default `%ProgramFiles%` locations.
 
+## Icon extraction notes
+
+- **Shell batch helper** (`scripts/windows-shell-item-icon.ps1`): for `.exe` / `.dll` filesystem paths, prefers **`PrivateExtractIcons`** at the requested pixel size (default 256) before falling back to `SHGetFileInfo`, so Steam and other rich-icon executables avoid upscaling a 32×32 system icon.
+- **MSIX manifest logos** (`readFirstVisualElementsLogoAbsPathSync` in `icon-path-and-app-helpers.js`): prefers larger `Square310x310` / `Square150x150` assets over `Square44x44` when present.
+
 ## Change checklist
 
 When adding a new discovery source:

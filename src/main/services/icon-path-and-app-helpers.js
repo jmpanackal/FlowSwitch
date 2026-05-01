@@ -604,11 +604,14 @@ const createIconPathAndAppHelpers = ({
       const hit = r.exec(attrs);
       return hit ? hit[1].trim().replace(/\//g, '\\') : null;
     };
-    const rel = pickAttr('Square44x44Logo')
+    // Prefer larger assets first so catalog icons stay sharp on HiDPI (was defaulting to 44×44).
+    const rel = pickAttr('Square310x310Logo')
+      || pickAttr('Wide310x150Logo')
       || pickAttr('Square150x150Logo')
+      || pickAttr('Square71x71Logo')
+      || pickAttr('Square44x44Logo')
       || pickAttr('AppListIcon')
       || pickAttr('Square30x30Logo')
-      || pickAttr('Square310x310Logo')
       || pickAttr('Logo');
     if (!rel || /^ms-appx:/i.test(rel)) return null;
     const candidate = path.normalize(path.join(pkgRoot, rel));
@@ -1275,11 +1278,19 @@ const createIconPathAndAppHelpers = ({
         || nameLc.includes('zune')
         || nameLc.includes('groove')
       );
+      const devToolCatalogNameBypass = (
+        mediaOrSpotifyByName
+        || nameLc.includes('codex')
+        || nameLc.includes('windsurf')
+        || /\bvisual studio code\b/i.test(safeName)
+        || (/\bcursor\b/i.test(safeName) && !nameLc.includes('sql'))
+      );
       if (registryMeta.systemComponent && !packagedOrStoreInstall) return false;
-      if (registryMeta.parentKeyName && !packagedOrStoreInstall && !mediaOrSpotifyByName) return false;
+      if (registryMeta.parentKeyName && !packagedOrStoreInstall && !devToolCatalogNameBypass) return false;
       const releaseType = String(registryMeta.releaseType || '').toLowerCase();
       if (
         !packagedOrStoreInstall
+        && !devToolCatalogNameBypass
         && (
           releaseType.includes('update')
           || releaseType.includes('hotfix')
@@ -1355,6 +1366,7 @@ const createIconPathAndAppHelpers = ({
     parseInternetShortcut,
     isAppProtocolUrl,
     getCanonicalAppKey,
+    normalizeCatalogDisplayName: normalizeDisplayNameForCatalogDedupe,
     isLikelyBackgroundBinary,
     isLikelyUserApp,
   };
