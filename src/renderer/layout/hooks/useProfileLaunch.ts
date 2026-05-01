@@ -94,7 +94,7 @@ export function useProfileLaunch({
       if (outcome === "success") {
         setLaunchFeedback({
           status: "success",
-          message: message || "Launch complete.",
+          message: message || "Launch completed.",
           progress: null,
         });
       } else if (outcome === "warning") {
@@ -106,7 +106,7 @@ export function useProfileLaunch({
       } else {
         setLaunchFeedback({
           status: "error",
-          message: message || "Launch finished with errors.",
+          message: message || "Launch completed with errors.",
           progress: null,
         });
       }

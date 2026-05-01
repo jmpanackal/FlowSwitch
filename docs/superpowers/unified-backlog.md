@@ -32,9 +32,9 @@ Status legend:
 
 #### P0 - Now
 
-1. Launch visibility and control (`in_progress`)
-   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step.
-   - Remaining: finish per-app/overall status clarity polish and lock completion feedback policy.
+1. Launch visibility and control (`mostly_done`)
+   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step; post-run summary title aligns with outcome (complete vs warnings vs issues); per-app status in “Apps launched” (badges + portaled tooltips, substantive warning text); one-line cancel context when the run was cancelled; in-run “Run overview” counts (apps/tabs/failed/skipped/awaiting confirmation); human-readable per-action states in details; terminal icons in completed list match outcome (success/warning/failed/skipped).
+   - Remaining: optional completion feedback tweaks from user testing (e.g. audio cue, taskbar progress) and any copy tuning after real profile runs.
 
 2. Critical layout-editor responsiveness and shell trust (`mostly_done`)
    - Current: drag freeze is mostly fixed; minimized-target-on-secondary-monitor bug is fixed.
@@ -103,5 +103,6 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - OBS-specific launch hardening landed: executable launches now use executable-directory `cwd`, and OBS fatal error dialogs are treated as launch failures instead of successful main windows.
 - Generic recoverability hardening landed: if an app lands on target monitor but enforces non-trivial window-size constraints, FlowSwitch now records constrained placement (warning) instead of failing the full launch.
 - Launch timeline and inspector copy landed: phase-accurate substep labels, single constrained user message, warning treatment on verifying placement when constrained.
+- Launch inspector completion polish landed: session outcome title, per-app tooltips and badges in Apps launched, run overview strip during active launches, readable action states, per-outcome icons in the completed list.
 - Canonical backlog process landed: `unified-backlog.md`, `AGENTS.md` post-commit sync rule, removal of superseded standalone launch plan docs under `docs/superpowers/plans/`.
 - First-launch blur: not fixed, low reproducibility.
