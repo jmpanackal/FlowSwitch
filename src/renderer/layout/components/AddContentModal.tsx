@@ -1,4 +1,5 @@
 import { useState, useRef } from "react";
+import { createPortal } from "react-dom";
 import { X, ExternalLink, Upload, Folder, File, Globe } from "lucide-react";
 
 interface AddContentModalProps {
@@ -7,6 +8,8 @@ interface AddContentModalProps {
   type: 'link' | 'file';
   currentFolder?: string;
   onAddContent: (contentData: any) => void;
+  /** Shown after a successful add (e.g. app-wide snackbar). */
+  onNotify?: (message: string) => void;
 }
 
 type NativePickedEntry = { path: string; kind: 'file' | 'directory' };
@@ -105,7 +108,14 @@ const extractTitleFromUrl = (url: string): string => {
   }
 };
 
-export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddContent }: AddContentModalProps) {
+export function AddContentModal({
+  isOpen,
+  onClose,
+  type,
+  currentFolder,
+  onAddContent,
+  onNotify,
+}: AddContentModalProps) {
   const [url, setUrl] = useState('');
   const [name, setName] = useState('');
 
@@ -194,7 +204,9 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
         };
 
         onAddContent(contentData);
+        onNotify?.('Link added to Content library.');
       } else {
+        let addedCount = 0;
         if (nativeEntries?.length) {
           const dirs = nativeEntries.filter((e) => e.kind === 'directory');
           const files = nativeEntries.filter((e) => e.kind === 'file');
@@ -215,6 +227,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
                     : base,
                 defaultApp: 'File Explorer',
               });
+              addedCount += 1;
             }
           }
           if (files.length) {
@@ -229,6 +242,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
                 isFolder: false,
                 defaultApp: getDefaultApp('file', bn),
               });
+              addedCount += 1;
             }
           }
         } else if (selectedFiles && selectedFiles.length > 0) {
@@ -252,10 +266,16 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
             };
 
             onAddContent(contentData);
+            addedCount += 1;
           }
         } else {
           alert('Please select at least one file or folder');
           return;
+        }
+        if (addedCount === 1) {
+          onNotify?.('Added 1 item to Content library.');
+        } else if (addedCount > 1) {
+          onNotify?.(`Added ${addedCount} items to Content library.`);
         }
       }
 
@@ -330,9 +350,9 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
 
   if (!isOpen) return null;
 
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4 backdrop-blur-sm flow-modal-backdrop-enter">
-      <div className="app-no-drag w-full max-w-md rounded-lg border border-flow-border bg-flow-surface-elevated shadow-lg flow-modal-panel-enter">
+  return createPortal(
+    <div className="fixed inset-0 z-[220] flex items-center justify-center overflow-y-auto bg-black/50 p-4 py-8 backdrop-blur-sm flow-modal-backdrop-enter">
+      <div className="app-no-drag my-auto w-full max-w-md max-h-[min(90vh,720px)] overflow-y-auto rounded-lg border border-flow-border bg-flow-surface-elevated shadow-lg flow-modal-panel-enter">
         {/* Header */}
         <div className="flex items-center justify-between p-4 border-b border-flow-border">
           <div className="flex items-center gap-2">
@@ -568,6 +588,7 @@ export function AddContentModal({ isOpen, onClose, type, currentFolder, onAddCon
           </button>
         </div>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

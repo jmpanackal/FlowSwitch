@@ -26,6 +26,17 @@ export type InstalledSidebarAppInput = {
 
 type InstalledCatalogEntry = { name: string; iconPath: string | null };
 
+/** Prefer `getInstalledAppsCatalog` (call-time snapshot) over a captured array. */
+function catalogForPlacement(
+  installedAppsCatalog: InstalledCatalogEntry[] | undefined,
+  getInstalledAppsCatalog: (() => InstalledCatalogEntry[] | undefined) | undefined,
+): InstalledCatalogEntry[] | undefined {
+  if (typeof getInstalledAppsCatalog === "function") {
+    return getInstalledAppsCatalog() ?? undefined;
+  }
+  return installedAppsCatalog;
+}
+
 function resolveInstalledCatalogIconPath(
   catalog: InstalledCatalogEntry[] | undefined,
   appName: string,
@@ -76,10 +87,24 @@ export function placeSidebarContentOnMonitor(args: {
   monitorId: string;
   item: SidebarContentItemInput;
   installedAppsCatalog?: InstalledCatalogEntry[];
+  /** When set, used instead of `installedAppsCatalog` so icons match drag-drop (ref snapshot). */
+  getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addApp: (profileId: string, monitorId: string, newApp: unknown) => void;
   addBrowserTab: (profileId: string, tab: unknown) => void;
 }): void {
-  const { profile, monitorId, item, installedAppsCatalog, addApp, addBrowserTab } = args;
+  const {
+    profile,
+    monitorId,
+    item,
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+    addApp,
+    addBrowserTab,
+  } = args;
+  const catalog = catalogForPlacement(
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+  );
   const targetMonitor = profile.monitors?.find((m) => m.id === monitorId);
   if (!targetMonitor) return;
 
@@ -91,7 +116,7 @@ export function placeSidebarContentOnMonitor(args: {
 
   if (isLink) {
     const instanceId = newInstanceId(item.defaultApp);
-    const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, item.defaultApp);
+    const iconPath = resolveInstalledCatalogIconPath(catalog, item.defaultApp);
     const newApp: Record<string, unknown> = {
       instanceId,
       name: item.defaultApp,
@@ -125,7 +150,7 @@ export function placeSidebarContentOnMonitor(args: {
 
   const appLabel = item.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
-  const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appLabel);
+  const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
   const newApp: Record<string, unknown> = {
     instanceId,
     name: appLabel,
@@ -158,10 +183,22 @@ export function placeSidebarContentOnMinimized(args: {
   profile: FlowProfile;
   item: SidebarContentItemInput;
   installedAppsCatalog?: InstalledCatalogEntry[];
+  getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addAppToMinimized: (profileId: string, newApp: unknown) => void;
   addBrowserTab: (profileId: string, tab: unknown) => void;
 }): void {
-  const { profile, item, installedAppsCatalog, addAppToMinimized, addBrowserTab } = args;
+  const {
+    profile,
+    item,
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+    addAppToMinimized,
+    addBrowserTab,
+  } = args;
+  const catalog = catalogForPlacement(
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+  );
   const primary =
     profile.monitors.find((m) => m.primary) || profile.monitors[0];
   const targetMonitorId = primary?.id || "monitor-1";
@@ -171,7 +208,7 @@ export function placeSidebarContentOnMinimized(args: {
   if (isLink) {
     const appLabel = item.defaultApp || "File Viewer";
     const instanceId = newInstanceId(appLabel);
-    const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appLabel);
+    const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
     const newApp: Record<string, unknown> = {
       instanceId,
       name: appLabel,
@@ -201,7 +238,7 @@ export function placeSidebarContentOnMinimized(args: {
 
   const appLabel = item.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
-  const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appLabel);
+  const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
   const newApp: Record<string, unknown> = {
     instanceId,
     name: appLabel,
@@ -368,6 +405,7 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
   /** When the library lives outside the profile document, pass its file rows here. */
   libraryItems?: LibraryContentRow[];
   installedAppsCatalog?: InstalledCatalogEntry[];
+  getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addApp: (profileId: string, monitorId: string, newApp: unknown) => void;
 }): void {
   const {
@@ -377,8 +415,13 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
     folders,
     libraryItems,
     installedAppsCatalog,
+    getInstalledAppsCatalog,
     addApp,
   } = args;
+  const catalog = catalogForPlacement(
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+  );
   const items = (libraryItems ?? profile.contentItems ?? []) as LibraryContentRow[];
   const associatedFiles = collectAssociatedFilesFromLibraryFolder(
     folder,
@@ -395,7 +438,7 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
 
   const appLabel = folder.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
-  const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appLabel);
+  const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
   addApp(profile.id, monitorId, {
     instanceId,
     name: appLabel,
@@ -420,6 +463,7 @@ export function placeSidebarLibraryFolderOnMinimized(args: {
   folders: SidebarLibraryFolderInput[];
   libraryItems?: LibraryContentRow[];
   installedAppsCatalog?: InstalledCatalogEntry[];
+  getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addAppToMinimized: (profileId: string, newApp: unknown) => void;
 }): void {
   const {
@@ -428,8 +472,13 @@ export function placeSidebarLibraryFolderOnMinimized(args: {
     folders,
     libraryItems,
     installedAppsCatalog,
+    getInstalledAppsCatalog,
     addAppToMinimized,
   } = args;
+  const catalog = catalogForPlacement(
+    installedAppsCatalog,
+    getInstalledAppsCatalog,
+  );
   const items = (libraryItems ?? profile.contentItems ?? []) as LibraryContentRow[];
   const associatedFiles = collectAssociatedFilesFromLibraryFolder(
     folder,
@@ -443,7 +492,7 @@ export function placeSidebarLibraryFolderOnMinimized(args: {
   const targetMonitorId = primary?.id || "monitor-1";
   const appLabel = folder.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
-  const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appLabel);
+  const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
   addAppToMinimized(profile.id, {
     instanceId,
     name: appLabel,

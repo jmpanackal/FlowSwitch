@@ -19,6 +19,7 @@ import {
   type FlowLibraryViewMode,
 } from "./components/FlowLibraryToolbar";
 import { ProfileCard } from "./components/ProfileCard";
+import { useFlowSnackbar } from "./components/FlowSnackbar";
 import { FlowTooltip } from "./components/ui/tooltip";
 import { MonitorLayout } from "./components/MonitorLayout";
 import { LaunchCenterInspector } from "./components/LaunchCenterInspector";
@@ -145,6 +146,7 @@ export default function App() {
   const [isLaunching, setIsLaunching] = useState(false);
   const { launchFeedback, setLaunchFeedback, launchFeedbackTimeoutRef } =
     useLaunchFeedback();
+  const { push: pushSnackbar } = useFlowSnackbar();
   const [isEditMode, setIsEditMode] = useState(false);
   const isEditModeRef = useRef(false);
   const [profileSettingsIntent, setProfileSettingsIntent] = useState<{
@@ -342,6 +344,10 @@ export default function App() {
     { name: string; iconPath: string | null }[] | null
   >(null);
   installedAppsCatalogRef.current = installedCatalogApps;
+  const getInstalledAppsCatalog = useCallback(
+    () => installedAppsCatalogRef.current ?? undefined,
+    [],
+  );
 
   const contentLibraryEntryCount = useMemo(() => {
     const items = contentLibrary.items as ContentItem[];
@@ -590,6 +596,7 @@ export default function App() {
     setSelectedApp,
     currentProfile,
     profileDragActionsRef,
+    notifyUser: pushSnackbar,
   });
 
   libraryFolderPlacementRef.current = currentProfile
@@ -601,7 +608,7 @@ export default function App() {
             folder,
             folders: contentLibrary.folders as ContentFolder[],
             libraryItems: contentLibrary.items as ContentItem[],
-            installedAppsCatalog: installedCatalogApps,
+            getInstalledAppsCatalog,
             addApp,
           });
         },
@@ -611,7 +618,7 @@ export default function App() {
             folder,
             folders: contentLibrary.folders as ContentFolder[],
             libraryItems: contentLibrary.items as ContentItem[],
-            installedAppsCatalog: installedCatalogApps,
+            getInstalledAppsCatalog,
             addAppToMinimized,
           });
         },
@@ -638,8 +645,10 @@ export default function App() {
     try {
       const detectedMonitors = await fetchSystemMonitorsForProfile();
       const newId = `profile-${Date.now()}`;
+      let createdName = "";
       setProfiles((prev) => {
         const name = uniqueProfileDisplayName("New profile", prev);
+        createdName = name;
         const raw = buildEmptyFlowProfile({
           id: newId,
           name,
@@ -649,10 +658,19 @@ export default function App() {
         return [...prev, normalizeFlowProfile(raw)];
       });
       setSelectedProfile(newId);
+      if (createdName) {
+        pushSnackbar(`Created profile "${createdName}".`);
+      }
     } finally {
       setIsProfileCreationBusy(false);
     }
-  }, [isEditMode, isProfileCreationBusy, setProfiles, setSelectedProfile]);
+  }, [
+    isEditMode,
+    isProfileCreationBusy,
+    pushSnackbar,
+    setProfiles,
+    setSelectedProfile,
+  ]);
 
   const handleNewFromCapturedLayout = useCallback(async () => {
     if (isEditMode || isProfileCreationBusy) return;
@@ -690,18 +708,24 @@ export default function App() {
         return;
       }
       const newId = `memory-${Date.now()}`;
+      let createdName = "";
       setProfiles((prev) => {
         const name = uniqueProfileDisplayName("New profile", prev);
+        createdName = name;
         const raw = buildMemoryFlowProfileFromCapture(capture, name, newId, prev);
         return [...prev, normalizeFlowProfile(raw)];
       });
       setSelectedProfile(newId);
+      if (createdName) {
+        pushSnackbar(`Created profile "${createdName}" from current layout.`);
+      }
     } finally {
       setIsProfileCreationBusy(false);
     }
   }, [
     isEditMode,
     isProfileCreationBusy,
+    pushSnackbar,
     scheduleLaunchFeedbackClear,
     setLaunchFeedback,
     setProfiles,
@@ -858,12 +882,12 @@ export default function App() {
         profile: currentProfile,
         monitorId,
         item,
-        installedAppsCatalog: installedCatalogApps,
+        getInstalledAppsCatalog,
         addApp,
         addBrowserTab,
       });
     },
-    [currentProfile, installedCatalogApps, addApp, addBrowserTab],
+    [currentProfile, getInstalledAppsCatalog, addApp, addBrowserTab],
   );
 
   const handlePlaceContentOnMinimized = useCallback(
@@ -872,12 +896,12 @@ export default function App() {
       placeSidebarContentOnMinimized({
         profile: currentProfile,
         item,
-        installedAppsCatalog: installedCatalogApps,
+        getInstalledAppsCatalog,
         addAppToMinimized,
         addBrowserTab,
       });
     },
-    [currentProfile, installedCatalogApps, addAppToMinimized, addBrowserTab],
+    [currentProfile, getInstalledAppsCatalog, addAppToMinimized, addBrowserTab],
   );
 
   const handleConsumedOpenLibraryFolder = useCallback(() => {
@@ -930,7 +954,7 @@ export default function App() {
           profile: currentProfile,
           monitorId,
           item: contentInspectorSelection.item,
-          installedAppsCatalog: installedCatalogApps,
+          getInstalledAppsCatalog,
           addApp,
           addBrowserTab,
         });
@@ -941,7 +965,7 @@ export default function App() {
           folder: contentInspectorSelection.folder,
           folders: contentLibrary.folders as ContentFolder[],
           libraryItems: contentLibrary.items as ContentItem[],
-          installedAppsCatalog: installedCatalogApps,
+          getInstalledAppsCatalog,
           addApp,
         });
       }
@@ -954,7 +978,7 @@ export default function App() {
       contentLibrary.items,
       addApp,
       addBrowserTab,
-      installedCatalogApps,
+      getInstalledAppsCatalog,
       clearInspectorSelection,
     ],
   );
@@ -965,7 +989,7 @@ export default function App() {
       placeSidebarContentOnMinimized({
         profile: currentProfile,
         item: contentInspectorSelection.item,
-        installedAppsCatalog: installedCatalogApps,
+        getInstalledAppsCatalog,
         addAppToMinimized,
         addBrowserTab,
       });
@@ -975,7 +999,7 @@ export default function App() {
         folder: contentInspectorSelection.folder,
         folders: contentLibrary.folders as ContentFolder[],
         libraryItems: contentLibrary.items as ContentItem[],
-        installedAppsCatalog: installedCatalogApps,
+        getInstalledAppsCatalog,
         addAppToMinimized,
       });
     }
@@ -987,7 +1011,7 @@ export default function App() {
     contentLibrary.items,
     addAppToMinimized,
     addBrowserTab,
-    installedCatalogApps,
+    getInstalledAppsCatalog,
     clearInspectorSelection,
   ]);
 
@@ -2117,7 +2141,7 @@ export default function App() {
                       folder,
                       folders: contentLibrary.folders as ContentFolder[],
                       libraryItems: contentLibrary.items as ContentItem[],
-                      installedAppsCatalog: installedCatalogApps,
+                      getInstalledAppsCatalog,
                       addApp,
                     });
                   }}
@@ -2128,7 +2152,7 @@ export default function App() {
                       folder,
                       folders: contentLibrary.folders as ContentFolder[],
                       libraryItems: contentLibrary.items as ContentItem[],
-                      installedAppsCatalog: installedCatalogApps,
+                      getInstalledAppsCatalog,
                       addAppToMinimized,
                     });
                   }}
@@ -2140,6 +2164,7 @@ export default function App() {
                   excludedContentIds={Array.from(excludedContentIdSet)}
                   installedAppsCatalog={installedCatalogApps}
                   onPersistContentLibrary={handlePersistContentLibrary}
+                  onDeleteLibraryEntry={handleDeleteLibraryEntry}
                   compact={true}
                   sidebarSearchQuery={sidebarSearchQuery}
                   onSidebarSearchQueryChange={setSidebarSearchQuery}

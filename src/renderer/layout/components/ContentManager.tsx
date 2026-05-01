@@ -1,7 +1,8 @@
-import { useState, useRef, useEffect, useMemo } from "react";
-import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, ChevronRight, ChevronDown, Folder, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3 } from "lucide-react";
+import { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import { Link, FileText, Plus, Settings, Search, Star, ExternalLink, ChevronRight, ChevronDown, Folder, Home, Heart, Clock, Filter, HelpCircle, Info, Upload, LayoutGrid, List, Grid3X3, MoreVertical } from "lucide-react";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AddContentModal } from "./AddContentModal";
+import { useFlowSnackbar } from "./FlowSnackbar";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import {
   restoreDocumentTextSelection,
@@ -15,6 +16,8 @@ import {
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
 import { flowDropdownNativeSelectClass } from "./inspectorStyles";
+import { AVAILABLE_APPS } from "../constants/availableAppsForOpensWith";
+import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
   getAppColor,
@@ -89,6 +92,8 @@ interface ContentManagerProps {
     items: ContentItem[];
     folders: ContentFolder[];
   }) => void;
+  /** Remove a library row from the global content library (compact overflow menu). */
+  onDeleteLibraryEntry?: (scope: "item" | "folder", id: string) => void;
   /** IDs hidden for the active profile only (global library still contains them). */
   excludedContentIds?: string[];
   /** Installed-app catalog rows (name + shell icon path) for drag previews matching “Opens with”. */
@@ -100,58 +105,7 @@ interface ContentManagerProps {
 }
 
 const CONTENT_SIDEBAR_COMPACT_HELP =
-  'Click a row to set path and Opens with. Use + to add to a monitor or minimized row. Drag the content icon to place precisely on the canvas.';
-
-// Available apps for users to choose from (exported for library inspector)
-export const AVAILABLE_APPS = [
-  // Browsers
-  'Chrome',
-  'Firefox', 
-  'Safari',
-  'Edge',
-  
-  // Office Applications
-  'Microsoft Word',
-  'Microsoft Excel',
-  'Microsoft PowerPoint',
-  'Microsoft Outlook',
-  
-  // Development Tools
-  'Visual Studio Code',
-  'Visual Studio',
-  'Sublime Text',
-  'Atom',
-  'IntelliJ IDEA',
-  
-  // File & Media
-  'Adobe Acrobat',
-  'Notepad',
-  'Notepad++',
-  'Photos',
-  'VLC Media Player',
-  'Windows Media Player',
-  'Adobe Photoshop',
-  'Adobe Illustrator',
-  
-  // System & Utilities
-  'File Explorer',
-  'WinRAR',
-  '7-Zip',
-  'Command Prompt',
-  'PowerShell',
-  
-  // Communication
-  'Discord',
-  'Slack',
-  'Microsoft Teams',
-  'Zoom',
-  
-  // Design & Creativity
-  'Figma',
-  'Adobe XD',
-  'Sketch',
-  'Canva'
-];
+  "Click a row to set path and Opens with. Use ⋯ on a row for Add to layout or Remove from library. Drag the content icon to place precisely on the canvas.";
 
 const SIDEBAR_DRAG_BROWSER_NAMES = new Set(
   ["Chrome", "Firefox", "Safari", "Edge"].map((s) => s.toLowerCase()),
@@ -271,12 +225,14 @@ export function ContentManager({
   externalContentItems,
   externalContentFolders,
   onPersistContentLibrary,
+  onDeleteLibraryEntry,
   excludedContentIds,
   installedAppsCatalog,
   compact = false,
   sidebarSearchQuery,
   onSidebarSearchQueryChange,
 }: ContentManagerProps) {
+  const { push: pushLibrarySnackbar } = useFlowSnackbar();
   const [content, setContent] = useState<ContentItem[]>([]);
   const [folders, setFolders] = useState<ContentFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState('');
@@ -301,20 +257,36 @@ export function ContentManager({
   const [showAddModal, setShowAddModal] = useState(false);
   const [addModalType, setAddModalType] = useState<'link' | 'file'>('link');
   const [appDropdownOpen, setAppDropdownOpen] = useState<string | null>(null);
-  const [compactAddMenu, setCompactAddMenu] = useState<{
-    key: string;
+  type ContentRowOverflowMenuState =
+    | { scope: "item"; item: ContentItem; anchor: HTMLElement }
+    | { scope: "folder"; folder: ContentFolder; anchor: HTMLElement };
+
+  const [contentRowOverflowMenu, setContentRowOverflowMenu] =
+    useState<ContentRowOverflowMenuState | null>(null);
+  const [contentRowAddToSubmenu, setContentRowAddToSubmenu] = useState<{
+    scope: "item" | "folder";
+    id: string;
     anchor: HTMLElement;
   } | null>(null);
+  const contentAddSubmenuCloseTimerRef = useRef<number | null>(null);
   const libraryHydratedRef = useRef(false);
   const lastExternalLibrarySigRef = useRef("");
   const persistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const compactItemMenuKey = (id: string) => `item:${id}`;
-  const compactFolderMenuKey = (id: string) => `folder:${id}`;
+
+  const closeContentRowMenus = useCallback(() => {
+    if (contentAddSubmenuCloseTimerRef.current != null) {
+      window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+      contentAddSubmenuCloseTimerRef.current = null;
+    }
+    setContentRowAddToSubmenu(null);
+    setContentRowOverflowMenu(null);
+  }, []);
 
   const monitorsSortedForMenu = useMemo(() => {
     const list = [...(currentProfile?.monitors ?? [])] as {
       id: string;
       name?: string;
+      systemName?: string | null;
       primary?: boolean;
     }[];
     list.sort((a, b) => {
@@ -323,6 +295,19 @@ export function ContentManager({
     });
     return list;
   }, [currentProfile?.monitors]);
+
+  const monitorDisplayLabelMap = useMemo(
+    () =>
+      buildMonitorDisplayLabelMap(
+        monitorsSortedForMenu.map((m) => ({
+          id: m.id,
+          name: m.name || m.id,
+          systemName: m.systemName ?? null,
+          primary: m.primary,
+        })),
+      ),
+    [monitorsSortedForMenu],
+  );
 
   useEffect(() => {
     if (externalContentItems == null || externalContentFolders == null) {
@@ -384,8 +369,29 @@ export function ContentManager({
   }, [currentProfile?.id, externalContentItems, externalContentFolders]);
 
   useEffect(() => {
-    setCompactAddMenu(null);
-  }, [currentProfile?.id]);
+    closeContentRowMenus();
+  }, [currentProfile?.id, closeContentRowMenus]);
+
+  useEffect(() => {
+    if (!contentRowOverflowMenu) {
+      setContentRowAddToSubmenu(null);
+      return;
+    }
+    if (contentRowAddToSubmenu) {
+      let oid: string;
+      if (contentRowOverflowMenu.scope === "item") {
+        oid = contentRowOverflowMenu.item.id;
+      } else {
+        oid = contentRowOverflowMenu.folder.id;
+      }
+      if (
+        contentRowAddToSubmenu.id !== oid
+        || contentRowAddToSubmenu.scope !== contentRowOverflowMenu.scope
+      ) {
+        setContentRowAddToSubmenu(null);
+      }
+    }
+  }, [contentRowOverflowMenu, contentRowAddToSubmenu]);
 
   useEffect(() => {
     if (!openLibraryFolderId) return;
@@ -572,6 +578,11 @@ export function ContentManager({
 
   // Enhanced mouse system for drag detection
   const handleMouseDown = (e: React.MouseEvent, item: ContentItem | ContentFolder) => {
+    const t = e.target as HTMLElement;
+    if (t.closest("[data-content-row-menu]")) {
+      return;
+    }
+
     e.preventDefault();
     
     console.log('🖱️ CONTENT MOUSE DOWN:', item.name);
@@ -814,13 +825,13 @@ export function ContentManager({
   const handleAddContentToMonitor = (item: ContentItem, monitorId: string) => {
     if (!onPlaceContentOnMonitor) return;
     onPlaceContentOnMonitor(monitorId, item);
-    setCompactAddMenu(null);
+    closeContentRowMenus();
   };
 
   const handleAddContentToMinimized = (item: ContentItem) => {
     if (!onPlaceContentOnMinimized) return;
     onPlaceContentOnMinimized(item);
-    setCompactAddMenu(null);
+    closeContentRowMenus();
   };
 
   const handleAddLibraryFolderToMonitor = (
@@ -829,194 +840,310 @@ export function ContentManager({
   ) => {
     if (!onPlaceLibraryFolderOnMonitor) return;
     onPlaceLibraryFolderOnMonitor(monitorId, folder);
-    setCompactAddMenu(null);
+    closeContentRowMenus();
   };
 
   const handleAddLibraryFolderToMinimized = (folder: ContentFolder) => {
     if (!onPlaceLibraryFolderOnMinimized) return;
     onPlaceLibraryFolderOnMinimized(folder);
-    setCompactAddMenu(null);
+    closeContentRowMenus();
   };
 
-  /** Compact sidebar: + menu for a content item */
-  const renderCompactAddToolbar = (item: ContentItem) => {
-    if (!compact || !onPlaceContentOnMonitor) return null;
-    const k = compactItemMenuKey(item.id);
+  /** Compact sidebar: ⋯ overflow (Add to + remove), matching Apps row menus. */
+  const renderCompactLibraryOverflowMenu = (
+    target:
+      | { scope: "item"; item: ContentItem }
+      | { scope: "folder"; folder: ContentFolder },
+  ) => {
+    if (!compact) return null;
+    const scope = target.scope;
+    const entity = scope === "item" ? target.item : target.folder;
+    const name = entity.name;
+    const id = entity.id;
+    const canAddToLayout =
+      scope === "item" ? Boolean(onPlaceContentOnMonitor) : Boolean(onPlaceLibraryFolderOnMonitor);
+
+    if (!canAddToLayout && !onDeleteLibraryEntry) return null;
+
+    let overflowOpen = false;
+    if (contentRowOverflowMenu != null) {
+      if (
+        scope === "item"
+        && contentRowOverflowMenu.scope === "item"
+        && contentRowOverflowMenu.item.id === id
+      ) {
+        overflowOpen = true;
+      }
+      if (
+        scope === "folder"
+        && contentRowOverflowMenu.scope === "folder"
+        && contentRowOverflowMenu.folder.id === id
+      ) {
+        overflowOpen = true;
+      }
+    }
+
+    const submenuOpen =
+      overflowOpen
+      && contentRowAddToSubmenu != null
+      && contentRowAddToSubmenu.scope === scope
+      && contentRowAddToSubmenu.id === id;
+
+    const menuStackId = `compact-content-${scope}-${id}`;
+
     return (
       <div
-        className="flex shrink-0 items-center gap-0.5 self-center"
+        data-content-row-menu
+        className={`flex shrink-0 items-center gap-0 ${
+          contentLibraryView === "grid"
+            ? "justify-center self-center"
+            : "self-center"
+        }`}
         onMouseDown={stopContentRowPointer}
+        onClick={(e) => e.stopPropagation()}
       >
         <div className="relative">
-          <FlowTooltip
-            label={
-              !currentProfile
-                ? "Select a profile first"
-                : "Add to a monitor or minimized row"
-            }
-          >
-            <span className="inline-flex">
-              <button
-                type="button"
-                disabled={!currentProfile}
-                aria-label={`Add ${item.name} to layout`}
-                aria-expanded={compactAddMenu?.key === k}
-                aria-haspopup="menu"
-                onClick={(e) => {
-                  stopContentRowPointer(e);
-                  setAppDropdownOpen(null);
-                  setCompactAddMenu((prev) =>
-                    prev?.key === k
-                      ? null
-                      : { key: k, anchor: e.currentTarget as HTMLElement },
-                  );
-                }}
-                className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
-              </button>
-            </span>
+          <FlowTooltip label={`More actions for ${name}`}>
+            <button
+              type="button"
+              className="rounded-md p-1 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
+              aria-label={`More actions for ${name}`}
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              onClick={(e) => {
+                stopContentRowPointer(e);
+                setAppDropdownOpen(null);
+                if (contentAddSubmenuCloseTimerRef.current != null) {
+                  window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+                  contentAddSubmenuCloseTimerRef.current = null;
+                }
+                setContentRowAddToSubmenu(null);
+                setContentRowOverflowMenu((prev) => {
+                  let sameRowOpen = false;
+                  if (prev != null) {
+                    if (
+                      scope === "item"
+                      && prev.scope === "item"
+                      && prev.item.id === id
+                    ) {
+                      sameRowOpen = true;
+                    }
+                    if (
+                      scope === "folder"
+                      && prev.scope === "folder"
+                      && prev.folder.id === id
+                    ) {
+                      sameRowOpen = true;
+                    }
+                  }
+                  if (sameRowOpen) {
+                    return null;
+                  }
+                  if (scope === "item") {
+                    return {
+                      scope: "item",
+                      item: target.item,
+                      anchor: e.currentTarget as HTMLElement,
+                    };
+                  }
+                  return {
+                    scope: "folder",
+                    folder: target.folder,
+                    anchor: e.currentTarget as HTMLElement,
+                  };
+                });
+              }}
+            >
+              <MoreVertical
+                className="h-3.5 w-3.5"
+                strokeWidth={2}
+                aria-hidden
+              />
+            </button>
           </FlowTooltip>
-          {compactAddMenu?.key === k ? (
+          {overflowOpen && contentRowOverflowMenu ? (
             <SidebarOverlayMenu
               open
-              anchorEl={compactAddMenu.anchor}
-              onClose={() => setCompactAddMenu(null)}
+              anchorEl={contentRowOverflowMenu.anchor}
+              menuStackId={menuStackId}
+              onClose={() => {
+                setContentRowAddToSubmenu(null);
+                setContentRowOverflowMenu(null);
+              }}
             >
-              {monitorsSortedForMenu.length ? (
-                monitorsSortedForMenu.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="menuitem"
-                    className="flow-menu-item min-w-0 text-left text-xs"
-                    onClick={(e) => {
-                      stopContentRowPointer(e);
-                      handleAddContentToMonitor(item, m.id);
-                    }}
-                  >
-                    <span className="truncate">
-                      {(m.name || m.id) + (m.primary ? " (primary)" : "")}
-                    </span>
-                  </button>
-                ))
-              ) : (
-                <div className="px-3 py-2 text-[11px] text-flow-text-muted">
-                  No monitors in this profile.
-                </div>
-              )}
-              <div className="my-0.5 h-px bg-flow-border/50" role="none" />
-              <FlowTooltip
-                label={!currentProfile ? "Select a profile first" : undefined}
-              >
-                <span className="flex w-full">
+              {canAddToLayout ? (
+                <div className="px-1 py-0.5">
                   <button
                     type="button"
                     role="menuitem"
-                    disabled={!currentProfile || !onPlaceContentOnMinimized}
+                    aria-haspopup="menu"
+                    aria-expanded={submenuOpen}
+                    disabled={!currentProfile}
                     className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
                     onClick={(e) => {
                       stopContentRowPointer(e);
-                      handleAddContentToMinimized(item);
+                      setContentRowAddToSubmenu({
+                        scope,
+                        id,
+                        anchor: e.currentTarget as HTMLElement,
+                      });
+                    }}
+                    onMouseEnter={(e) => {
+                      if (contentAddSubmenuCloseTimerRef.current != null) {
+                        window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+                        contentAddSubmenuCloseTimerRef.current = null;
+                      }
+                      setContentRowAddToSubmenu({
+                        scope,
+                        id,
+                        anchor: e.currentTarget as HTMLElement,
+                      });
+                    }}
+                    onMouseLeave={() => {
+                      if (contentAddSubmenuCloseTimerRef.current != null) {
+                        window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+                      }
+                      contentAddSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                        setContentRowAddToSubmenu(null);
+                      }, 120);
                     }}
                   >
-                    Minimized row
-                  </button>
-                </span>
-              </FlowTooltip>
-              <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
-                Drag the row to drop on a tile. Row click: path and “Opens with”
-                in the panel.
-              </div>
-            </SidebarOverlayMenu>
-          ) : null}
-        </div>
-      </div>
-    );
-  };
-
-  const renderCompactFolderAddToolbar = (folder: ContentFolder) => {
-    if (!compact || !onPlaceLibraryFolderOnMonitor) return null;
-    const k = compactFolderMenuKey(folder.id);
-    return (
-      <div
-        className="flex shrink-0 items-center gap-0.5 self-center"
-        onMouseDown={stopContentRowPointer}
-      >
-        <div className="relative">
-          <FlowTooltip
-            label={
-              !currentProfile
-                ? "Select a profile first"
-                : "Add folder contents as one layout tile"
-            }
-          >
-            <span className="inline-flex">
-              <button
-                type="button"
-                disabled={!currentProfile}
-                aria-label={`Add folder ${folder.name} to layout`}
-                aria-expanded={compactAddMenu?.key === k}
-                aria-haspopup="menu"
-                onClick={(e) => {
-                  stopContentRowPointer(e);
-                  setAppDropdownOpen(null);
-                  setCompactAddMenu((prev) =>
-                    prev?.key === k
-                      ? null
-                      : { key: k, anchor: e.currentTarget as HTMLElement },
-                  );
-                }}
-                className="rounded-md p-1.5 text-flow-text-muted transition-colors hover:bg-flow-surface hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Plus className="h-4 w-4" strokeWidth={2} aria-hidden />
-              </button>
-            </span>
-          </FlowTooltip>
-          {compactAddMenu?.key === k ? (
-            <SidebarOverlayMenu
-              open
-              anchorEl={compactAddMenu.anchor}
-              onClose={() => setCompactAddMenu(null)}
-            >
-              {monitorsSortedForMenu.length ? (
-                monitorsSortedForMenu.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    role="menuitem"
-                    className="flow-menu-item min-w-0 text-left text-xs"
-                    onClick={(e) => {
-                      stopContentRowPointer(e);
-                      handleAddLibraryFolderToMonitor(folder, m.id);
-                    }}
-                  >
-                    <span className="truncate">
-                      {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                    <span className="flex items-center justify-between gap-2">
+                      <span>Add to</span>
+                      <span aria-hidden className="text-flow-text-muted">
+                        ▸
+                      </span>
                     </span>
                   </button>
-                ))
-              ) : (
-                <div className="px-3 py-2 text-[11px] text-flow-text-muted">
-                  No monitors in this profile.
                 </div>
-              )}
-              <div className="my-0.5 h-px bg-flow-border/50" role="none" />
-              <button
-                type="button"
-                role="menuitem"
-                disabled={!currentProfile || !onPlaceLibraryFolderOnMinimized}
-                className="flow-menu-item text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
-                onClick={(e) => {
-                  stopContentRowPointer(e);
-                  handleAddLibraryFolderToMinimized(folder);
-                }}
-              >
-                Minimized row
-              </button>
-              <div className="border-t border-flow-border/40 px-2 py-1.5 text-[10px] leading-snug text-flow-text-muted">
-                One tile: all files in this folder (nested included). Links skipped.
-              </div>
+              ) : null}
+              {submenuOpen && canAddToLayout && contentRowAddToSubmenu ? (
+                <SidebarOverlayMenu
+                  open
+                  anchorEl={contentRowAddToSubmenu.anchor}
+                  menuStackId={menuStackId}
+                  onClose={() => setContentRowAddToSubmenu(null)}
+                  unconstrainedHeight
+                  placement="right-start"
+                >
+                  <div
+                    className="px-1 py-0.5"
+                    onMouseEnter={() => {
+                      if (contentAddSubmenuCloseTimerRef.current != null) {
+                        window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+                        contentAddSubmenuCloseTimerRef.current = null;
+                      }
+                    }}
+                    onMouseLeave={() => {
+                      if (contentAddSubmenuCloseTimerRef.current != null) {
+                        window.clearTimeout(contentAddSubmenuCloseTimerRef.current);
+                      }
+                      contentAddSubmenuCloseTimerRef.current = window.setTimeout(() => {
+                        setContentRowAddToSubmenu(null);
+                      }, 120);
+                    }}
+                  >
+                    {monitorsSortedForMenu.length ? (
+                      monitorsSortedForMenu.map((m) => (
+                        <button
+                          key={m.id}
+                          type="button"
+                          role="menuitem"
+                          disabled={
+                            !currentProfile
+                            || (scope === "item" ? !onPlaceContentOnMonitor : !onPlaceLibraryFolderOnMonitor)
+                          }
+                          className="flow-menu-item min-w-0 text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={(e) => {
+                            stopContentRowPointer(e);
+                            if (scope === "item") {
+                              handleAddContentToMonitor(target.item, m.id);
+                            } else {
+                              handleAddLibraryFolderToMonitor(target.folder, m.id);
+                            }
+                          }}
+                        >
+                          <span className="flex min-w-0 flex-col">
+                            <span className="truncate">
+                              {monitorDisplayLabelMap.get(m.id)?.headline
+                                ?? (m.name || m.id)}
+                            </span>
+                            <span className="truncate text-[10px] leading-snug text-flow-text-muted">
+                              {monitorDisplayLabelMap.get(m.id)?.detail
+                                ?? m.name
+                                ?? m.id}
+                            </span>
+                          </span>
+                        </button>
+                      ))
+                    ) : (
+                      <div className="px-3 py-2 text-[11px] text-flow-text-muted">
+                        No monitors in this profile.
+                      </div>
+                    )}
+                    <div
+                      className="my-0.5 h-px bg-flow-border/50"
+                      role="separator"
+                      aria-hidden
+                    />
+                    <FlowTooltip
+                      label={
+                        !currentProfile ? "Select a profile first" : undefined
+                      }
+                    >
+                      <span className="flex w-full">
+                        <button
+                          type="button"
+                          role="menuitem"
+                          disabled={
+                            !currentProfile
+                            || (scope === "item"
+                              ? !onPlaceContentOnMinimized
+                              : !onPlaceLibraryFolderOnMinimized)
+                          }
+                          className="flow-menu-item w-full text-left text-xs disabled:cursor-not-allowed disabled:opacity-40"
+                          onClick={(e) => {
+                            stopContentRowPointer(e);
+                            if (scope === "item") {
+                              handleAddContentToMinimized(target.item);
+                            } else {
+                              handleAddLibraryFolderToMinimized(target.folder);
+                            }
+                          }}
+                        >
+                          Minimized row
+                        </button>
+                      </span>
+                    </FlowTooltip>
+                  </div>
+                </SidebarOverlayMenu>
+              ) : null}
+              {onDeleteLibraryEntry ? (
+                <>
+                  {canAddToLayout ? (
+                    <div
+                      className="my-1 h-px bg-flow-border/60"
+                      role="separator"
+                      aria-hidden
+                    />
+                  ) : null}
+                  <div className="bg-flow-bg-tertiary/25 px-1 py-0.5">
+                    <button
+                      type="button"
+                      role="menuitem"
+                      className="flow-menu-item w-full text-left text-xs text-flow-accent-red hover:text-flow-accent-red"
+                      onClick={(e) => {
+                        stopContentRowPointer(e);
+                        onDeleteLibraryEntry(scope, id);
+                        pushLibrarySnackbar(`Removed "${name}" from Content library.`);
+                        closeContentRowMenus();
+                      }}
+                    >
+                      Remove from content library
+                    </button>
+                  </div>
+                </>
+              ) : null}
             </SidebarOverlayMenu>
           ) : null}
         </div>
@@ -1096,7 +1223,7 @@ export function ContentManager({
                   {folder.name}
                 </h3>
               </div>
-              {renderCompactFolderAddToolbar(folder)}
+              {renderCompactLibraryOverflowMenu({ scope: "folder", folder })}
             </div>
           </div>
         </div>
@@ -1397,7 +1524,7 @@ export function ContentManager({
                   {item.name}
                 </h3>
               </div>
-              {renderCompactAddToolbar(item)}
+              {renderCompactLibraryOverflowMenu({ scope: "item", item })}
             </div>
           </div>
         </div>
@@ -2131,6 +2258,7 @@ export function ContentManager({
         type={addModalType}
         currentFolder={currentFolder?.name}
         onAddContent={handleAddContent}
+        onNotify={pushLibrarySnackbar}
       />
     </div>
   );

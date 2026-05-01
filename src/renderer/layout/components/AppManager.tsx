@@ -24,6 +24,7 @@ import {
 import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
+import { useFlowSnackbar } from "./FlowSnackbar";
 import { FlowTooltip } from "./ui/tooltip";
 import {
   FlowLibraryToolbar,
@@ -112,6 +113,7 @@ export function AppManager({
   onInspectInstalledApp,
   installedAppCategoryOverrides = {},
 }: AppManagerProps) {
+  const { push: pushSnackbar } = useFlowSnackbar();
   const [searchTerm, setSearchTerm] = useState('');
   const sidebarSearchControlled =
     Boolean(compact)
@@ -256,14 +258,25 @@ export function AppManager({
     if (!bridge || typeof bridge.addUserCatalogExe !== "function") return;
     try {
       const res = await bridge.addUserCatalogExe();
-      if (res && typeof res === "object" && "ok" in res && res.ok) {
+      if (!res || typeof res !== "object") return;
+      if ("ok" in res && res.ok && "path" in res && typeof res.path === "string") {
         invalidateInstalledAppsCache();
         setCatalogListVersion((v) => v + 1);
+        const norm = res.path.replace(/[/\\]+/g, "\\");
+        const leaf = norm.split("\\").filter(Boolean).pop() || res.path;
+        pushSnackbar(`Added "${leaf}" to Apps library.`);
+        return;
       }
+      if ("canceled" in res && res.canceled) return;
+      const err =
+        "error" in res && typeof res.error === "string" && res.error.trim()
+          ? res.error.trim()
+          : "Could not add application.";
+      pushSnackbar(err, { variant: "error" });
     } catch {
-      /* ignore */
+      pushSnackbar("Could not add application.", { variant: "error" });
     }
-  }, []);
+  }, [pushSnackbar]);
 
   const monitorsSortedForMenu = useMemo(() => {
     const list = [...(currentProfile?.monitors ?? [])] as {
@@ -739,6 +752,7 @@ export function AppManager({
                         <SidebarOverlayMenu
                           open
                           anchorEl={overflowMenuOpen.anchor}
+                          menuStackId={`app-catalog-${catalogKey}`}
                           onClose={() => {
                             setAddToSubmenuOpen(null);
                             setOverflowMenuOpen(null);
@@ -789,6 +803,7 @@ export function AppManager({
                             <SidebarOverlayMenu
                               open
                               anchorEl={addToSubmenuOpen.anchor}
+                              menuStackId={`app-catalog-${catalogKey}`}
                               onClose={() => setAddToSubmenuOpen(null)}
                               unconstrainedHeight
                               placement="right-start"
