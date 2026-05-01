@@ -33,8 +33,8 @@ Status legend:
 #### P0 - Now
 
 1. Launch visibility and control (`mostly_done`)
-   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step; post-run summary title aligns with outcome (complete vs warnings vs issues); per-app status in “Apps launched” (badges + portaled tooltips, substantive warning text); one-line cancel context when the run was cancelled; in-run “Run overview” counts (apps/tabs/failed/skipped/awaiting confirmation); human-readable per-action states in details; terminal icons in completed list match outcome (success/warning/failed/skipped).
-   - Remaining: optional completion feedback tweaks from user testing (e.g. audio cue, taskbar progress) and any copy tuning after real profile runs.
+   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step; post-run “Launch summary” shows session outcome chip beside the section title (not bundled with the app counter), launched profile name with elapsed time on a full-width row, and per-app status (quiet OK checkmark vs warn/error/stopped pills, substeps and in-row notes for non-OK, optional “Reused existing window” when applicable); launch inspector uses the launched profile (not canvas selection) and launch-status polling keys off the active launch profile id during runs; one-line cancel context when the run was cancelled; in-run “Run overview” counts (apps/tabs/failed/skipped/awaiting confirmation); human-readable per-action states in details; terminal icons in completed list match outcome (success/warning/failed/skipped).
+   - Remaining: optional completion feedback tweaks from user testing (e.g. audio cue, taskbar progress) and any copy tuning after real profile runs; optional return of rich per-app hover detail in the post-run summary if dogfood shows a gap.
 
 2. Critical layout-editor responsiveness and shell trust (`mostly_done`)
    - Current: drag freeze is mostly fixed; minimized-target-on-secondary-monitor bug is fixed.
@@ -87,7 +87,7 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 
 ## Immediate Next Execution Queue
 
-1. Finish launch visibility/control from "partial" to full P0 completion criteria.
+1. Optional polish on launch visibility/control (audio, taskbar progress, dogfood copy); treat P0 launch track as criteria-met unless new gaps appear.
 2. Run targeted first-launch blur investigation matrix (DPI, scale, zoom, first-run state capture), then fix or classify.
 3. Start app-discovery trust pass (manual exe + launchability classification + non-system-drive icon/path robustness).
 4. Start large-profile guardrails (thresholds, warnings, sequencing policy).
@@ -103,6 +103,7 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - OBS-specific launch hardening landed: executable launches now use executable-directory `cwd`, and OBS fatal error dialogs are treated as launch failures instead of successful main windows.
 - Generic recoverability hardening landed: if an app lands on target monitor but enforces non-trivial window-size constraints, FlowSwitch now records constrained placement (warning) instead of failing the full launch.
 - Launch timeline and inspector copy landed: phase-accurate substep labels, single constrained user message, warning treatment on verifying placement when constrained.
-- Launch inspector completion polish landed: session outcome title, per-app tooltips and badges in Apps launched, run overview strip during active launches, readable action states, per-outcome icons in the completed list.
+- Launch inspector completion polish landed: session outcome aligned with run, per-app badges and detail rows in the post-run list, run overview strip during active launches, readable action states, per-outcome icons in the completed list.
+- Launch summary + profile fidelity merge landed (main): header hierarchy (outcome by title, counter separate), launched-profile inspector binding and poll id during active launch, quiet OK vs pill states, “Reused existing window” smart-decision copy (backward-compatible with legacy “Reusing” text).
 - Canonical backlog process landed: `unified-backlog.md`, `AGENTS.md` post-commit sync rule, removal of superseded standalone launch plan docs under `docs/superpowers/plans/`.
 - First-launch blur: not fixed, low reproducibility.
