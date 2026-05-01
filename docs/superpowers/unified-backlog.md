@@ -40,12 +40,13 @@ Status legend:
    - Current: drag freeze is mostly fixed; minimized-target-on-secondary-monitor bug is fixed.
    - Remaining: first-launch blur root cause and fix (not reproducible yet).
 
-3. App discovery completeness and hygiene (`not_started`)
+3. App discovery completeness and hygiene (`in_progress` — `feature/app-discovery-hygiene`)
    - Improve coverage for missing apps.
    - Filter non-app/system-noise entries.
    - Clarify launchable vs listed entries.
    - Add manual executable path support and test-launch flow.
    - Harden icon/path handling for non-system drives.
+   - **Latest (branch):** Apps sidebar add pill → pick `.exe` → persists `userCatalogExePaths` and merges into catalog (`installed-apps:add-user-exe`); Steam library `common` roots merged into optional deep exe scan; stricter catalog filters (VC++ redistributable titles, Java/AMD/Intel installer noise, Package Cache VC paths), inbox shortcut allow-list extended (Codex, Cursor, Windsurf), WindowsApps shim **display-name** fallbacks when WinRT/manifest names are missing, optional exe scan uses `%ProgramFiles%` / `%ProgramFiles(x86)%` and `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS`; shell icon script tweaks; matrix doc updated. **Content / layout:** “Add to monitor” from the content ⋯ menu resolves catalog icons at placement time (`getInstalledAppsCatalog` + ref) so tiles match drag-drop; content library gains `FlowSnackbar` provider usage and `AVAILABLE_APPS` moved to `availableAppsForOpensWith` for Fast Refresh hygiene.
 
 4. Safe launch guardrails for large profiles (`not_started`)
    - Soft threshold warnings and hard constraints.

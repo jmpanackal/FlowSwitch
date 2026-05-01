@@ -1,5 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const { createProfileLaunchGatherers } = require('./profile-launch-gather');
 
 const stubDeps = () => {
@@ -32,6 +35,47 @@ test('gatherProfileAppLaunches collects per-monitor apps with monitor mapping', 
   assert.equal(launches.length, 1);
   assert.equal(launches[0].appName, 'Calc');
   assert.equal(launches[0].monitor?.id, 'm1');
+});
+
+test('gatherProfileAppLaunches adds folder spawn args for any host exe with folder content', { skip: process.platform !== 'win32' }, () => {
+  const { gatherProfileAppLaunches } = createProfileLaunchGatherers(stubDeps());
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-flow-'));
+  try {
+    const hostExe = path.join(
+      process.env.SystemRoot || process.env.windir || 'C:\\Windows',
+      'System32',
+      'notepad.exe',
+    );
+    const monitorMap = new Map([['m1', { id: 'm1' }]]);
+    const profile = {
+      monitors: [
+        {
+          id: 'm1',
+          primary: true,
+          apps: [
+            {
+              name: 'Visual Studio Code',
+              executablePath: hostExe,
+              associatedFiles: [{ type: 'folder', path: tmp, associatedApp: 'Visual Studio Code', useDefaultApp: true }],
+            },
+          ],
+        },
+      ],
+      minimizedApps: [],
+      restrictedApps: [],
+    };
+    const { launches, skippedApps } = gatherProfileAppLaunches(profile, monitorMap);
+    assert.equal(skippedApps.length, 0);
+    assert.equal(launches.length, 1);
+    assert.ok(Array.isArray(launches[0].spawnArgsForExecutable));
+    assert.equal(launches[0].spawnArgsForExecutable[0], tmp);
+  } finally {
+    try {
+      fs.rmSync(tmp, { recursive: true });
+    } catch {
+      // ignore
+    }
+  }
 });
 
 test('gatherLegacyActionLaunches skips restricted legacy app actions', () => {

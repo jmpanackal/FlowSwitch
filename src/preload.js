@@ -28,6 +28,15 @@ contextBridge.exposeInMainWorld('electron', {
 
   // Fetch installed apps from main process (returns Promise<{ name, iconPath }[]>)
   getInstalledApps: (opts) => ipcRenderer.invoke('get-installed-apps', opts ?? {}),
+  addUserCatalogExe: () => ipcRenderer.invoke('installed-apps:add-user-exe'),
+  /** Windows: spawn .exe, open .lnk, or open a safe catalog URL to verify discovery. */
+  testLaunchCatalogApp: (payload) => ipcRenderer.invoke('catalog-app:test-launch', payload ?? {}),
+  /** Windows: persist or clear per-catalog-row .exe override (prefs `catalogLaunchExeOverrides`). */
+  setCatalogLaunchExeOverride: (payload) => ipcRenderer.invoke('catalog-app:set-launch-exe-override', payload ?? {}),
+  /** Windows: open .exe file picker, confirm, then save catalog launch override. */
+  pickCatalogLaunchExeOverride: (payload) => ipcRenderer.invoke('catalog-app:pick-launch-exe-override', payload ?? {}),
+  /** Windows: confirm then remove saved .exe override for this catalog row. */
+  clearCatalogLaunchExeOverride: (payload) => ipcRenderer.invoke('catalog-app:clear-launch-exe-override', payload ?? {}),
 
   // Capture running app layout from main process
   captureRunningAppLayout: () => ipcRenderer.invoke('capture-running-app-layout'),

@@ -88,6 +88,8 @@ export type UseMainLayoutProfileMutationsArgs = {
   setSelectedApp: Dispatch<SetStateAction<MainLayoutSelectedApp | null>>;
   currentProfile: FlowProfile | null;
   profileDragActionsRef: MutableRefObject<ProfileLayoutDragActions | null>;
+  /** Optional transient UI message (e.g. snackbar) after profile library actions. */
+  notifyUser?: (message: string) => void;
 };
 
 export function useMainLayoutProfileMutations({
@@ -99,6 +101,7 @@ export function useMainLayoutProfileMutations({
   setSelectedApp,
   currentProfile,
   profileDragActionsRef,
+  notifyUser,
 }: UseMainLayoutProfileMutationsArgs) {
   const updateProfile = (profileId: string, updates: any) => {
     setProfiles((prev) =>
@@ -1170,6 +1173,7 @@ export function useMainLayoutProfileMutations({
     };
 
     setProfiles((prev) => [...prev, newProfile]);
+    notifyUser?.(`Duplicated profile as "${newProfile.name}".`);
   };
 
   const deleteProfile = (profileId: string) => {

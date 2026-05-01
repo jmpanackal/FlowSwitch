@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { FlowTooltip } from "./ui/tooltip";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
@@ -43,6 +43,8 @@ import {
   inferInstalledAppLibraryCategory,
   isAppLibraryCategory,
 } from "../../utils/installedAppLibraryCategory";
+import { buildTestLaunchSpawnArgsForFolderContentHost } from "../utils/profileAppTestLaunch";
+import { useFlowSnackbar } from "./FlowSnackbar";
 import {
   inspectorFieldLabelClass,
   inspectorHelperTextClass,
@@ -158,6 +160,8 @@ interface SelectedAppDetailsProps {
     app: InstalledAppCatalogKeySource,
     category: string,
   ) => void;
+  /** After saving or clearing a catalog `.exe` override, refetch catalog and refresh inspector. */
+  onCatalogLaunchExeChanged?: () => void | Promise<void>;
 }
 
 type TabType = "overview" | "launch" | "content";
@@ -177,7 +181,9 @@ export function SelectedAppDetails({
   onAddSidebarAppToMonitor,
   onAddSidebarAppToMinimized,
   onSetInstalledAppLibraryCategory,
+  onCatalogLaunchExeChanged,
 }: SelectedAppDetailsProps) {
+  const { push: pushSnackbar } = useFlowSnackbar();
   const [addAssocMenuOpen, setAddAssocMenuOpen] = useState(false);
   const addAssocMenuRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
@@ -187,6 +193,7 @@ export function SelectedAppDetails({
   const [pasteInput, setPasteInput] = useState('');
   const [identityPathCopyNotice, setIdentityPathCopyNotice] = useState<string | null>(null);
   const identityPathCopyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [catalogExeOverrideBusy, setCatalogExeOverrideBusy] = useState(false);
 
   useEffect(() => {
     return () => {
@@ -272,6 +279,87 @@ export function SelectedAppDetails({
     document.addEventListener("mousedown", onDocMouseDown);
     return () => document.removeEventListener("mousedown", onDocMouseDown);
   }, [addAssocMenuOpen]);
+
+  const handleCatalogTestLaunchFromInspector = useCallback(async () => {
+    if (!selectedApp) return;
+    const fromSidebar = selectedApp.source === "sidebar";
+    const fromProfileApp =
+      (selectedApp.source === "monitor" || selectedApp.source === "minimized")
+      && selectedApp.type === "app";
+    if (!fromSidebar && !fromProfileApp) return;
+    const d = selectedApp.data;
+    if (!window.electron?.testLaunchCatalogApp) {
+      pushSnackbar("Test launch is not available.", { variant: "error" });
+      return;
+    }
+    const spawnArgs = buildTestLaunchSpawnArgsForFolderContentHost(d);
+    const r = await window.electron.testLaunchCatalogApp({
+      name: d.name,
+      executablePath: d.executablePath ?? "",
+      shortcutPath: d.shortcutPath ?? "",
+      launchUrl: d.launchUrl ?? "",
+      ...(spawnArgs?.length ? { spawnArgsForExecutable: spawnArgs } : {}),
+    });
+    if (r.ok) {
+      pushSnackbar(`Started “${d.name}”.`);
+    } else {
+      pushSnackbar(r.error || "Test launch failed.", { variant: "error" });
+    }
+  }, [selectedApp, pushSnackbar]);
+
+  const handlePickCatalogLaunchExeOverride = useCallback(async () => {
+    if (!selectedApp || selectedApp.source !== "sidebar") return;
+    if (!window.electron?.pickCatalogLaunchExeOverride) {
+      pushSnackbar("File picker is not available.", { variant: "error" });
+      return;
+    }
+    const d = selectedApp.data;
+    setCatalogExeOverrideBusy(true);
+    try {
+      const r = await window.electron.pickCatalogLaunchExeOverride({
+        name: String(d.name ?? ""),
+        shortcutPath: d.shortcutPath ?? null,
+        launchUrl: d.launchUrl ?? null,
+        executablePath: typeof d.executablePath === "string" ? d.executablePath : "",
+      });
+      if (!r.ok) {
+        if (r.canceled) return;
+        pushSnackbar(r.error || "Could not save override.", { variant: "error" });
+        return;
+      }
+      pushSnackbar("Saved executable override for this catalog entry.");
+      await onCatalogLaunchExeChanged?.();
+    } finally {
+      setCatalogExeOverrideBusy(false);
+    }
+  }, [selectedApp, onCatalogLaunchExeChanged, pushSnackbar]);
+
+  const handleClearCatalogLaunchExeOverride = useCallback(async () => {
+    if (!selectedApp || selectedApp.source !== "sidebar") return;
+    if (!window.electron?.clearCatalogLaunchExeOverride) {
+      pushSnackbar("Clear override is not available.", { variant: "error" });
+      return;
+    }
+    const d = selectedApp.data;
+    setCatalogExeOverrideBusy(true);
+    try {
+      const r = await window.electron.clearCatalogLaunchExeOverride({
+        name: String(d.name ?? ""),
+        shortcutPath: d.shortcutPath ?? null,
+        launchUrl: d.launchUrl ?? null,
+      });
+      if (!r.ok) {
+        if (r.canceled) return;
+        pushSnackbar(r.error || "Could not clear override.", { variant: "error" });
+        return;
+      }
+      if (r.noOp) return;
+      pushSnackbar("Cleared override. FlowSwitch will use discovery again.");
+      await onCatalogLaunchExeChanged?.();
+    } finally {
+      setCatalogExeOverrideBusy(false);
+    }
+  }, [selectedApp, onCatalogLaunchExeChanged, pushSnackbar]);
 
   if (!selectedApp) {
     return (
@@ -422,6 +510,23 @@ export function SelectedAppDetails({
     );
     const layoutHasPlacementActions = showMoveToSection || showAddToLayout;
 
+    const catalogTestLaunchDisabled =
+      typeof window === "undefined"
+      || typeof window.electron?.testLaunchCatalogApp !== "function"
+      || !(
+        rawExe
+        || (typeof currentData.shortcutPath === "string"
+          && currentData.shortcutPath.trim())
+        || (typeof currentData.launchUrl === "string" && currentData.launchUrl.trim())
+      );
+
+    const catalogExeOverrideActive = Boolean(
+      (currentData as { catalogLaunchExeOverrideActive?: boolean }).catalogLaunchExeOverrideActive,
+    );
+
+    const showInspectorTestLaunch =
+      source === "sidebar" || (isProfileSlot && type === "app");
+
     return (
     <div className="min-w-0 space-y-6">
       <div className="min-w-0 space-y-3">
@@ -429,24 +534,31 @@ export function SelectedAppDetails({
           <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
             Layout
           </label>
-          <p className={inspectorHelperTextClass}>
-            Move, add, or remove this app on the active profile.
-            {showAddToLayout ? (
-              <>
-                {" "}
-                From the Apps list you can also use{" "}
-                <span className="font-medium text-flow-text-primary">+</span> or drag the icon.
-              </>
-            ) : null}
-            {showMoveToSection && !showAddToLayout ? (
-              <>
-                {" "}
-                {source === "monitor"
-                  ? "Use the buttons below to move to another monitor or the minimized row."
-                  : "Use the buttons below to move onto a monitor."}
-              </>
-            ) : null}
-          </p>
+          {source === "sidebar" ? (
+            <p className={inspectorHelperTextClass}>
+              Place on the active profile from here, or use{" "}
+              <span className="font-medium text-flow-text-primary">+</span> / drag in the Apps list.
+            </p>
+          ) : (
+            <p className={inspectorHelperTextClass}>
+              Move, add, or remove this app on the active profile.
+              {showAddToLayout ? (
+                <>
+                  {" "}
+                  From the Apps list you can also use{" "}
+                  <span className="font-medium text-flow-text-primary">+</span> or drag the icon.
+                </>
+              ) : null}
+              {showMoveToSection && !showAddToLayout ? (
+                <>
+                  {" "}
+                  {source === "monitor"
+                    ? "Use the buttons below to move to another monitor or the minimized row."
+                    : "Use the buttons below to move onto a monitor."}
+                </>
+              ) : null}
+            </p>
+          )}
         </div>
 
         <div className="min-w-0 space-y-2">
@@ -550,12 +662,6 @@ export function SelectedAppDetails({
         ) : null}
       </div>
 
-      <div className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-3 text-xs leading-relaxed text-flow-text-muted">
-        Single-app placement preview is not available yet — use{" "}
-        <span className="font-medium text-flow-text-secondary">Launch profile</span>{" "}
-        in the header to run the full workflow.
-      </div>
-
       {/* Basic Info */}
       <div className="min-w-0 space-y-4">
         <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
@@ -614,6 +720,28 @@ export function SelectedAppDetails({
           </div>
         ) : null}
 
+        {showInspectorTestLaunch ? (
+          <div className="min-w-0 space-y-2 rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-3">
+            <label className={inspectorFieldLabelClass}>Test launch</label>
+            <p className={inspectorHelperTextClass}>
+              {source === "sidebar"
+                ? "Runs this catalog entry once on Windows (.exe, shortcut, or supported URL)."
+                : "Runs once using the paths saved for this slot on Windows (.exe, shortcut, or supported URL)."}
+            </p>
+            <button
+              type="button"
+              onClick={() => void handleCatalogTestLaunchFromInspector()}
+              disabled={catalogTestLaunchDisabled}
+              aria-disabled={catalogTestLaunchDisabled}
+              className={`${inspectorPanelListButtonClass}${
+                catalogTestLaunchDisabled ? " cursor-not-allowed opacity-40" : ""
+              }`}
+            >
+              Test launch
+            </button>
+          </div>
+        ) : null}
+
         <div>
           <label className={inspectorFieldLabelClass}>Executable Path</label>
           {rawExe ? (
@@ -635,32 +763,95 @@ export function SelectedAppDetails({
               No executable path set for this app.
             </p>
           )}
-          <div className="mt-2 flex flex-wrap items-center gap-2">
-            <FlowTooltip
-              label={
-                canRevealInExplorer
-                  ? "Show executable or saved shortcut in File Explorer"
-                  : "Set an executable path above to open its location on disk."
-              }
+          {source === "sidebar" ? (
+            <div
+              className="mt-2 rounded-md border border-flow-border/40 bg-flow-bg-primary/15 px-2 py-2"
+              aria-label="Launch path and Explorer"
             >
-              <span className="inline-flex">
+              <div className="flex flex-wrap items-center gap-2">
                 <button
                   type="button"
-                  onClick={() => void handleRevealInExplorer()}
-                  disabled={!canRevealInExplorer}
-                  aria-disabled={!canRevealInExplorer}
-                  className={
+                  disabled={
+                    catalogExeOverrideBusy
+                    || typeof window === "undefined"
+                    || typeof window.electron?.pickCatalogLaunchExeOverride !== "function"
+                  }
+                  onClick={() => void handlePickCatalogLaunchExeOverride()}
+                  className={inspectorPanelCompactButtonClass}
+                >
+                  Set launch .exe from file…
+                </button>
+                {catalogExeOverrideActive ? (
+                  <button
+                    type="button"
+                    disabled={
+                      catalogExeOverrideBusy
+                      || typeof window === "undefined"
+                      || typeof window.electron?.clearCatalogLaunchExeOverride !== "function"
+                    }
+                    onClick={() => void handleClearCatalogLaunchExeOverride()}
+                    className={inspectorPanelCompactButtonClass}
+                  >
+                    Clear override
+                  </button>
+                ) : null}
+                <FlowTooltip
+                  label={
                     canRevealInExplorer
-                      ? inspectorPanelCompactButtonClass
-                      : inspectorPanelCompactButtonDisabledClass
+                      ? "Show executable or saved shortcut in File Explorer"
+                      : "Set an executable path above to open its location on disk."
                   }
                 >
-                  <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
-                  Open in Explorer
-                </button>
-              </span>
-            </FlowTooltip>
-          </div>
+                  <span className="inline-flex">
+                    <button
+                      type="button"
+                      onClick={() => void handleRevealInExplorer()}
+                      disabled={!canRevealInExplorer}
+                      aria-disabled={!canRevealInExplorer}
+                      className={
+                        canRevealInExplorer
+                          ? inspectorPanelCompactButtonClass
+                          : inspectorPanelCompactButtonDisabledClass
+                      }
+                    >
+                      <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
+                      Open in Explorer
+                    </button>
+                  </span>
+                </FlowTooltip>
+              </div>
+              <p className={`${inspectorHelperTextClass} mt-1.5`}>
+                Opens a file dialog; the .exe you select becomes what FlowSwitch launches for this catalog app (confirm to apply).
+              </p>
+            </div>
+          ) : (
+            <div className="mt-2 flex flex-wrap items-center gap-2">
+              <FlowTooltip
+                label={
+                  canRevealInExplorer
+                    ? "Show executable or saved shortcut in File Explorer"
+                    : "Set an executable path above to open its location on disk."
+                }
+              >
+                <span className="inline-flex">
+                  <button
+                    type="button"
+                    onClick={() => void handleRevealInExplorer()}
+                    disabled={!canRevealInExplorer}
+                    aria-disabled={!canRevealInExplorer}
+                    className={
+                      canRevealInExplorer
+                        ? inspectorPanelCompactButtonClass
+                        : inspectorPanelCompactButtonDisabledClass
+                    }
+                  >
+                    <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
+                    Open in Explorer
+                  </button>
+                </span>
+              </FlowTooltip>
+            </div>
+          )}
           {revealPathError ? (
             <p className="mt-1.5 text-[11px] leading-snug text-flow-accent-red" role="status">
               {revealPathError}

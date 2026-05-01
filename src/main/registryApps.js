@@ -39,7 +39,10 @@ function getRegistryInstalledApps() {
               const installLoc = String(installLocation?.value || '').trim();
               const uninst = String(uninstallString?.value || '').trim();
               const quietUninst = String(quietUninstallString?.value || '').trim();
-              if (displayName && (iconFromRegistry || installLoc || uninst || quietUninst)) {
+              const hasUninstallSignals = !!(iconFromRegistry || installLoc || uninst || quietUninst);
+              const nmLc = String(displayName?.value || '').trim().toLowerCase();
+              const codexLikeName = nmLc.includes('openai') && nmLc.includes('codex');
+              if (displayName && (hasUninstallSignals || codexLikeName)) {
                 results.push({
                   name: displayName.value,
                   iconSource: iconFromRegistry,

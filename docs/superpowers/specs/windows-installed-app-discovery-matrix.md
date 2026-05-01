@@ -26,7 +26,7 @@ This document maps **where user-launchable Windows applications can appear** and
 | 10 | MSIX / Store **user shims** | `%LOCALAPPDATA%\Microsoft\WindowsApps\*.exe` | Store Spotify, Terminal, many UWP bridges | Yes (**full** `*.exe` scan; symlink-aware). **Filtered noise:** `winget`, `wt`, `WindowsPackageManager*`, `XboxPcAppAdmin*`, `XboxPcAppCE*`, common `python*` shims (see `isWindowsAppsCatalogNoiseBasename` in `icon-path-and-app-helpers.js`). Icons: `getSafeIconDataUrl` resolves **`realpath`** before Shell / `getFileIcon` so Store aliases are not stuck on the generic placeholder. |
 | 11 | MSIX package volume | `%ProgramFiles%\WindowsApps\...` (ACL-heavy) | Store Spotify package root, other MSIX payloads | **Yes (indirect)** — Node cannot `stat`/`readdir` most of this tree as a normal user. When ARP `InstallLocation` points here, we **do not** rely on folder probe; we map the package folder name to `%LOCALAPPDATA%\Microsoft\WindowsApps\<Family>_<PublisherHash>.exe` via `inferMsixUserWindowsAppsShimFromPackageDir` (prefix scan fallback if the exact filename differs). |
 | 11b | MSIX per-user package root | `%LOCALAPPDATA%\Packages\<PFN>\...` | Store apps often register here instead of `Program Files\WindowsApps` | **Yes** — same helper tries `%LOCALAPPDATA%\Microsoft\WindowsApps\<PFN>.exe`. |
-| 12 | Optional deep `.exe` scan | `Program Files`, `Program Files (x86)` | Recovery / IT | Opt |
+| 12 | Optional deep `.exe` scan | `%ProgramFiles%`, `%ProgramFiles(x86)%`, plus optional `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS` (comma/semicolon-separated existing folders) when `FLOWSWITCH_ENABLE_EXE_SCAN=1` | Recovery / IT / extra drive roots | Opt |
 
 ## Registry value notes (Uninstall keys)
 
@@ -48,6 +48,16 @@ This document maps **where user-launchable Windows applications can appear** and
 | `AppxPackage` / `Get-AppxPackage` PowerShell | Requires shelling out or native bindings; Start Menu + WindowsApps shims cover most UX. |
 | Portable / zip apps | No registry or Start Menu entry by design. |
 | `%LOCALAPPDATA%\Programs` tree | Partially covered via Uninstall + optional exe scan; not fully walked by default (cost). |
+
+## Developer toggles (optional deep scan)
+
+- `FLOWSWITCH_ENABLE_EXE_SCAN=1` — enables shallow `.exe` enumeration under Program Files roots (see `collectInstalledAppsCatalog` in `trusted-renderer-ipc.js`).
+- `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS` — additional **existing** directories to include in that scan (comma or semicolon separated), for example games or tools installed outside the default `%ProgramFiles%` locations.
+
+## Icon extraction notes
+
+- **Shell batch helper** (`scripts/windows-shell-item-icon.ps1`): for `.exe` / `.dll` filesystem paths, prefers **`PrivateExtractIcons`** at the requested pixel size (default 256) before falling back to `SHGetFileInfo`, so Steam and other rich-icon executables avoid upscaling a 32×32 system icon.
+- **MSIX manifest logos** (`readFirstVisualElementsLogoAbsPathSync` in `icon-path-and-app-helpers.js`): prefers larger `Square310x310` / `Square150x150` assets over `Square44x44` when present.
 
 ## Change checklist
 

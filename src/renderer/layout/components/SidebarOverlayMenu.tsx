@@ -15,6 +15,12 @@ type SidebarOverlayMenuProps = {
   open: boolean;
   anchorEl: HTMLElement | null;
   onClose: () => void;
+  /**
+   * When nested menus each use their own portal, outside-click on the parent
+   * would see submenu clicks as “outside”. Pass the same id on parent + child
+   * so pointer targets inside `[data-flow-menu-stack="…"]` do not close the parent.
+   */
+  menuStackId?: string;
   children: React.ReactNode;
   /**
    * When true, avoid the compact max-height + internal scroll used for long per-row menus.
@@ -37,6 +43,7 @@ export function SidebarOverlayMenu({
   open,
   anchorEl,
   onClose,
+  menuStackId,
   children,
   unconstrainedHeight = false,
   placement = "align-end",
@@ -136,6 +143,15 @@ export function SidebarOverlayMenu({
     const onPointerDown = (e: PointerEvent) => {
       const t = e.target as Node;
       if (menuRef.current?.contains(t) || anchorEl?.contains(t)) return;
+      if (menuStackId && t instanceof Element) {
+        const stackHost = t.closest("[data-flow-menu-stack]");
+        if (
+          stackHost
+          && stackHost.getAttribute("data-flow-menu-stack") === menuStackId
+        ) {
+          return;
+        }
+      }
       onClose();
     };
     const onKeyDown = (e: KeyboardEvent) => {
@@ -147,7 +163,7 @@ export function SidebarOverlayMenu({
       document.removeEventListener("pointerdown", onPointerDown);
       document.removeEventListener("keydown", onKeyDown);
     };
-  }, [open, onClose, anchorEl]);
+  }, [open, onClose, anchorEl, menuStackId]);
 
   if (!open || !anchorEl) return null;
 
@@ -160,6 +176,7 @@ export function SidebarOverlayMenu({
       ref={menuRef}
       className={panelClass}
       role="menu"
+      data-flow-menu-stack={menuStackId}
     >
       {children}
     </div>,

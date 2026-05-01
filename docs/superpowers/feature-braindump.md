@@ -144,6 +144,7 @@ Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
 1. App discovery completeness and hygiene
 
 - Problem: app list currently misses real apps and includes noise entries.
+- **Progress (2026-04-30, `feature/app-discovery-hygiene`):** catalog noise filters expanded; dev-tool shim display names (Codex / Cursor / Windsurf) and inbox labels; optional deep exe scan respects `%ProgramFiles%`, Steam `steamapps/common` roots, and `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS` (see `windows-installed-app-discovery-matrix.md`); Apps sidebar add control picks a `.exe`, stores it in prefs (`userCatalogExePaths`), and merges it into the installed-apps catalog after cache invalidation. **Also (same branch session):** sidebar explicit placement uses `getInstalledAppsCatalog()` so menu “add to monitor/minimized” matches drag-drop icons; renderer snackbar wiring for content flows; canonical `AVAILABLE_APPS` list extracted for opens-with.
 - Scope:
   - improve detection coverage (examples noted: Spotify, File Explorer, Task Manager, Codex)
   - hide system utilities/uninstallers/non-app entries

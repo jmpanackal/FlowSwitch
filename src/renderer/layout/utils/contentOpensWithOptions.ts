@@ -1,5 +1,5 @@
 import type { ContentFolder, ContentItem } from "../components/ContentManager";
-import { AVAILABLE_APPS } from "../components/ContentManager";
+import { AVAILABLE_APPS } from "../constants/availableAppsForOpensWith";
 
 type LibrarySelectionInput =
   | { kind: "item"; item: ContentItem }

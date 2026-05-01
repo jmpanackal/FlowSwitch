@@ -1444,9 +1444,13 @@ const launchProfileById = async (profileId, options = {}) => {
       const hintCount = processHintCounts.get(processHintLc) || 0;
       const isDuplicateProcessLaunch = hintCount > 1;
       const isChromiumFamily = isChromiumFamilyProcessKey(processHintLc);
-      const launchArgs = (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath)
-        ? ['--new-window']
+      const profileSpawnArgs = Array.isArray(launchItem.spawnArgsForExecutable)
+        ? launchItem.spawnArgsForExecutable.filter((a) => typeof a === 'string' && a.trim())
         : [];
+      let launchArgs = [...profileSpawnArgs];
+      if (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath) {
+        launchArgs = ['--new-window', ...launchArgs];
+      }
       launchDiagnostics.start({
         processHintLc,
         strategy: 'run-launch',

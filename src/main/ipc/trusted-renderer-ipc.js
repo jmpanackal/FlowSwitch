@@ -2,6 +2,7 @@
 
 const path = require('path');
 const fs = require('fs');
+const { spawn } = require('child_process');
 const ws = require('windows-shortcuts');
 const {
   getAppxUserPackageLookup,
@@ -10,9 +11,63 @@ const {
 const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 const { readAppPreferences, writeAppPreferences } = require('../services/app-preferences-store');
+const { getSteamAppsCommonRootDirsSync } = require('../services/steam-library-roots');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
+
+const catalogLaunchIdentityKey = (e) => (
+  `${String(e?.name || '').trim()}\0${e?.shortcutPath ?? ''}\0${e?.launchUrl ?? ''}`
+);
+
+const launchDetachedExecutableForCatalogTest = (executablePath, spawnArgs = []) => (
+  new Promise((resolve, reject) => {
+    const safeExecutablePath = String(executablePath || '').trim();
+    const args = Array.isArray(spawnArgs)
+      ? spawnArgs.map((a) => String(a || '').trim()).filter(Boolean)
+      : [];
+    const launchCwd = safeExecutablePath ? path.dirname(safeExecutablePath) : undefined;
+    let child;
+    try {
+      child = spawn(safeExecutablePath, args, {
+        detached: true,
+        stdio: 'ignore',
+        windowsHide: false,
+        cwd: launchCwd,
+      });
+    } catch (error) {
+      reject(error);
+      return;
+    }
+    let completed = false;
+    const cleanup = () => {
+      child.removeListener('error', onError);
+      child.removeListener('spawn', onSpawn);
+    };
+    const onError = (error) => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      reject(error);
+    };
+    const onSpawn = () => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      child.unref();
+      resolve();
+    };
+    child.once('error', onError);
+    child.once('spawn', onSpawn);
+    setTimeout(() => {
+      if (completed) return;
+      completed = true;
+      cleanup();
+      child.unref();
+      resolve();
+    }, 200);
+  })
+);
 
 const createHandleTrustedIpc = (ipcMain, isTrustedIpcSender) => (
   (channel, handler) => {
@@ -44,6 +99,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     clearLaunchTaskbarProgress = () => {},
     isLikelyUserApp,
     getCanonicalAppKey,
+    normalizeCatalogDisplayName,
     extractExecutablePath,
     resolveBareSystemExecutableFromShimTarget,
     resolveUpdateStyleProcessStartChildExe,
@@ -200,6 +256,44 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       properties: ['openFile', 'multiSelections'],
     });
     return pack(r);
+  });
+
+  handleTrustedIpc('installed-apps:add-user-exe', async (event) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Only available on Windows' };
+    }
+    const win = BrowserWindow.fromWebContents(event.sender);
+    const r = await dialog.showOpenDialog(win || undefined, {
+      title: 'Add application to Apps library',
+      properties: ['openFile'],
+      filters: [{ name: 'Applications', extensions: ['exe'] }],
+    });
+    if (r.canceled || !r.filePaths?.length) {
+      return { ok: false, canceled: true };
+    }
+    const raw = String(r.filePaths[0] || '').trim();
+    if (!raw.toLowerCase().endsWith('.exe')) {
+      return { ok: false, error: 'Select a .exe file' };
+    }
+    let norm;
+    try {
+      norm = path.normalize(raw.replace(/\//g, '\\'));
+      if (norm.includes('..')) return { ok: false, error: 'Invalid path' };
+      if (!fs.existsSync(norm) || !fs.statSync(norm).isFile()) {
+        return { ok: false, error: 'File not found' };
+      }
+    } catch {
+      return { ok: false, error: 'Invalid path' };
+    }
+    const cur = readAppPreferences();
+    const list = Array.isArray(cur.userCatalogExePaths) ? [...cur.userCatalogExePaths] : [];
+    const lc = norm.toLowerCase();
+    if (!list.some((p) => path.normalize(String(p).replace(/\//g, '\\')).toLowerCase() === lc)) {
+      list.push(norm);
+      writeAppPreferences({ userCatalogExePaths: list });
+    }
+    installedAppsCatalogCache = null;
+    return { ok: true, path: norm };
   });
 
   const MAX_BROWSE_FOLDER_ENTRIES = 500;
@@ -374,6 +468,8 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       'start-menu-shortcut': 3,
       'start-menu-url': 3,
       registry: 2,
+      'pf-windowsapps-pfn-scan': 2,
+      'user-catalog-exe': 2,
       'windows-apps-shim': 1,
       'exe-scan': 1,
     };
@@ -558,8 +654,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     };
 
     const upsertDiscoveredApp = (appName, iconPath, sourcePath = '', context = {}) => {
-      if (!isLikelyUserApp(appName, sourcePath, context)) return;
-      const normalizedName = String(appName || '').trim();
+      const normalizedName = normalizeCatalogDisplayName(String(appName || '').trim());
+      if (!normalizedName) return;
+      if (!isLikelyUserApp(normalizedName, sourcePath, context)) return;
       const targetExeRaw = context.targetExe || extractExecutablePath(sourcePath);
       const exeDedupeKey = normalizeExePathDedupeKey(targetExeRaw);
       let key = getCanonicalAppKey(normalizedName) || normalizedName.toLowerCase();
@@ -621,6 +718,9 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       const canonicalKey = getCanonicalAppKey(appMeta.name);
       if (seenStartMenuKeys.has(canonicalKey)) return true;
 
+      const displayLc = String(appMeta.name || '').trim().toLowerCase();
+      if (displayLc.includes('codex') && displayLc.includes('openai')) return true;
+
       // Include registry-only apps only when they look like user-launchable GUI apps.
       const source = String(iconSourcePath || '').toLowerCase();
       if (!source) return false;
@@ -652,6 +752,16 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         '\\windows\\systemapps\\',
         '\\appdata\\local\\packages\\',
         '\\appdata\\local\\microsoft\\windowsapps\\',
+        '\\microsoft\\winget\\packages\\',
+        '\\scoop\\apps\\',
+        '\\appdata\\local\\scoop\\apps\\',
+        '\\steam\\steamapps\\',
+        '\\steamapps\\',
+        '\\epic games\\',
+        '\\gog galaxy\\games\\',
+        '\\ubisoft\\',
+        '\\riot games\\',
+        '\\battle.net\\',
       ];
       if (registryGlobalInstallPrefixes.some((m) => source.includes(m))) {
         return true;
@@ -939,8 +1049,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       if (installProbeExe) {
         haystackParts.push(installProbeExe);
       }
-      const registryHaystack = haystackParts.join('\n');
-      if (!registryHaystack.trim()) {
+      let registryHaystack = haystackParts.join('\n').trim();
+      const nm = String(app.name || '').trim();
+      const nmLc = nm.toLowerCase();
+      if (!registryHaystack && nmLc.includes('codex') && nmLc.includes('openai')) {
+        registryHaystack = nm;
+      }
+      if (!registryHaystack) {
         continue;
       }
 
@@ -956,7 +1071,11 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           || extractExecutablePath(app.quietUninstallString || '')
           || null
         );
-        if (!isLikelyUserApp(app.name, iconSourceForRegistry, {
+        const catalogRegistryName = normalizeCatalogDisplayName(String(app.name || '').trim());
+        if (!catalogRegistryName) {
+          return;
+        }
+        if (!isLikelyUserApp(catalogRegistryName, iconSourceForRegistry, {
           source: 'registry',
           registryMeta: app,
           targetExe: registryEarlyTargetExe,
@@ -1046,7 +1165,22 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       if (fromLookup) return String(fromLookup).trim();
       const fromManifest = readStorePackageDisplayNameFromExePathSync(exeFullPath);
       if (fromManifest) return fromManifest;
-      return String(stem || '').trim();
+      const stemRaw = String(stem || '').trim();
+      const stemLc = stemRaw.toLowerCase();
+      // Fallback when WinRT/manifest names are missing (dev tools often ship as appx-style stems).
+      if (
+        stemLc === 'codex'
+        || stemLc.startsWith('openai.codex')
+        || stemLc.startsWith('openaicodex')
+        || stemLc.startsWith('openai-codex')
+        || /^openai\.codex_/i.test(stemRaw)
+        || (stemLc.includes('codex') && stemLc.includes('openai'))
+      ) {
+        return 'Codex';
+      }
+      if (stemLc === 'windsurf' || stemLc.startsWith('codeium.windsurf')) return 'Windsurf';
+      if (stemLc === 'cursor' || stemLc.startsWith('anysphere.cursor')) return 'Cursor';
+      return stemRaw;
     };
 
     const windowsAppsShimTasks = [];
@@ -1090,10 +1224,31 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     // Enable only for deep discovery troubleshooting:
     //   FLOWSWITCH_ENABLE_EXE_SCAN=1 npm run dev
     if (process.env.FLOWSWITCH_ENABLE_EXE_SCAN === '1') {
-      const exeDirs = [
-        'C:/Program Files',
-        'C:/Program Files (x86)'
-      ];
+      const exeDirs = [];
+      const pf = process.env.ProgramFiles;
+      const pf86 = process.env['ProgramFiles(x86)'];
+      if (pf) exeDirs.push(pf);
+      if (pf86) exeDirs.push(pf86);
+      if (exeDirs.length === 0) {
+        exeDirs.push('C:/Program Files', 'C:/Program Files (x86)');
+      }
+      const extraRoots = String(process.env.FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS || '').trim();
+      if (extraRoots) {
+        for (const raw of extraRoots.split(/[;,]/)) {
+          const p = raw.trim().replace(/^["']|["']$/g, '');
+          if (!p) continue;
+          try {
+            if (fs.existsSync(p)) exeDirs.push(p);
+          } catch {
+            /* ignore */
+          }
+        }
+      }
+      for (const steamCommon of getSteamAppsCommonRootDirsSync()) {
+        if (steamCommon && !exeDirs.some((d) => d.toLowerCase() === steamCommon.toLowerCase())) {
+          exeDirs.push(steamCommon);
+        }
+      }
       const exeFiles = scanForExeFiles(exeDirs, 3); // limit depth for perf
       for (const exePath of exeFiles) {
         const name = path.basename(exePath, '.exe');
@@ -1122,6 +1277,101 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         `[InstalledApps] Icon extraction failures (shortcut=${iconFailureSummary.shortcut}, registry=${iconFailureSummary.registry}).`,
       );
     }
+
+    // OpenAI Codex (MSIX) often omits Start Menu / ARP signals we trust; listing
+    // `Program Files\\WindowsApps\\OpenAI.Codex_*` usually works even when deeper reads fail.
+    const scanOpenAiCodexProgramFilesWindowsApps = async () => {
+      if (process.platform !== 'win32') return;
+      const roots = [];
+      const pf = process.env.ProgramFiles || '';
+      const pfx86 = process.env['ProgramFiles(x86)'] || '';
+      if (pf) roots.push(path.join(pf, 'WindowsApps'));
+      if (pfx86) roots.push(path.join(pfx86, 'WindowsApps'));
+      const tasks = [];
+      for (const root of [...new Set(roots)]) {
+        let dirents;
+        try {
+          dirents = fs.readdirSync(root, { withFileTypes: true });
+        } catch {
+          continue;
+        }
+        for (const d of dirents) {
+          if (!d.isDirectory()) continue;
+          if (!/^OpenAI\.Codex_/i.test(d.name)) continue;
+          const pkgDir = path.join(root, d.name);
+          tasks.push(async () => {
+            const shimExe = inferMsixUserWindowsAppsShimFromPackageDir(pkgDir);
+            const probed = probeInstallFolderForWindowsExe(pkgDir);
+            const targetExe = shimExe || probed;
+            if (!targetExe) return;
+            let iconPath = null;
+            try {
+              const codexAumid = appxUserLookup?.getPreferredAppUserModelIdForExe?.(targetExe);
+              const codexMoniker = toAppsFolderShellMoniker(codexAumid);
+              if (codexMoniker) {
+                iconPath = await getSafeIconDataUrl(codexMoniker);
+              }
+              if (!iconPath) {
+                const iconSources = [...new Set([shimExe, probed].filter(Boolean))];
+                for (const src of iconSources) {
+                  iconPath = await getSafeIconDataUrl(src);
+                  if (iconPath) break;
+                }
+              }
+            } catch {
+              iconPath = null;
+            }
+            upsertDiscoveredApp('Codex', iconPath, targetExe, {
+              source: 'pf-windowsapps-pfn-scan',
+              targetExe,
+            });
+          });
+        }
+      }
+      if (tasks.length) await runWithConcurrencyLimit(tasks, 4);
+    };
+    await scanOpenAiCodexProgramFilesWindowsApps();
+
+    const prefsForCatalog = readAppPreferences();
+    const userCatalogExePaths = Array.isArray(prefsForCatalog.userCatalogExePaths)
+      ? prefsForCatalog.userCatalogExePaths
+      : [];
+    const userCatalogExeTasks = userCatalogExePaths.map((rawPath) => async () => {
+      const expanded = path.normalize(
+        String(rawPath || '').trim().replace(/\//g, '\\'),
+      );
+      if (!expanded || expanded.includes('..')) return;
+      if (!expanded.toLowerCase().endsWith('.exe')) return;
+      try {
+        if (!fs.existsSync(expanded) || !fs.statSync(expanded).isFile()) return;
+      } catch {
+        return;
+      }
+      const displayName = normalizeCatalogDisplayName(
+        path.basename(expanded, path.extname(expanded)),
+      );
+      if (!displayName) return;
+      if (!isLikelyUserApp(displayName, expanded, {
+        source: 'user-catalog-exe',
+        targetExe: expanded,
+      })) {
+        return;
+      }
+      let iconPath = null;
+      try {
+        iconPath = await getSafeIconDataUrl(expanded);
+      } catch {
+        iconPath = null;
+      }
+      upsertDiscoveredApp(displayName, iconPath, expanded, {
+        source: 'user-catalog-exe',
+        targetExe: expanded,
+      });
+    });
+    if (userCatalogExeTasks.length) {
+      await runWithConcurrencyLimit(userCatalogExeTasks, 8);
+    }
+
     return Array.from(appMap.values())
       .map((entry) => ({
         name: entry.name,
@@ -1153,7 +1403,24 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
 
     installedAppsCatalogInflight = (async () => {
       try {
-        const apps = await collectInstalledAppsCatalog();
+        const appsRaw = await collectInstalledAppsCatalog();
+        const prefsOv = readAppPreferences();
+        const ovMap = prefsOv.catalogLaunchExeOverrides
+          && typeof prefsOv.catalogLaunchExeOverrides === 'object'
+          && !Array.isArray(prefsOv.catalogLaunchExeOverrides)
+          ? prefsOv.catalogLaunchExeOverrides
+          : {};
+        const apps = appsRaw.map((e) => {
+          const k = catalogLaunchIdentityKey(e);
+          const rep = ovMap[k];
+          if (typeof rep === 'string' && rep.trim()) {
+            const t = rep.trim();
+            if (t.toLowerCase().endsWith('.exe')) {
+              return { ...e, executablePath: t, catalogLaunchExeOverrideActive: true };
+            }
+          }
+          return e;
+        });
         installedAppsCatalogCache = { at: Date.now(), apps };
         return apps;
       } finally {
@@ -1170,6 +1437,314 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     } catch (err) {
       console.error('Error in get-installed-apps handler:', err);
       return [];
+    }
+  });
+
+  handleTrustedIpc('catalog-app:test-launch', async (_event, payload) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Test launch is only available on Windows.' };
+    }
+    try {
+      const exeOverrideRaw = typeof payload?.executablePathOverride === 'string'
+        ? payload.executablePathOverride.trim()
+        : '';
+      const exeRaw = typeof payload?.executablePath === 'string'
+        ? payload.executablePath.trim()
+        : '';
+      const exePick = exeOverrideRaw || exeRaw;
+      const shortcutRaw = typeof payload?.shortcutPath === 'string'
+        ? payload.shortcutPath.trim()
+        : '';
+      const launchUrlRaw = typeof payload?.launchUrl === 'string'
+        ? payload.launchUrl.trim()
+        : '';
+
+      const normalizeSpawnArgPath = (rawArg) => {
+        const lim = safeLimitedString(String(rawArg || '').trim(), MAX_SHORTCUT_PATH_LENGTH);
+        if (!lim) return null;
+        let norm;
+        try {
+          norm = path.normalize(lim.replace(/\//g, '\\'));
+        } catch {
+          return null;
+        }
+        if (norm.includes('..')) return null;
+        if (!/^([a-zA-Z]:|\\\\)/.test(norm)) return null;
+        return norm;
+      };
+
+      const tryLaunchExe = async (raw, spawnArgsForExecutable = []) => {
+        const safe = safeLimitedString(raw, MAX_SHORTCUT_PATH_LENGTH);
+        if (!safe) return { ok: false, error: 'Missing executable path' };
+        let norm;
+        try {
+          norm = path.normalize(safe.replace(/\//g, '\\'));
+        } catch {
+          return { ok: false, error: 'Invalid path' };
+        }
+        if (norm.includes('..')) return { ok: false, error: 'Invalid path' };
+        if (!norm.toLowerCase().endsWith('.exe')) {
+          return { ok: false, error: 'Test launch requires a .exe path' };
+        }
+        try {
+          if (!fs.existsSync(norm) || !fs.statSync(norm).isFile()) {
+            return { ok: false, error: 'Executable not found' };
+          }
+        } catch {
+          return { ok: false, error: 'Executable not accessible' };
+        }
+        const rawArgs = Array.isArray(spawnArgsForExecutable) ? spawnArgsForExecutable : [];
+        const cleaned = [];
+        for (const a of rawArgs.slice(0, 8)) {
+          const n = normalizeSpawnArgPath(a);
+          if (!n) return { ok: false, error: 'Invalid launch argument path' };
+          cleaned.push(n);
+        }
+        for (const argPath of cleaned) {
+          try {
+            if (!fs.existsSync(argPath)) {
+              return { ok: false, error: 'Folder or file path not found' };
+            }
+            const st = fs.statSync(argPath);
+            if (!st.isDirectory() && !st.isFile()) {
+              return { ok: false, error: 'Launch path must be a file or folder' };
+            }
+          } catch {
+            return { ok: false, error: 'Launch path not accessible' };
+          }
+        }
+        await launchDetachedExecutableForCatalogTest(norm, cleaned);
+        return { ok: true };
+      };
+
+      if (exePick) {
+        const spawnRaw = payload?.spawnArgsForExecutable;
+        const spawnArgsForExecutable = Array.isArray(spawnRaw)
+          ? spawnRaw.map((x) => String(x || '').trim()).filter(Boolean)
+          : [];
+        return tryLaunchExe(exePick, spawnArgsForExecutable);
+      }
+
+      if (shortcutRaw) {
+        const sc = safeLimitedString(shortcutRaw, MAX_SHORTCUT_PATH_LENGTH);
+        if (!sc) return { ok: false, error: 'Invalid shortcut path' };
+        let norm;
+        try {
+          norm = path.normalize(sc.replace(/\//g, '\\'));
+        } catch {
+          return { ok: false, error: 'Invalid shortcut path' };
+        }
+        if (norm.includes('..')) return { ok: false, error: 'Invalid shortcut path' };
+        try {
+          if (!fs.existsSync(norm)) {
+            return { ok: false, error: 'Shortcut not found' };
+          }
+        } catch {
+          return { ok: false, error: 'Shortcut not accessible' };
+        }
+        const errMsg = await shell.openPath(norm);
+        if (errMsg) return { ok: false, error: errMsg };
+        return { ok: true };
+      }
+
+      if (launchUrlRaw && isSafeAppLaunchUrl(launchUrlRaw)) {
+        await shell.openExternal(launchUrlRaw);
+        return { ok: true };
+      }
+
+      return {
+        ok: false,
+        error: 'No launch target. Set an executable path, shortcut, or supported URL.',
+      };
+    } catch (err) {
+      console.error('[catalog-app:test-launch]', err);
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  handleTrustedIpc('catalog-app:set-launch-exe-override', async (_event, payload) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Only available on Windows.' };
+    }
+    try {
+      const name = String(payload?.name || '').trim();
+      if (!name) return { ok: false, error: 'Missing app name' };
+      const shortcutPath = payload?.shortcutPath != null ? String(payload.shortcutPath) : '';
+      const launchUrl = payload?.launchUrl != null ? String(payload.launchUrl) : '';
+      const key = catalogLaunchIdentityKey({ name, shortcutPath, launchUrl });
+
+      const rawExe = typeof payload?.executablePath === 'string'
+        ? payload.executablePath.trim()
+        : '';
+
+      const cur = readAppPreferences();
+      const nextOvr = {
+        ...(cur.catalogLaunchExeOverrides && typeof cur.catalogLaunchExeOverrides === 'object' && !Array.isArray(cur.catalogLaunchExeOverrides)
+          ? cur.catalogLaunchExeOverrides
+          : {}),
+      };
+
+      if (!rawExe) {
+        delete nextOvr[key];
+      } else {
+        let norm;
+        try {
+          norm = path.normalize(rawExe.replace(/\//g, '\\'));
+        } catch {
+          return { ok: false, error: 'Invalid path' };
+        }
+        if (norm.includes('..')) return { ok: false, error: 'Invalid path' };
+        if (!norm.toLowerCase().endsWith('.exe')) {
+          return { ok: false, error: 'Override must be a .exe file' };
+        }
+        try {
+          if (!fs.existsSync(norm) || !fs.statSync(norm).isFile()) {
+            return { ok: false, error: 'File not found' };
+          }
+        } catch {
+          return { ok: false, error: 'Path not accessible' };
+        }
+        nextOvr[key] = norm;
+      }
+
+      writeAppPreferences({ catalogLaunchExeOverrides: nextOvr });
+      installedAppsCatalogCache = null;
+      return { ok: true };
+    } catch (err) {
+      console.error('[catalog-app:set-launch-exe-override]', err);
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  handleTrustedIpc('catalog-app:pick-launch-exe-override', async (event, payload) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Only available on Windows.' };
+    }
+    try {
+      const name = String(payload?.name || '').trim();
+      if (!name) return { ok: false, error: 'Missing app name' };
+      const shortcutPath = payload?.shortcutPath != null ? String(payload.shortcutPath) : '';
+      const launchUrl = payload?.launchUrl != null ? String(payload.launchUrl) : '';
+      const key = catalogLaunchIdentityKey({ name, shortcutPath, launchUrl });
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const exeHint = typeof payload?.executablePath === 'string'
+        ? payload.executablePath.trim()
+        : '';
+      let defaultPath;
+      try {
+        if (exeHint && exeHint.toLowerCase().endsWith('.exe')) {
+          const d = path.dirname(path.normalize(exeHint.replace(/\//g, '\\')));
+          if (d && !d.includes('..')) defaultPath = d;
+        }
+      } catch {
+        // ignore invalid hint
+      }
+
+      const pick = await dialog.showOpenDialog(win || undefined, {
+        title: 'Choose executable',
+        ...(defaultPath ? { defaultPath } : {}),
+        properties: ['openFile'],
+        filters: [{ name: 'Applications', extensions: ['exe'] }],
+      });
+      if (pick.canceled || !pick.filePaths?.length) {
+        return { ok: false, canceled: true };
+      }
+      const raw = String(pick.filePaths[0] || '').trim();
+      let norm;
+      try {
+        norm = path.normalize(raw.replace(/\//g, '\\'));
+      } catch {
+        return { ok: false, error: 'Invalid path' };
+      }
+      if (norm.includes('..')) return { ok: false, error: 'Invalid path' };
+      if (!norm.toLowerCase().endsWith('.exe')) {
+        return { ok: false, error: 'Select a .exe file' };
+      }
+      try {
+        if (!fs.existsSync(norm) || !fs.statSync(norm).isFile()) {
+          return { ok: false, error: 'File not found' };
+        }
+      } catch {
+        return { ok: false, error: 'Path not accessible' };
+      }
+
+      const confirm = await dialog.showMessageBox(win || undefined, {
+        type: 'question',
+        buttons: ['Use this .exe', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Confirm launch override',
+        message: `Use this executable for "${name}"?`,
+        detail: (
+          'FlowSwitch will launch this file for this catalog entry instead of auto-discovery.\n\n'
+          + norm
+        ),
+      });
+      if (confirm.response !== 0) {
+        return { ok: false, canceled: true };
+      }
+
+      const cur = readAppPreferences();
+      const nextOvr = {
+        ...(cur.catalogLaunchExeOverrides && typeof cur.catalogLaunchExeOverrides === 'object'
+        && !Array.isArray(cur.catalogLaunchExeOverrides)
+          ? cur.catalogLaunchExeOverrides
+          : {}),
+      };
+      nextOvr[key] = norm;
+      writeAppPreferences({ catalogLaunchExeOverrides: nextOvr });
+      installedAppsCatalogCache = null;
+      return { ok: true, path: norm };
+    } catch (err) {
+      console.error('[catalog-app:pick-launch-exe-override]', err);
+      return { ok: false, error: String(err?.message || err) };
+    }
+  });
+
+  handleTrustedIpc('catalog-app:clear-launch-exe-override', async (event, payload) => {
+    if (process.platform !== 'win32') {
+      return { ok: false, error: 'Only available on Windows.' };
+    }
+    try {
+      const name = String(payload?.name || '').trim();
+      if (!name) return { ok: false, error: 'Missing app name' };
+      const shortcutPath = payload?.shortcutPath != null ? String(payload.shortcutPath) : '';
+      const launchUrl = payload?.launchUrl != null ? String(payload.launchUrl) : '';
+      const key = catalogLaunchIdentityKey({ name, shortcutPath, launchUrl });
+
+      const cur = readAppPreferences();
+      const nextOvr = {
+        ...(cur.catalogLaunchExeOverrides && typeof cur.catalogLaunchExeOverrides === 'object'
+        && !Array.isArray(cur.catalogLaunchExeOverrides)
+          ? cur.catalogLaunchExeOverrides
+          : {}),
+      };
+      if (!nextOvr[key]) {
+        return { ok: true, noOp: true };
+      }
+
+      const win = BrowserWindow.fromWebContents(event.sender);
+      const confirm = await dialog.showMessageBox(win || undefined, {
+        type: 'question',
+        buttons: ['Clear override', 'Cancel'],
+        defaultId: 0,
+        cancelId: 1,
+        title: 'Remove custom executable',
+        message: `Stop using a custom .exe for "${name}"?`,
+        detail: 'FlowSwitch will use catalog discovery again for this entry.',
+      });
+      if (confirm.response !== 0) {
+        return { ok: false, canceled: true };
+      }
+
+      delete nextOvr[key];
+      writeAppPreferences({ catalogLaunchExeOverrides: nextOvr });
+      installedAppsCatalogCache = null;
+      return { ok: true };
+    } catch (err) {
+      console.error('[catalog-app:clear-launch-exe-override]', err);
+      return { ok: false, error: String(err?.message || err) };
     }
   });
 

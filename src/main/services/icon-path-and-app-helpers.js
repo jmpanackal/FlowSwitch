@@ -297,6 +297,10 @@ const createIconPathAndAppHelpers = ({
    * per-user installers (Spotify: %LocalAppData%\Spotify with Spotify.exe inside).
    * Also checks one directory level (and shallow `app-*` children) when the root only has
    * updaters like Update.exe.
+   *
+   * MSIX under `Program Files\\WindowsApps\\<PFN>`: real binaries often live in `app\\` while the
+   * package root is ACL-hostile to Node — probe `app` and `Appx` before the root when the path
+   * looks like a package folder (not already `...\\app` or `...\\Appx`).
    */
   const probeInstallFolderForWindowsExe = (dirRaw) => {
     if (!dirRaw || process.platform !== 'win32') return null;
@@ -304,7 +308,35 @@ const createIconPathAndAppHelpers = ({
     if (!expanded) return null;
     const normalized = normalizePathForWindows(expanded);
     if (normalized.includes('..')) return null;
-    const folderHint = path.basename(normalized.replace(/[/\\]+$/, '')).toLowerCase();
+    const lcWin = normalized.replace(/\//g, '\\').toLowerCase();
+    const isProgramFilesWindowsAppsPkg = lcWin.includes('\\windowsapps\\')
+      && !/[\\/](app|appx)$/i.test(normalized);
+    if (isProgramFilesWindowsAppsPkg) {
+      for (const sub of ['app', 'Appx']) {
+        const alt = path.join(normalized, sub);
+        try {
+          if (fs.statSync(alt).isDirectory()) {
+            const nested = probeInstallFolderForWindowsExe(alt);
+            if (nested) return nested;
+          }
+        } catch {
+          /* ACL or missing */
+        }
+      }
+    }
+
+    const probeBase = path.basename(normalized.replace(/[/\\]+$/, '')).toLowerCase();
+    let folderHint = probeBase;
+    if (probeBase === 'app' || probeBase === 'appx') {
+      const parentPkg = path.basename(path.dirname(normalized));
+      const neutral = parentPkg.split('__')[0] || parentPkg;
+      const fam = neutral.replace(
+        /_\d+(?:\.\d+)+(?:_(?:x64|x86|arm64|arm|neutral))?$/i,
+        '',
+      );
+      const dotParts = fam.split('.');
+      folderHint = (dotParts[dotParts.length - 1] || fam).toLowerCase();
+    }
 
     const deprioritizeFilename = new Set([
       'uninstall.exe',
@@ -450,6 +482,15 @@ const createIconPathAndAppHelpers = ({
     if (!lc.includes('\\windowsapps\\')) return null;
     const base = path.basename(normalized.replace(/[/\\]+$/, ''));
     const waDir = windowsAppsShimDir();
+
+    // Shims are usually `<PackageFullNameFolder>.exe` (e.g. OpenAI.Codex_26…_x64__….exe), not
+    // `<Family>_<publisher>.exe` — try the exact PFN filename first.
+    const exactShimPath = path.join(waDir, `${base}.exe`);
+    try {
+      if (fs.existsSync(exactShimPath) && fs.statSync(exactShimPath).isFile()) return exactShimPath;
+    } catch {
+      // continue
+    }
 
     const pickFromFamilyPrefix = (family) => {
       const fam = String(family || '').trim();
@@ -604,11 +645,14 @@ const createIconPathAndAppHelpers = ({
       const hit = r.exec(attrs);
       return hit ? hit[1].trim().replace(/\//g, '\\') : null;
     };
-    const rel = pickAttr('Square44x44Logo')
+    // Prefer larger assets first so catalog icons stay sharp on HiDPI (was defaulting to 44×44).
+    const rel = pickAttr('Square310x310Logo')
+      || pickAttr('Wide310x150Logo')
       || pickAttr('Square150x150Logo')
+      || pickAttr('Square71x71Logo')
+      || pickAttr('Square44x44Logo')
       || pickAttr('AppListIcon')
       || pickAttr('Square30x30Logo')
-      || pickAttr('Square310x310Logo')
       || pickAttr('Logo');
     if (!rel || /^ms-appx:/i.test(rel)) return null;
     const candidate = path.normalize(path.join(pkgRoot, rel));
@@ -872,6 +916,7 @@ const createIconPathAndAppHelpers = ({
       || baseName.includes('prereq')
       || baseName === 'vc_redist.x64'
       || baseName === 'vc_redist.x86'
+      || baseName.startsWith('vc_redist')
       || baseName === 'vcredist_x64'
       || baseName === 'vcredist_x86'
       || baseName === 'launcherprereqsetup_x64'
@@ -1041,6 +1086,13 @@ const createIconPathAndAppHelpers = ({
     // Apple Bonjour / mDNS background service rows (not a user-facing desktop app).
     /^bonjour$/i,
     /^bonjour\s+service$/i,
+    // Microsoft VC++ runtime installers clutter the catalog (ARP duplicates).
+    /\bmicrosoft\s+visual\s+c\+\+\s+[^\n]*\bredistributable\b/i,
+    /\bredistributable\s*\(x\d+\)/i,
+    /\bjava\s+auto\s*updater\b/i,
+    /\bjava\s+update\s+scheduler\b/i,
+    /\bamd\s+software\s+installer\b/i,
+    /\bintel\s+driver\s*&\s*support\s+assistant\b/i,
   ];
 
   const isLikelyBackgroundBinary = (filePath = '') => {
@@ -1114,6 +1166,9 @@ const createIconPathAndAppHelpers = ({
       && /\bwindows\s+defender\b/i.test(lc)) {
       return true;
     }
+    if (lc.includes('\\package cache\\') && /\\vc_redist|visual\s*c\+\+\s*runtime|vcruntime/i.test(lc)) {
+      return true;
+    }
     return false;
   };
 
@@ -1171,6 +1226,11 @@ const createIconPathAndAppHelpers = ({
     'Spotify AB',
     'Microsoft Movies & TV',
     'Zune Video',
+    'Codex',
+    'OpenAI Codex',
+    'Cursor',
+    'Cursor (User)',
+    'Windsurf',
   ];
   const INBOX_SHORTCUT_CANONICAL_KEYS = new Set(
     INBOX_START_MENU_APP_LABELS.map((label) => getCanonicalAppKey(label)).filter(Boolean),
@@ -1205,6 +1265,25 @@ const createIconPathAndAppHelpers = ({
 
     const lowerSourcePath = String(sourcePath || '').toLowerCase().replace(/\//g, '\\');
     const pathHaystack = `${lowerSourcePath}\n${targetExe}`;
+
+    if (context.source === 'pf-windowsapps-pfn-scan') {
+      const lc = pathHaystack.toLowerCase();
+      return (
+        getCanonicalAppKey(safeName) === 'codex'
+        && lc.includes('openai')
+        && lc.includes('codex')
+        && lc.includes('\\windowsapps\\')
+      );
+    }
+
+    if (context.source === 'user-catalog-exe') {
+      const p = (lowerSourcePath || targetExe || '').trim();
+      if (!p.endsWith('.exe')) return false;
+      if (isDeniedNonUserExecutableBasename(p)) return false;
+      if (isInstallerLikeExecutable(p)) return false;
+      if (isLikelyBackgroundBinary(p)) return false;
+      return true;
+    }
 
     if (matchesNonUserAppPathHaystack(pathHaystack)) {
       return false;
@@ -1259,11 +1338,19 @@ const createIconPathAndAppHelpers = ({
         || nameLc.includes('zune')
         || nameLc.includes('groove')
       );
+      const devToolCatalogNameBypass = (
+        mediaOrSpotifyByName
+        || nameLc.includes('codex')
+        || nameLc.includes('windsurf')
+        || /\bvisual studio code\b/i.test(safeName)
+        || (/\bcursor\b/i.test(safeName) && !nameLc.includes('sql'))
+      );
       if (registryMeta.systemComponent && !packagedOrStoreInstall) return false;
-      if (registryMeta.parentKeyName && !packagedOrStoreInstall && !mediaOrSpotifyByName) return false;
+      if (registryMeta.parentKeyName && !packagedOrStoreInstall && !devToolCatalogNameBypass) return false;
       const releaseType = String(registryMeta.releaseType || '').toLowerCase();
       if (
         !packagedOrStoreInstall
+        && !devToolCatalogNameBypass
         && (
           releaseType.includes('update')
           || releaseType.includes('hotfix')
@@ -1339,6 +1426,7 @@ const createIconPathAndAppHelpers = ({
     parseInternetShortcut,
     isAppProtocolUrl,
     getCanonicalAppKey,
+    normalizeCatalogDisplayName: normalizeDisplayNameForCatalogDedupe,
     isLikelyBackgroundBinary,
     isLikelyUserApp,
   };

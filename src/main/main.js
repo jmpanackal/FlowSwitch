@@ -157,6 +157,7 @@ const {
   parseInternetShortcut,
   isAppProtocolUrl,
   getCanonicalAppKey,
+  normalizeCatalogDisplayName,
   isLikelyBackgroundBinary,
   isLikelyUserApp,
 } = createIconPathAndAppHelpers({
@@ -1258,6 +1259,7 @@ if (shouldBootstrapElectronMain) {
     clearLaunchTaskbarProgress: clearMainWindowLaunchTaskbarProgress,
     isLikelyUserApp,
     getCanonicalAppKey,
+    normalizeCatalogDisplayName,
     extractExecutablePath,
     resolveBareSystemExecutableFromShimTarget,
     resolveUpdateStyleProcessStartChildExe,
