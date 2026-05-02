@@ -6,6 +6,7 @@
 export function buildTestLaunchSpawnArgsForFolderContentHost(data: {
   executablePath?: string | null;
   associatedFiles?: Array<{ type?: string; path?: string | null }>;
+  browserTabs?: Array<{ url?: string | null }>;
 } | null | undefined): string[] | undefined {
   if (!data) return undefined;
   const exe = typeof data.executablePath === "string" ? data.executablePath.trim() : "";
@@ -17,6 +18,10 @@ export function buildTestLaunchSpawnArgsForFolderContentHost(data: {
       && String(f.path || "").trim(),
   );
   const p = folder && typeof folder.path === "string" ? folder.path.trim() : "";
-  if (!p) return undefined;
-  return [p.replace(/\//g, "\\")];
+  if (p) return [p.replace(/\//g, "\\")];
+  const tabs = Array.isArray(data.browserTabs) ? data.browserTabs : [];
+  const firstUrl = tabs.find((t) => typeof t?.url === "string" && String(t.url).trim());
+  const u = firstUrl && typeof firstUrl.url === "string" ? firstUrl.url.trim() : "";
+  if (u) return [u];
+  return undefined;
 }

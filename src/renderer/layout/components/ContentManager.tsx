@@ -16,7 +16,6 @@ import {
   type FlowLibraryViewMode,
 } from "./FlowLibraryToolbar";
 import { flowDropdownNativeSelectClass } from "./inspectorStyles";
-import { AVAILABLE_APPS } from "../constants/availableAppsForOpensWith";
 import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
@@ -25,6 +24,7 @@ import {
   getBrowserColor,
   getBrowserIcon,
 } from "../utils/layoutDropPresentation";
+import { resolveHostExecutableForCatalogLabel } from "../utils/catalogHostResolve";
 
 // Enhanced content types for the unified system
 export interface ContentFolder {
@@ -96,8 +96,12 @@ interface ContentManagerProps {
   onDeleteLibraryEntry?: (scope: "item" | "folder", id: string) => void;
   /** IDs hidden for the active profile only (global library still contains them). */
   excludedContentIds?: string[];
-  /** Installed-app catalog rows (name + shell icon path) for drag previews matching “Opens with”. */
-  installedAppsCatalog?: { name: string; iconPath: string | null }[];
+  /** Installed-app catalog rows used for opens-with icon + executable host resolution. */
+  installedAppsCatalog?: {
+    name: string;
+    iconPath: string | null;
+    executablePath?: string | null;
+  }[];
   compact?: boolean;
   /** When both set with `compact`, hides the local search field and uses this query. */
   sidebarSearchQuery?: string;
@@ -112,7 +116,11 @@ const SIDEBAR_DRAG_BROWSER_NAMES = new Set(
 );
 
 function resolveInstalledCatalogIconPath(
-  catalog: { name: string; iconPath: string | null }[] | undefined,
+  catalog: {
+    name: string;
+    iconPath: string | null;
+    executablePath?: string | null;
+  }[] | undefined,
   appName: string,
 ): string | null {
   if (!catalog?.length || !appName.trim()) return null;
@@ -130,7 +138,11 @@ function resolveInstalledCatalogIconPath(
 function renderOpensWithDragPreview(
   defaultApp: string,
   label: string,
-  catalog: { name: string; iconPath: string | null }[] | undefined,
+  catalog: {
+    name: string;
+    iconPath: string | null;
+    executablePath?: string | null;
+  }[] | undefined,
 ) {
   const raster = safeIconSrc(
     resolveInstalledCatalogIconPath(catalog, defaultApp) ?? undefined,
@@ -162,6 +174,10 @@ function renderOpensWithDragPreview(
       <span className="truncate font-medium text-white">{label}</span>
     </div>
   );
+}
+
+function normalizeWindowsPathForSpawn(raw: string): string {
+  return String(raw || "").trim().replace(/\//g, "\\");
 }
 
 // Default app mappings by content type (for initial suggestions)
@@ -308,6 +324,147 @@ export function ContentManager({
       ),
     [monitorsSortedForMenu],
   );
+
+  const opensWithChoices = useMemo(() => {
+    const seen = new Set<string>();
+    const out: string[] = [];
+    const push = (value: string) => {
+      const t = String(value || "").trim();
+      if (!t || seen.has(t)) return;
+      seen.add(t);
+      out.push(t);
+    };
+    for (const row of installedAppsCatalog || []) {
+      push(String(row?.name || ""));
+    }
+    for (const item of content) push(item.defaultApp);
+    for (const folder of folders) push(folder.defaultApp);
+    push("File Explorer");
+    push("Visual Studio Code");
+    push("Chrome");
+    push("Edge");
+    return out;
+  }, [installedAppsCatalog, content, folders]);
+
+  const renderOpensWithIcon = useCallback((appName: string, className: string) => {
+    const iconPath = resolveInstalledCatalogIconPath(installedAppsCatalog, appName);
+    const raster = safeIconSrc(iconPath ?? undefined);
+    if (raster) {
+      return <img src={raster} alt="" className={`${className} rounded object-contain`} />;
+    }
+    const tl = String(appName || "").trim().toLowerCase();
+    const isLikelyBrowser =
+      SIDEBAR_DRAG_BROWSER_NAMES.has(tl)
+      || tl.includes("chrome")
+      || tl.includes("firefox")
+      || tl.includes("edge")
+      || tl.includes("safari")
+      || tl.includes("browser");
+    if (isLikelyBrowser) {
+      const Glyph = getBrowserIcon(appName);
+      return <Glyph className={className} style={{ color: getBrowserColor(appName) }} />;
+    }
+    const Glyph = getAppIcon(appName);
+    return <Glyph className={className} style={{ color: getAppColor(appName) }} />;
+  }, [installedAppsCatalog]);
+
+  const renderContentTypeBadge = useCallback((target: ContentItem | ContentFolder) => {
+    if ((target as ContentFolder).type === "folder") {
+      return (
+        <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-flow-border/60 bg-flow-bg-secondary">
+          <Folder className="h-2.5 w-2.5 text-amber-400" aria-hidden />
+        </span>
+      );
+    }
+    const item = target as ContentItem;
+    if (item.type === "link") {
+      return (
+        <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-flow-border/60 bg-flow-bg-secondary">
+          <ExternalLink className="h-2.5 w-2.5 text-blue-400" aria-hidden />
+        </span>
+      );
+    }
+    if (item.isFolder) {
+      return (
+        <span className="inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-flow-border/60 bg-flow-bg-secondary">
+          <Folder className="h-2.5 w-2.5 text-amber-400" aria-hidden />
+        </span>
+      );
+    }
+    return (
+      <span className="inline-flex h-3.5 w-3.5 items-center justify-center overflow-hidden rounded-full border border-flow-border/60 bg-flow-bg-secondary p-[1px]">
+        <FileIcon type={item.fileType || "unknown"} className="h-2.5 w-2.5" />
+      </span>
+    );
+  }, []);
+
+  const handleTestLaunchContentTarget = useCallback(async (
+    target:
+      | { scope: "item"; item: ContentItem }
+      | { scope: "folder"; folder: ContentFolder },
+  ) => {
+    if (!window.electron?.testLaunchCatalogApp) {
+      pushLibrarySnackbar("Test launch is not available in this build.", { variant: "error" });
+      return;
+    }
+    const defaultApp = target.scope === "item" ? target.item.defaultApp : target.folder.defaultApp;
+    const hostExe = resolveHostExecutableForCatalogLabel(installedAppsCatalog, defaultApp);
+    const payload: {
+      name?: string;
+      executablePath?: string | null;
+      launchUrl?: string | null;
+      spawnArgsForExecutable?: string[];
+    } = {
+      name: defaultApp || (target.scope === "item" ? target.item.name : target.folder.name),
+      executablePath: hostExe ?? "",
+      launchUrl: "",
+    };
+
+    if (target.scope === "item") {
+      const item = target.item;
+      if (item.type === "link") {
+        const url = String(item.url || "").trim();
+        if (hostExe) {
+          if (!url) {
+            pushLibrarySnackbar("No URL to launch for this content.", { variant: "error" });
+            return;
+          }
+          payload.spawnArgsForExecutable = [url];
+        } else {
+          payload.launchUrl = url;
+        }
+      } else {
+        if (!hostExe) {
+          pushLibrarySnackbar(`No launch app found for "${defaultApp}".`, { variant: "error" });
+          return;
+        }
+        const p = String(item.path || "").trim();
+        if (!p) {
+          pushLibrarySnackbar("No file/folder path set for this content.", { variant: "error" });
+          return;
+        }
+        payload.spawnArgsForExecutable = [normalizeWindowsPathForSpawn(p)];
+      }
+    } else {
+      if (!hostExe) {
+        pushLibrarySnackbar(`No launch app found for "${defaultApp}".`, { variant: "error" });
+        return;
+      }
+      const diskPath = String(target.folder.diskPath || "").trim();
+      if (!diskPath) {
+        pushLibrarySnackbar("This folder entry has no disk path to launch.", { variant: "error" });
+        return;
+      }
+      payload.spawnArgsForExecutable = [normalizeWindowsPathForSpawn(diskPath)];
+    }
+
+    const result = await window.electron.testLaunchCatalogApp(payload);
+    if (result.ok) {
+      pushLibrarySnackbar(`Started "${target.scope === "item" ? target.item.name : target.folder.name}".`);
+    } else {
+      pushLibrarySnackbar(result.error || "Test launch failed.", { variant: "error" });
+    }
+  }, [installedAppsCatalog, pushLibrarySnackbar]);
 
   useEffect(() => {
     if (externalContentItems == null || externalContentFolders == null) {
@@ -655,12 +812,21 @@ export function ContentManager({
 
     if (item.type === "folder") {
       const folder = item as ContentFolder;
+      const dragIconPath = resolveInstalledCatalogIconPath(
+        installedAppsCatalog,
+        folder.defaultApp,
+      );
       const dragData = {
         source: "sidebar" as const,
         type: "libraryFolder" as const,
         folder: { ...folder },
         name: folder.name,
         defaultApp: folder.defaultApp,
+        iconPath: dragIconPath ?? null,
+        icon: getAppIcon(folder.defaultApp),
+        color: getAppColor(folder.defaultApp),
+        fileIcon: Folder,
+        fileColor: "#F59E0B",
       };
       const preview = renderOpensWithDragPreview(
         folder.defaultApp,
@@ -680,6 +846,12 @@ export function ContentManager({
     }
 
     const contentItem = item as ContentItem;
+    const defaultAppLabel = contentItem.defaultApp || "File Viewer";
+    const dragIconPath = resolveInstalledCatalogIconPath(
+      installedAppsCatalog,
+      defaultAppLabel,
+    );
+    const isLink = contentItem.type === "link";
 
     const dragData = {
       source: "sidebar" as const,
@@ -695,6 +867,21 @@ export function ContentManager({
       useDefaultApp: true,
       createNewApp: true,
       associatedApp: contentItem.defaultApp,
+      iconPath: dragIconPath ?? null,
+      icon: isLink ? getBrowserIcon(defaultAppLabel) : getAppIcon(defaultAppLabel),
+      color: isLink ? getBrowserColor(defaultAppLabel) : getAppColor(defaultAppLabel),
+      fileIcon:
+        contentItem.type === "link"
+          ? ExternalLink
+          : contentItem.isFolder
+            ? Folder
+            : undefined,
+      fileColor:
+        contentItem.type === "link"
+          ? "#3B82F6"
+          : contentItem.isFolder
+            ? "#F59E0B"
+            : getFileTypeColor(contentItem.fileType || "unknown"),
     };
 
     const preview = renderOpensWithDragPreview(
@@ -1017,6 +1204,27 @@ export function ContentManager({
                   </button>
                 </div>
               ) : null}
+              <div className="px-1 py-0.5">
+                <button
+                  type="button"
+                  role="menuitem"
+                  className="flow-menu-item w-full text-left text-xs"
+                  onClick={(e) => {
+                    stopContentRowPointer(e);
+                    void handleTestLaunchContentTarget(target);
+                    closeContentRowMenus();
+                  }}
+                >
+                  Test launch
+                </button>
+              </div>
+              {onDeleteLibraryEntry ? (
+                <div
+                  className="my-0.5 h-px bg-flow-border/60"
+                  role="separator"
+                  aria-hidden
+                />
+              ) : null}
               {submenuOpen && canAddToLayout && contentRowAddToSubmenu ? (
                 <SidebarOverlayMenu
                   open
@@ -1153,13 +1361,14 @@ export function ContentManager({
 
   // Get icon for content item
   const getContentIcon = (item: ContentItem) => {
-    if (item.type === 'link') {
-      return <ExternalLink className="w-4 h-4 text-blue-400" />;
-    } else if (item.isFolder) {
-      return <Folder className="w-4 h-4 text-yellow-400" />;
-    } else {
-      return <FileIcon type={item.fileType || 'unknown'} className="w-4 h-4" />;
-    }
+    return (
+      <span className="relative inline-flex">
+        {renderOpensWithIcon(item.defaultApp, "h-6 w-6")}
+        <span className="absolute -bottom-1 -right-1">
+          {renderContentTypeBadge(item)}
+        </span>
+      </span>
+    );
   };
 
   // Get color for content item
@@ -1214,7 +1423,12 @@ export function ContentManager({
               onMouseLeave={() => setHoveredItem(null)}
             >
               <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-flow-bg-tertiary/50">
-                <Folder className="h-4 w-4 text-amber-400" aria-hidden />
+                <span className="relative inline-flex">
+                  {renderOpensWithIcon(folder.defaultApp, "h-6 w-6")}
+                  <span className="absolute -bottom-1 -right-1">
+                    {renderContentTypeBadge(folder)}
+                  </span>
+                </span>
               </div>
               <div className={`min-w-0 ${isGrid ? "w-full" : "flex-1"}`}>
                 <h3
@@ -1262,7 +1476,7 @@ export function ContentManager({
                   {appDropdownOpen === folder.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                       <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                        {AVAILABLE_APPS.map((app) => (
+                        {opensWithChoices.map((app) => (
                           <button
                             key={app}
                             onClick={(e) => {
@@ -1343,7 +1557,7 @@ export function ContentManager({
                   {appDropdownOpen === folder.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                       <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                        {AVAILABLE_APPS.map((app) => (
+                        {opensWithChoices.map((app) => (
                           <button
                             key={app}
                             onClick={(e) => {
@@ -1438,7 +1652,7 @@ export function ContentManager({
                 {appDropdownOpen === folder.id && (
                   <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                     <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                      {AVAILABLE_APPS.map((app) => (
+                      {opensWithChoices.map((app) => (
                         <button
                           key={app}
                           onClick={(e) => {
@@ -1563,7 +1777,7 @@ export function ContentManager({
                   {appDropdownOpen === item.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                       <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                        {AVAILABLE_APPS.map((app) => (
+                        {opensWithChoices.map((app) => (
                           <button
                             key={app}
                             onClick={(e) => {
@@ -1647,7 +1861,7 @@ export function ContentManager({
                   {appDropdownOpen === item.id && (
                     <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                       <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                        {AVAILABLE_APPS.map((app) => (
+                        {opensWithChoices.map((app) => (
                           <button
                             key={app}
                             onClick={(e) => {
@@ -1734,7 +1948,7 @@ export function ContentManager({
                 {appDropdownOpen === item.id && (
                   <div className="absolute top-full left-0 mt-1 w-48 bg-flow-surface-elevated border border-flow-border rounded-lg shadow-lg overflow-hidden z-50">
                     <div className="scrollbar-elegant max-h-40 overflow-y-auto">
-                      {AVAILABLE_APPS.map((app) => (
+                      {opensWithChoices.map((app) => (
                         <button
                           key={app}
                           onClick={(e) => {

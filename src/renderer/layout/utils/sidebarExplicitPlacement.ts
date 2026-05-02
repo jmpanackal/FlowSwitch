@@ -91,6 +91,10 @@ export function placeSidebarContentOnMonitor(args: {
   /** When set, used instead of `installedAppsCatalog` so icons match drag-drop (ref snapshot). */
   getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addApp: (profileId: string, monitorId: string, newApp: unknown) => void;
+  preferredPlacement?: {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  };
   addBrowserTab: (profileId: string, tab: unknown) => void;
 }): void {
   const {
@@ -101,6 +105,7 @@ export function placeSidebarContentOnMonitor(args: {
     getInstalledAppsCatalog,
     addApp,
     addBrowserTab,
+    preferredPlacement,
   } = args;
   const catalog = catalogForPlacement(
     installedAppsCatalog,
@@ -112,20 +117,24 @@ export function placeSidebarContentOnMonitor(args: {
   const isPortrait = targetMonitor.orientation === "portrait";
   const prospectiveAppCount = (targetMonitor.apps?.length || 0) + 1;
   const snapped = pickZoneNearCenter(isPortrait, prospectiveAppCount);
+  const placement = preferredPlacement ?? snapped;
 
   const isLink = item.type === "link" && Boolean(item.url);
 
   if (isLink) {
-    const instanceId = newInstanceId(item.defaultApp);
-    const iconPath = resolveInstalledCatalogIconPath(catalog, item.defaultApp);
+    const appLabel = item.defaultApp || "File Viewer";
+    const instanceId = newInstanceId(appLabel);
+    const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+    const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
     const newApp: Record<string, unknown> = {
       instanceId,
-      name: item.defaultApp,
-      icon: getBrowserIcon(item.defaultApp),
+      name: appLabel,
+      icon: getBrowserIcon(appLabel),
       iconPath,
-      color: getBrowserColor(item.defaultApp),
-      position: snapped.position,
-      size: { width: 60, height: 60 },
+      ...(hostExe ? { executablePath: hostExe } : {}),
+      color: getBrowserColor(appLabel),
+      position: placement.position,
+      size: placement.size,
       volume: 50,
       launchBehavior: "new",
       runAsAdmin: false,
@@ -139,7 +148,7 @@ export function placeSidebarContentOnMonitor(args: {
     addBrowserTab(profile.id, {
       name: item.name,
       url: item.url,
-      browser: item.defaultApp,
+      browser: appLabel,
       newWindow: false,
       monitorId,
       isActive: true,
@@ -160,8 +169,8 @@ export function placeSidebarContentOnMonitor(args: {
     iconPath,
     ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
-    position: snapped.position,
-    size: snapped.size,
+    position: placement.position,
+    size: placement.size,
     volume: 50,
     launchBehavior: "new",
     runAsAdmin: false,
@@ -212,11 +221,13 @@ export function placeSidebarContentOnMinimized(args: {
     const appLabel = item.defaultApp || "File Viewer";
     const instanceId = newInstanceId(appLabel);
     const iconPath = resolveInstalledCatalogIconPath(catalog, appLabel);
+    const hostExe = resolveHostExecutableForCatalogLabel(catalog, appLabel);
     const newApp: Record<string, unknown> = {
       instanceId,
       name: appLabel,
       icon: getAppIcon(appLabel),
       iconPath,
+      ...(hostExe ? { executablePath: hostExe } : {}),
       color: getAppColor(appLabel),
       volume: 50,
       launchBehavior: "minimize",
@@ -412,6 +423,10 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
   installedAppsCatalog?: InstalledCatalogEntry[];
   getInstalledAppsCatalog?: () => InstalledCatalogEntry[] | undefined;
   addApp: (profileId: string, monitorId: string, newApp: unknown) => void;
+  preferredPlacement?: {
+    position: { x: number; y: number };
+    size: { width: number; height: number };
+  };
 }): void {
   const {
     profile,
@@ -422,6 +437,7 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
     installedAppsCatalog,
     getInstalledAppsCatalog,
     addApp,
+    preferredPlacement,
   } = args;
   const catalog = catalogForPlacement(
     installedAppsCatalog,
@@ -440,6 +456,7 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
   const isPortrait = targetMonitor.orientation === "portrait";
   const prospectiveAppCount = (targetMonitor.apps?.length || 0) + 1;
   const snapped = pickZoneNearCenter(isPortrait, prospectiveAppCount);
+  const placement = preferredPlacement ?? snapped;
 
   const appLabel = folder.defaultApp || "File Viewer";
   const instanceId = newInstanceId(appLabel);
@@ -452,8 +469,8 @@ export function placeSidebarLibraryFolderOnMonitor(args: {
     iconPath,
     ...(hostExe ? { executablePath: hostExe } : {}),
     color: getAppColor(appLabel),
-    position: snapped.position,
-    size: snapped.size,
+    position: placement.position,
+    size: placement.size,
     volume: 50,
     launchBehavior: "new",
     runAsAdmin: false,

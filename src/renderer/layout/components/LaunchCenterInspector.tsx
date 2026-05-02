@@ -369,12 +369,31 @@ function appSummaryBadgeMeta(status: AppSummaryStatus): {
   }
 }
 
-function cleanAppSummaryLine(action: LaunchAction): string {
+function appSummaryDecisionLines(action: LaunchAction): {
+  reusableNote: string | null;
+  contentNotes: string[];
+} {
   const decisions = Array.isArray(action.smartDecisions)
     ? action.smartDecisions.map((d) => String(d || "").trim()).filter(Boolean)
     : [];
-  const reused = decisions.some((d) => /^(?:reusing|reused) existing window$/i.test(d));
-  return reused ? "Launched · Reused existing window" : "Launched";
+  const reused = decisions.find((d) => /^(?:reusing|reused) existing window$/i.test(d)) || null;
+  const contentNotes = decisions.filter((d) => {
+    const lc = d.toLowerCase();
+    return lc.includes("content item")
+      || lc.includes("file opened with this app")
+      || lc.includes("files opened with this app")
+      || lc.includes("files opened:")
+      || lc.includes("linked to this app")
+      || lc.includes("link opened with this app")
+      || lc.includes("links opened with this app")
+      || lc.includes("links opened:")
+      || lc.startsWith("content:")
+      || lc.startsWith("links:");
+  });
+  return {
+    reusableNote: reused ? "Reused existing window" : null,
+    contentNotes,
+  };
 }
 
 function LaunchSummarySubstepIcon({
@@ -417,11 +436,13 @@ function LaunchSummaryAppRow({
     : null;
   const warningNote = status === "warn" ? pickNonTrivialSmartDecisionLine(action) : null;
   const errorNote = status === "error" ? (action.errorMessage || "").trim() : "";
-  const cleanLine = cleanAppSummaryLine(action);
-  const okReuseNote =
-    status === "ok" && cleanLine !== "Launched"
-      ? cleanLine.replace(/^Launched · /, "")
-      : null;
+  const decisionLines = appSummaryDecisionLines(action);
+  const okNotes = status === "ok"
+    ? [
+      ...decisionLines.contentNotes,
+      ...(decisionLines.reusableNote ? [decisionLines.reusableNote] : []),
+    ]
+    : [];
   const okPrimary = status === "ok" ? (
     <span
       className="flex h-6 w-6 shrink-0 items-center justify-center self-start text-emerald-400/95"
@@ -437,8 +458,14 @@ function LaunchSummaryAppRow({
   );
   const detailBody =
     status === "ok" ? (
-      okReuseNote ? (
-        <p className="text-[11px] leading-snug text-flow-text-secondary break-words">{okReuseNote}</p>
+      okNotes.length > 0 ? (
+        <ul className="space-y-0.5">
+          {okNotes.map((note) => (
+            <li key={note} className="text-[11px] leading-snug text-flow-text-secondary break-words">
+              {note}
+            </li>
+          ))}
+        </ul>
       ) : null
     ) : (
       <ul className="space-y-0.5">

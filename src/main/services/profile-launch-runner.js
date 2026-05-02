@@ -983,46 +983,70 @@ const launchProfileById = async (profileId, options = {}) => {
   }));
   let activeUiPhase = null;
   let activeUiName = null;
-  const tabUrlDedupeForCount = new Set();
-  const countUniqueTabUrl = (rawUrl) => {
-    const u = normalizeSafeUrl(rawUrl);
-    if (!u || tabUrlDedupeForCount.has(u)) return;
-    tabUrlDedupeForCount.add(u);
+  const launchExeByInstanceId = new Map();
+  const launchExeByAppName = new Map();
+  const BROWSER_ALIAS_GROUPS = [
+    ['microsoft edge', 'edge'],
+    ['google chrome', 'chrome'],
+    ['mozilla firefox', 'firefox'],
+    ['vivaldi', 'vivaldi browser'],
+    ['opera', 'opera browser'],
+    ['brave', 'brave browser'],
+  ];
+  const normalizeBrowserLabel = (raw) => String(raw || '').trim().toLowerCase().replace(/\s+/g, ' ');
+  const resolveBrowserNameCandidates = (raw) => {
+    const base = normalizeBrowserLabel(raw);
+    if (!base) return [];
+    const out = new Set([base]);
+    const group = BROWSER_ALIAS_GROUPS.find((g) => g.includes(base));
+    if (group) {
+      for (const alias of group) out.add(alias);
+    }
+    return Array.from(out);
   };
-  for (const tab of (Array.isArray(profile?.browserTabs) ? profile.browserTabs : [])) {
-    countUniqueTabUrl(tab?.url);
+  for (const launch of appLaunches) {
+    const ex = typeof launch?.executablePath === 'string' ? launch.executablePath.trim() : '';
+    if (!ex) continue;
+    const iid = String(launch?.app?.instanceId || '').trim();
+    if (iid) launchExeByInstanceId.set(iid, ex);
+    const nl = normalizeBrowserLabel(launch?.appName || '');
+    if (nl && !launchExeByAppName.has(nl)) launchExeByAppName.set(nl, ex);
   }
-  for (const raw of legacyLaunchData.browserUrls || []) {
-    countUniqueTabUrl(raw);
-  }
-  const requestedBrowserTabCount = tabUrlDedupeForCount.size;
 
-  /** Ordered browser tabs (profile + legacy), deduped by normalized URL. */
+  /** Ordered browser tabs (profile + legacy), deduped by URL + preferred host hints. */
   const tabUrlList = [];
   const tabUrlSeen = new Set();
-  const pushTabEntry = (raw) => {
+  const pushTabEntry = (raw, meta = {}) => {
     const u = normalizeSafeUrl(raw);
-    if (!u || tabUrlSeen.has(u)) return;
-    tabUrlSeen.add(u);
+    if (!u) return;
+    const browser = String(meta.browser || '').trim();
+    const appInstanceId = String(meta.appInstanceId || '').trim();
+    const key = `${u}\0${browser.toLowerCase()}\0${appInstanceId}`;
+    if (tabUrlSeen.has(key)) return;
+    tabUrlSeen.add(key);
     let label = u;
     try {
       label = new URL(u).hostname || u;
     } catch {
       label = u;
     }
-    tabUrlList.push({ url: u, label });
+    tabUrlList.push({ key, url: u, label, browser, appInstanceId });
   };
   for (const tab of (Array.isArray(profile?.browserTabs) ? profile.browserTabs : [])) {
-    pushTabEntry(tab?.url);
+    pushTabEntry(tab?.url, {
+      browser: tab?.browser,
+      appInstanceId: tab?.appInstanceId,
+    });
   }
   for (const raw of legacyLaunchData.browserUrls || []) {
     pushTabEntry(raw);
   }
+  const requestedBrowserTabCount = tabUrlList.length;
 
-  const tabActionIdForUrl = (url) => {
+  const tabActionIdForUrl = (tabKey) => {
     let h = 2166136261;
-    for (let i = 0; i < url.length; i += 1) {
-      h ^= url.charCodeAt(i);
+    for (let i = 0; i < tabKey.length; i += 1) {
+      h ^= tabKey.charCodeAt(i);
       h = Math.imul(h, 16777619);
     }
     return `tab:${(h >>> 0).toString(36)}`;
@@ -1058,6 +1082,46 @@ const launchProfileById = async (profileId, options = {}) => {
       endedAtMs: null,
     },
   ]);
+
+  const buildInitialContentSmartDecisions = (launch) => {
+    const decisions = [];
+    const associatedFiles = Array.isArray(launch?.app?.associatedFiles)
+      ? launch.app.associatedFiles
+      : [];
+    if (associatedFiles.length > 0) {
+      decisions.push(
+        associatedFiles.length === 1
+          ? '1 file opened with this app'
+          : `${associatedFiles.length} files opened with this app`,
+      );
+      const contentNames = associatedFiles
+        .map((f) => String(f?.name || path.basename(String(f?.path || '')) || '').trim())
+        .filter(Boolean)
+        .slice(0, 2);
+      if (contentNames.length > 0) {
+        decisions.push(`Files opened: ${contentNames.join(', ')}`);
+      }
+    }
+    const instanceId = String(launch?.app?.instanceId || '').trim();
+    if (instanceId) {
+      const linkedTabs = tabUrlList.filter((t) => String(t?.appInstanceId || '').trim() === instanceId);
+      if (linkedTabs.length > 0) {
+        decisions.push(
+          linkedTabs.length === 1
+            ? '1 link opened with this app'
+            : `${linkedTabs.length} links opened with this app`,
+        );
+        const linkNames = linkedTabs
+          .map((t) => String(t?.label || t?.url || '').trim())
+          .filter(Boolean)
+          .slice(0, 2);
+        if (linkNames.length > 0) {
+          decisions.push(`Links opened: ${linkNames.join(', ')}`);
+        }
+      }
+    }
+    return decisions.length > 0 ? decisions : null;
+  };
 
   const delayTimelineIndexByApp = new Array(appLaunches.length).fill(-1);
   const appTimelineIndexByApp = new Array(appLaunches.length);
@@ -1099,7 +1163,7 @@ const launchProfileById = async (profileId, options = {}) => {
       state: 'queued',
       iconDataUrl: row.iconDataUrl,
       pills: null,
-      smartDecisions: null,
+      smartDecisions: buildInitialContentSmartDecisions(appLaunches[i]),
       errorMessage: null,
       failureKind: null,
       startedAtMs: null,
@@ -1110,10 +1174,10 @@ const launchProfileById = async (profileId, options = {}) => {
   }
 
   const tabUrlToTimelineIndex = new Map();
-  for (const { url, label } of tabUrlList) {
-    tabUrlToTimelineIndex.set(url, executionActions.length);
+  for (const { key, label } of tabUrlList) {
+    tabUrlToTimelineIndex.set(key, executionActions.length);
     executionActions.push({
-      id: tabActionIdForUrl(url),
+      id: tabActionIdForUrl(key),
       kind: 'tab',
       title: label,
       targetLocation: 'Browser',
@@ -1447,8 +1511,34 @@ const launchProfileById = async (profileId, options = {}) => {
       const profileSpawnArgs = Array.isArray(launchItem.spawnArgsForExecutable)
         ? launchItem.spawnArgsForExecutable.filter((a) => typeof a === 'string' && a.trim())
         : [];
+      const contentTargetTokens = profileSpawnArgs
+        .map((arg) => {
+          const raw = String(arg || '').trim();
+          if (!raw) return [];
+          const parts = [];
+          try {
+            const maybeUrl = new URL(raw);
+            const host = String(maybeUrl.hostname || '').trim().toLowerCase();
+            if (host) parts.push(host);
+          } catch {
+            // not a URL
+          }
+          const normalizedPath = raw.replace(/\//g, '\\');
+          const baseName = String(path.basename(normalizedPath) || '').trim().toLowerCase();
+          if (baseName) parts.push(baseName);
+          const withoutExt = baseName.replace(/\.[a-z0-9]+$/i, '').trim();
+          if (withoutExt && withoutExt !== baseName) parts.push(withoutExt);
+          return parts;
+        })
+        .flat()
+        .filter(Boolean);
       let launchArgs = [...profileSpawnArgs];
-      if (isChromiumFamily && isDuplicateProcessLaunch && launchItem.executablePath) {
+      if (
+        isChromiumFamily
+        && isDuplicateProcessLaunch
+        && launchItem.executablePath
+        && profileSpawnArgs.length === 0
+      ) {
         launchArgs = ['--new-window', ...launchArgs];
       }
       launchDiagnostics.start({
@@ -2346,6 +2436,62 @@ const launchProfileById = async (profileId, options = {}) => {
             reason: 'post-placement-window-scan',
           },
         });
+        const pickContentTargetHandle = (rows, fallbackHandle) => {
+          if (!Array.isArray(rows) || rows.length === 0) return null;
+          if (contentTargetTokens.length === 0) return null;
+          const fallback = String(fallbackHandle || '').trim();
+          let best = null;
+          let bestScore = Number.NEGATIVE_INFINITY;
+          for (const row of rows) {
+            const handle = String(row?.handle || '').trim();
+            if (!handle) continue;
+            if (row?.cloaked || row?.hung || row?.tool || !row?.enabled) continue;
+            if (row?.hasOwner || row?.topMost) continue;
+            if (isLikelyAuxiliaryWindowClass(row?.className)) continue;
+            const isMinimized = Boolean(row?.isMinimized);
+            if (!isMinimized && !row?.isWindowVisible) continue;
+            const titleLc = String(row?.title || '').trim().toLowerCase();
+            let tokenHits = 0;
+            for (const token of contentTargetTokens) {
+              if (token && titleLc.includes(token)) tokenHits += 1;
+            }
+            let score = tokenHits * 1000;
+            if (handle === fallback) score += 20;
+            score += Math.min(500, Number(row?.width || 0) * Number(row?.height || 0) / 10000);
+            if (score > bestScore) {
+              bestScore = score;
+              best = handle;
+            }
+          }
+          if (bestScore <= 0) return null;
+          return best;
+        };
+        const preferredContentHandle = pickContentTargetHandle(postPlacementRows, result.handle);
+        if (preferredContentHandle && preferredContentHandle !== String(result.handle || '').trim()) {
+          const preferredPlacement = await moveSpecificWindowHandleToBounds({
+            handle: preferredContentHandle,
+            bounds: placementBounds,
+            processHintLc,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'content-target-handle-selection',
+              reason: 'promoted-content-matching-window',
+              previousHandle: String(result.handle || '').trim() || null,
+              preferredHandle: preferredContentHandle,
+            },
+          });
+          if (preferredPlacement?.applied) {
+            const previousHandle = String(result.handle || '').trim();
+            result.handle = String(preferredPlacement.handle || preferredContentHandle).trim();
+            if (previousHandle && previousHandle !== result.handle) {
+              await minimizeWindowHandle(previousHandle);
+            }
+          }
+        }
         const placedRow = (Array.isArray(postPlacementRows) ? postPlacementRows : [])
           .find((row) => String(row?.handle || '').trim() === String(result.handle || '').trim());
         if (isLikelyFatalLaunchDialog(placedRow, processHintLc)) {
@@ -2696,6 +2842,62 @@ const launchProfileById = async (profileId, options = {}) => {
         if (bounds.state === 'maximized' && skipDelayedChromiumMaximizeStabilization) {
           maximizedPlacementVerified = true;
         }
+
+        const shouldSuppressExtraContentWindows = (
+          profileSpawnArgs.length > 0
+          && !launchItem.shortcutPath
+          && !launchItem.launchUrl
+          && preLaunchHandleSet.size === 0
+          && !reusedExistingHandle
+          && result.applied
+          && result.handle
+        );
+        if (shouldSuppressExtraContentWindows) {
+          const anchorHandle = String(result.handle || '').trim();
+          const scanHints = Array.from(new Set(
+            [processHintLc, ...(Array.isArray(activeProcessHints) ? activeProcessHints : [])]
+              .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+              .filter(Boolean),
+          ));
+          const extraHandles = new Set();
+          for (const hint of scanHints) {
+            const rows = await getVisibleWindowInfos(hint, {
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc: hint,
+                strategy: 'content-launch-extra-window-scan',
+              },
+              includeNonVisible: true,
+            });
+            for (const row of (Array.isArray(rows) ? rows : [])) {
+              const handle = String(row?.handle || '').trim();
+              if (!handle || handle === anchorHandle) continue;
+              if (row?.cloaked || row?.hung || row?.tool || !row?.enabled) continue;
+              if (row?.hasOwner || row?.topMost) continue;
+              if (isLikelyAuxiliaryWindowClass(row?.className)) continue;
+              const isMinimized = Boolean(row?.isMinimized);
+              if (!isMinimized && (Number(row?.width || 0) < 280 || Number(row?.height || 0) < 140)) {
+                continue;
+              }
+              if (!row?.isWindowVisible && !isMinimized) continue;
+              extraHandles.add(handle);
+            }
+          }
+          for (const extraHandle of extraHandles) {
+            await minimizeWindowHandle(extraHandle);
+          }
+          if (extraHandles.size > 0) {
+            launchDiagnostics.result({
+              processHintLc,
+              strategy: 'content-launch-extra-window-suppression',
+              reason: 'suppressed-extra-windows',
+              anchorHandle: anchorHandle || null,
+              suppressedHandles: Array.from(extraHandles),
+              suppressedCount: extraHandles.size,
+            });
+          }
+        }
+
         const placementValidated = (
           bounds.state === 'normal'
             ? placementVerified
@@ -2845,9 +3047,9 @@ const launchProfileById = async (profileId, options = {}) => {
     await runLaunch(launchItem, appIndex);
   }
 
-  for (const { url, label } of tabUrlList) {
+  for (const { key, url, label, browser, appInstanceId } of tabUrlList) {
     if (!isCurrentRunActive()) break;
-    const tIdx = tabUrlToTimelineIndex.get(url);
+    const tIdx = tabUrlToTimelineIndex.get(key);
     const tAct = tIdx != null ? executionActions[tIdx] : null;
     try {
       activeUiPhase = 'tabs';
@@ -2860,7 +3062,30 @@ const launchProfileById = async (profileId, options = {}) => {
         tAct.substeps[0].startedAtMs = t0;
       }
       publishCurrentLaunchStatus('in-progress');
-      await shell.openExternal(url);
+      let opened = false;
+      const preferredInstanceId = String(appInstanceId || '').trim();
+      const preferredBrowserCandidates = resolveBrowserNameCandidates(browser);
+      let preferredBrowserExe = null;
+      for (const candidate of preferredBrowserCandidates) {
+        preferredBrowserExe = launchExeByAppName.get(candidate) || null;
+        if (preferredBrowserExe) break;
+      }
+      const hostExe = (
+        (preferredInstanceId && launchExeByInstanceId.get(preferredInstanceId))
+        || preferredBrowserExe
+        || null
+      );
+      if (hostExe) {
+        try {
+          await launchExecutable(hostExe, [url]);
+          opened = true;
+        } catch {
+          // fallback to shell below
+        }
+      }
+      if (!opened) {
+        await shell.openExternal(url);
+      }
       launchedTabCount += 1;
       if (tAct) {
         const t1 = Date.now();

@@ -1472,6 +1472,19 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         if (!/^([a-zA-Z]:|\\\\)/.test(norm)) return null;
         return norm;
       };
+      const normalizeSpawnArgUrl = (rawArg) => {
+        const s = safeLimitedString(String(rawArg || '').trim(), MAX_URL_LENGTH);
+        if (!s) return null;
+        try {
+          const u = new URL(s);
+          const p = String(u.protocol || '').toLowerCase();
+          if (p === 'http:' || p === 'https:') return s;
+          if (isSafeAppLaunchUrl(s)) return s;
+        } catch {
+          return null;
+        }
+        return null;
+      };
 
       const tryLaunchExe = async (raw, spawnArgsForExecutable = []) => {
         const safe = safeLimitedString(raw, MAX_SHORTCUT_PATH_LENGTH);
@@ -1495,12 +1508,25 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         }
         const rawArgs = Array.isArray(spawnArgsForExecutable) ? spawnArgsForExecutable : [];
         const cleaned = [];
+        const argKinds = [];
         for (const a of rawArgs.slice(0, 8)) {
           const n = normalizeSpawnArgPath(a);
-          if (!n) return { ok: false, error: 'Invalid launch argument path' };
-          cleaned.push(n);
+          if (n) {
+            cleaned.push(n);
+            argKinds.push('path');
+            continue;
+          }
+          const u = normalizeSpawnArgUrl(a);
+          if (u) {
+            cleaned.push(u);
+            argKinds.push('url');
+            continue;
+          }
+          return { ok: false, error: 'Invalid launch argument' };
         }
-        for (const argPath of cleaned) {
+        for (let i = 0; i < cleaned.length; i += 1) {
+          if (argKinds[i] !== 'path') continue;
+          const argPath = cleaned[i];
           try {
             if (!fs.existsSync(argPath)) {
               return { ok: false, error: 'Folder or file path not found' };

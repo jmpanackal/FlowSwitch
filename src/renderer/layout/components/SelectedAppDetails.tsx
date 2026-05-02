@@ -44,6 +44,11 @@ import {
   isAppLibraryCategory,
 } from "../../utils/installedAppLibraryCategory";
 import { buildTestLaunchSpawnArgsForFolderContentHost } from "../utils/profileAppTestLaunch";
+import {
+  countAssociatedFolderRoots,
+  countAssociatedNonFolderEntries,
+  getAssociatedContentLimitsForHost,
+} from "../utils/associatedContentHostLimits";
 import { useFlowSnackbar } from "./FlowSnackbar";
 import {
   inspectorFieldLabelClass,
@@ -285,7 +290,7 @@ export function SelectedAppDetails({
     const fromSidebar = selectedApp.source === "sidebar";
     const fromProfileApp =
       (selectedApp.source === "monitor" || selectedApp.source === "minimized")
-      && selectedApp.type === "app";
+      && (selectedApp.type === "app" || selectedApp.type === "browser");
     if (!fromSidebar && !fromProfileApp) return;
     const d = selectedApp.data;
     if (!window.electron?.testLaunchCatalogApp) {
@@ -525,7 +530,7 @@ export function SelectedAppDetails({
     );
 
     const showInspectorTestLaunch =
-      source === "sidebar" || (isProfileSlot && type === "app");
+      source === "sidebar" || (isProfileSlot && (type === "app" || type === "browser"));
 
     return (
     <div className="min-w-0 space-y-6">
@@ -1227,16 +1232,69 @@ export function SelectedAppDetails({
       window.alert("Desktop file picker is not available in this environment.");
       return;
     }
+    const limits = getAssociatedContentLimitsForHost(data.name);
+    const currentFiles = currentData.associatedFiles || [];
+    const existingFolders = countAssociatedFolderRoots(currentFiles);
+    const existingNonFolders = countAssociatedNonFolderEntries(currentFiles);
+
     try {
       const res = await pick({ mode });
       if (res.canceled || !res.entries?.length) return;
-      const dirs = res.entries.filter((e) => e.kind === "directory");
-      const files = res.entries.filter((e) => e.kind === "file");
+      let dirs = res.entries.filter((e) => e.kind === "directory");
+      let files = res.entries.filter((e) => e.kind === "file");
       if (dirs.length && files.length) {
         window.alert("Choose only files or only folders in the same pick — not both.");
         return;
       }
-      const currentFiles = currentData.associatedFiles || [];
+
+      if (
+        limits.maxFolderRoots != null
+        && dirs.length > 0
+      ) {
+        const remainingFolderSlots = Math.max(
+          0,
+          limits.maxFolderRoots - existingFolders,
+        );
+        if (remainingFolderSlots <= 0) {
+          pushSnackbar(
+            `${data.name} already has a folder workspace here. Remove it before adding another folder, or add files instead.`,
+            { variant: "error" },
+          );
+          return;
+        }
+        if (dirs.length > remainingFolderSlots) {
+          pushSnackbar(
+            `${data.name} supports only ${limits.maxFolderRoots} folder workspace here. Added the first folder from your selection.`,
+            { variant: "error" },
+          );
+          dirs = dirs.slice(0, remainingFolderSlots);
+        }
+      }
+
+      if (
+        limits.maxNonFolderEntries != null
+        && files.length > 0
+      ) {
+        const remaining = Math.max(
+          0,
+          limits.maxNonFolderEntries - existingNonFolders,
+        );
+        if (remaining <= 0) {
+          pushSnackbar(
+            `${data.name} reached the maximum number of file attachments for this slot.`,
+            { variant: "error" },
+          );
+          return;
+        }
+        if (files.length > remaining) {
+          pushSnackbar(
+            `Only ${remaining} more file(s) allowed for ${data.name}. Added the first selections.`,
+            { variant: "error" },
+          );
+          files = files.slice(0, remaining);
+        }
+      }
+
       const stamp = Date.now();
       const additions: Array<{
         id: string;
@@ -1275,6 +1333,7 @@ export function SelectedAppDetails({
           });
         }
       }
+      if (!additions.length) return;
       onUpdateAssociatedFiles([...currentFiles, ...additions]);
     } catch {
       window.alert("Could not open the file picker.");
@@ -1292,6 +1351,23 @@ export function SelectedAppDetails({
     }
     const isBrowser = type === 'browser' || data.name?.toLowerCase().includes('chrome') || data.name?.toLowerCase().includes('browser') || data.name?.toLowerCase().includes('firefox') || data.name?.toLowerCase().includes('safari') || data.name?.toLowerCase().includes('edge');
     const appBrowserTabs = getAppBrowserTabs();
+
+    const assocLimits = getAssociatedContentLimitsForHost(data.name);
+    const assocRows = currentData.associatedFiles || [];
+    const assocFolderCount = countAssociatedFolderRoots(assocRows);
+    const folderSlotsLeft =
+      assocLimits.maxFolderRoots == null
+        ? null
+        : Math.max(0, assocLimits.maxFolderRoots - assocFolderCount);
+    const folderAddBlocked =
+      assocLimits.maxFolderRoots != null
+      && folderSlotsLeft !== null
+      && folderSlotsLeft <= 0;
+    const folderAddHint = folderAddBlocked
+      ? `${data.name} supports only one folder workspace on this tile. Remove the folder above or add files instead.`
+      : assocLimits.maxFolderRoots === 1
+        ? "One folder workspace; you can still add multiple files."
+        : undefined;
 
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
@@ -1407,12 +1483,15 @@ export function SelectedAppDetails({
 
         {/* Associated Content (fills remaining tab height) */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
-          <div className="flex min-w-0 shrink-0 flex-wrap items-center justify-between gap-2">
+          <div className="grid min-w-0 shrink-0 grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <label className={`${inspectorSectionPrimaryTitleClass} mb-0 min-w-0`}>
               Associated Content
             </label>
             {onUpdateAssociatedFiles && hasDesktopPicker ? (
-              <div className="relative shrink-0" ref={addAssocMenuRef}>
+              <div
+                className="relative z-[60] flex w-full min-w-0 shrink-0 justify-end overflow-visible sm:w-auto sm:justify-self-end"
+                ref={addAssocMenuRef}
+              >
                 <button
                   type="button"
                   onClick={() => setAddAssocMenuOpen((o) => !o)}
@@ -1423,7 +1502,10 @@ export function SelectedAppDetails({
                   <ChevronDown className="h-3 w-3 shrink-0 opacity-70" aria-hidden />
                 </button>
                 {addAssocMenuOpen ? (
-                  <div className="flow-menu-panel flow-menu-panel-enter absolute right-0 top-full z-[30000] mt-1 w-44 min-w-0 py-0.5">
+                  <div
+                    className="flow-menu-panel flow-menu-panel--compact flow-menu-panel-enter absolute right-0 top-full z-[70] mt-1 max-sm:!max-w-full max-sm:!min-w-0 max-sm:!w-[min(11rem,100%)] py-0.5"
+                    role="menu"
+                  >
                     <button
                       type="button"
                       className="flow-menu-item text-xs"
@@ -1432,14 +1514,31 @@ export function SelectedAppDetails({
                       <Upload className="h-3.5 w-3.5 shrink-0 text-emerald-400" aria-hidden />
                       Add files…
                     </button>
-                    <button
-                      type="button"
-                      className="flow-menu-item text-xs"
-                      onClick={() => void handlePickAssociatedPaths("directory")}
-                    >
-                      <Folder className="h-3.5 w-3.5 shrink-0 text-amber-400/90" aria-hidden />
-                      Add folder…
-                    </button>
+                    {folderAddBlocked ? (
+                      <FlowTooltip label={folderAddHint ?? ""}>
+                        <span className="block w-full">
+                          <button
+                            type="button"
+                            disabled
+                            className="flow-menu-item cursor-not-allowed text-xs opacity-45"
+                          >
+                            <Folder className="h-3.5 w-3.5 shrink-0 text-amber-400/90" aria-hidden />
+                            Add folder…
+                          </button>
+                        </span>
+                      </FlowTooltip>
+                    ) : (
+                      <FlowTooltip label={folderAddHint ?? "Pick one folder to open with this app"}>
+                        <button
+                          type="button"
+                          className="flow-menu-item w-full text-xs"
+                          onClick={() => void handlePickAssociatedPaths("directory")}
+                        >
+                          <Folder className="h-3.5 w-3.5 shrink-0 text-amber-400/90" aria-hidden />
+                          Add folder…
+                        </button>
+                      </FlowTooltip>
+                    )}
                   </div>
                 ) : null}
               </div>
@@ -1527,7 +1626,7 @@ export function SelectedAppDetails({
     activeTab === "overview" ? 0 : activeTab === "launch" ? 1 : 2;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-flow-bg-secondary/95 pt-12">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-flow-bg-secondary/95">
       {/* App Header - Always visible */}
       <div className="border-b border-flow-border/50 bg-flow-surface/30 px-3 py-3 backdrop-blur-sm sm:px-4">
         <div className="flex min-w-0 items-start gap-3 sm:gap-4">

@@ -34,7 +34,14 @@ import { resolveHostExecutableForCatalogLabel } from "../utils/catalogHostResolv
 
 /** Sidebar drag-drop for library folders (wired from MainLayout; uses global `contentLibrary`). */
 export type LibraryFolderPlacementActions = {
-  placeOnMonitor: (monitorId: string, folder: ContentFolder) => void;
+  placeOnMonitor: (
+    monitorId: string,
+    folder: ContentFolder,
+    preferredPlacement?: {
+      position: { x: number; y: number };
+      size: { width: number; height: number };
+    },
+  ) => void;
   placeOnMinimized: (folder: ContentFolder) => void;
 };
 
@@ -262,21 +269,6 @@ export function useLayoutCustomDrag({
         }
       }
 
-      if (
-        dragData.source === "sidebar"
-        && dragData.type === "libraryFolder"
-        && dragData.folder
-      ) {
-        const place = libraryFolderPlacementRef?.current;
-        if (
-          place
-          && currentProfile.monitors?.some((m: { id: string }) => m.id === targetMonitorId)
-        ) {
-          place.placeOnMonitor(targetMonitorId, dragData.folder as ContentFolder);
-        }
-        return;
-      }
-
       const monitorElement = document.querySelector(
         `[data-monitor-id="${targetMonitorId}"].monitor-container`,
       );
@@ -301,10 +293,21 @@ export function useLayoutCustomDrag({
       ) {
         return;
       }
-      const isIncomingApp = dragData.type === "app"
-        && (dragData.source === "sidebar"
-          || dragData.source === "minimized"
-          || (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId));
+      const isSidebarContentLikeDrop =
+        dragData.source === "sidebar"
+        && (
+          dragData.type === "content"
+          || dragData.type === "file"
+          || dragData.type === "libraryFolder"
+        );
+      const isIncomingApp =
+        isSidebarContentLikeDrop
+        || (
+          dragData.type === "app"
+          && (dragData.source === "sidebar"
+            || dragData.source === "minimized"
+            || (dragData.source === "monitor" && sourceMonitorId && sourceMonitorId !== targetMonitorId))
+        );
       // Count **units** (stacked apps = 1 slot) so the dynamic grid reflects
       // the post-drop layout. An incoming stack still lands as a single unit
       // (it will occupy one zone), so the addend is 1 regardless of size.
@@ -368,6 +371,23 @@ export function useLayoutCustomDrag({
       }
 
       if (dragData.source === "sidebar") {
+        if (dragData.type === "libraryFolder" && dragData.folder) {
+          const place = libraryFolderPlacementRef?.current;
+          if (
+            place
+            && currentProfile.monitors?.some((m: { id: string }) => m.id === targetMonitorId)
+          ) {
+            place.placeOnMonitor(
+              targetMonitorId,
+              dragData.folder as ContentFolder,
+              {
+                position,
+                size: snappedSize,
+              },
+            );
+          }
+          return;
+        }
         if (dragData.type === "content" || dragData.type === "file") {
           console.log(
             "🚀 CREATING NEW APP INSTANCE FOR CONTENT/FILE:",
@@ -393,13 +413,16 @@ export function useLayoutCustomDrag({
             dragData.contentType === "link"
             || (dragData.type === "content" && dragData.url)
           ) {
+            const instanceId = `${defaultAppLabel}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
             const newApp: any = {
-              name: dragData.defaultApp,
-              icon: getBrowserIcon(dragData.defaultApp),
+              instanceId,
+              name: defaultAppLabel,
+              icon: getBrowserIcon(defaultAppLabel),
               iconPath: resolvedIconPath,
-              color: getBrowserColor(dragData.defaultApp),
+              ...(hostExe ? { executablePath: hostExe } : {}),
+              color: getBrowserColor(defaultAppLabel),
               position,
-              size: { width: 60, height: 60 },
+              size: snappedSize,
               volume: 50,
               launchBehavior: "new" as const,
               runAsAdmin: false,
@@ -414,11 +437,11 @@ export function useLayoutCustomDrag({
             const newTab = {
               name: dragData.name,
               url: dragData.url,
-              browser: dragData.defaultApp,
+              browser: defaultAppLabel,
               newWindow: false,
               monitorId: targetMonitorId,
               isActive: true,
-              appInstanceId: newApp.instanceId,
+              appInstanceId: instanceId,
               id: `content-tab-${Date.now()}`,
             };
 
@@ -431,7 +454,7 @@ export function useLayoutCustomDrag({
               ...(hostExe ? { executablePath: hostExe } : {}),
               color: getAppColor(defaultAppLabel),
               position,
-              size: { width: 60, height: 60 },
+              size: snappedSize,
               volume: 50,
               launchBehavior: "new" as const,
               runAsAdmin: false,
@@ -527,7 +550,12 @@ export function useLayoutCustomDrag({
         );
       }
     },
-    [currentProfileRef, profileDragActionsRef, libraryFolderPlacementRef],
+    [
+      currentProfileRef,
+      profileDragActionsRef,
+      libraryFolderPlacementRef,
+      installedAppsCatalogRef,
+    ],
   );
 
   const handleDropOnMinimized = useCallback(
@@ -611,6 +639,7 @@ export function useLayoutCustomDrag({
           );
 
           const newApp: any = {
+            instanceId: `${defaultAppLabel}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
             name: defaultAppLabel,
             icon: getAppIcon(defaultAppLabel),
             iconPath: resolvedIconPath,

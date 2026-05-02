@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-04-30  
+Last updated: 2026-05-01  
 Owner: active implementation branch owner
 
 ## Purpose
@@ -59,7 +59,8 @@ Status legend:
 2. Reapply layout without relaunch (`not_started`)
 3. Faster profile access/switching + hotkeys (`not_started`)
 4. Layout editor ergonomics and history (`not_started`)
-5. Responsive behavior for smaller window sizes (`not_started`)
+5. Responsive behavior for smaller window sizes (`mostly_done` for inspector chrome)
+   - **Done on branch `fix/content-launch-followups` (2026-05-01):** associated-content **+ Add** menu stays within the narrow inspector (full-width grid row + width cap); removed dead **`pt-12`** top padding on app/content inspect roots (Launch tab unchanged).
 6. Catalog curation quick commands (`not_started`)
 7. Edit/view affordance + first-run guidance (`not_started`)
 
