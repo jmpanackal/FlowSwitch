@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-04-30  
+Last updated: 2026-05-03  
 Owner: active implementation branch owner
 
 ## Purpose
@@ -33,7 +33,7 @@ Status legend:
 #### P0 - Now
 
 1. Launch visibility and control (`mostly_done`)
-   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step; post-run “Launch summary” shows session outcome chip beside the section title (not bundled with the app counter), launched profile name with elapsed time on a full-width row, and per-app status (quiet OK checkmark vs warn/error/stopped pills, substeps and in-row notes for non-OK, optional “Reused existing window” when applicable); launch inspector uses the launched profile (not canvas selection) and launch-status polling keys off the active launch profile id during runs; one-line cancel context when the run was cancelled; in-run “Run overview” counts (apps/tabs/failed/skipped/awaiting confirmation); human-readable per-action states in details; terminal icons in completed list match outcome (success/warning/failed/skipped).
+   - Current: launch sidebar is implemented; launch tab/sidebar reasserts during active runs; main-window pin preference is wired at launch start; cancel path reports failed cancel attempts in UI; completion is truthful (verify/stabilize must pass, or generic constrained-placement acceptance with explicit warning); executable launches use exe-directory `cwd`; fatal post-launch error dialogs fail the app; timeline labels and inspector warning for constrained verify step; post-run “Launch summary” shows session outcome chip beside the section title (not bundled with the app counter), launched profile name with elapsed time on a full-width row, and per-app status (quiet OK checkmark vs warn/error/stopped pills, substeps and in-row notes for non-OK, optional “Reused existing window” when applicable); **post-run summary lists each associated file/folder with icons** (via `contentItems` through `launchProgressFromStatus`); **apps with associated content show a `sub-content` substep** (“Opening content” / “Opened content”) and Explorer multi-folder runs use an **`opening-content` row step** during post-verify tab automation; launch inspector uses the launched profile (not canvas selection) and launch-status polling keys off the active launch profile id during runs; one-line cancel context when the run was cancelled; in-run “Run overview” counts (apps/tabs/failed/skipped/awaiting confirmation); human-readable per-action states in details; terminal icons in completed list match outcome (success/warning/failed/skipped).
    - Remaining: optional completion feedback tweaks from user testing (e.g. audio cue, taskbar progress) and any copy tuning after real profile runs; optional return of rich per-app hover detail in the post-run summary if dogfood shows a gap.
 
 2. Critical layout-editor responsiveness and shell trust (`mostly_done`)
@@ -59,7 +59,8 @@ Status legend:
 2. Reapply layout without relaunch (`not_started`)
 3. Faster profile access/switching + hotkeys (`not_started`)
 4. Layout editor ergonomics and history (`not_started`)
-5. Responsive behavior for smaller window sizes (`not_started`)
+5. Responsive behavior for smaller window sizes (`mostly_done` for inspector chrome)
+   - **Done on branch `fix/content-launch-followups` (2026-05-01):** associated-content **+ Add** menu stays within the narrow inspector (full-width grid row + width cap); removed dead **`pt-12`** top padding on app/content inspect roots (Launch tab unchanged).
 6. Catalog curation quick commands (`not_started`)
 7. Edit/view affordance + first-run guidance (`not_started`)
 

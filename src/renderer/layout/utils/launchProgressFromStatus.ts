@@ -13,6 +13,7 @@ const APP_STEP_SET = new Set<AppLaunchRowProgress["step"]>([
   "launching",
   "placing",
   "verifying",
+  "opening-content",
   "awaiting-confirmation",
   "done",
   "failed",
@@ -24,6 +25,9 @@ const MAX_SUBSTEPS_PER_ACTION = 32;
 const MAX_LIST_ITEMS = 24;
 const MAX_LIST_STRING_LEN = 256;
 const MAX_ERROR_MESSAGE_LEN = 4000;
+const MAX_CONTENT_ITEMS = 32;
+const MAX_CONTENT_NAME_LEN = 256;
+const MAX_CONTENT_PATH_LEN = 1000;
 
 const ACTION_STATE_SET = new Set<LaunchActionState>([
   "queued",
@@ -87,6 +91,31 @@ function normalizeOptionalCount(raw: unknown): number | null {
   return Math.max(0, Math.floor(n));
 }
 
+function mapLaunchActionContentItems(
+  raw: unknown,
+): LaunchAction["contentItems"] {
+  if (!Array.isArray(raw)) return null;
+  const out: NonNullable<LaunchAction["contentItems"]> = [];
+  const cap = Math.min(raw.length, MAX_CONTENT_ITEMS);
+  for (let i = 0; i < cap; i += 1) {
+    const o = raw[i] && typeof raw[i] === "object" ? (raw[i] as Record<string, unknown>) : {};
+    let name = String(o.name ?? "").trim();
+    if (name.length > MAX_CONTENT_NAME_LEN) name = name.slice(0, MAX_CONTENT_NAME_LEN);
+    let path = String(o.path ?? "").trim();
+    if (path.length > MAX_CONTENT_PATH_LEN) path = path.slice(0, MAX_CONTENT_PATH_LEN);
+    const pathOrNull = path || null;
+    const typeRaw = String(o.type ?? "").trim().toLowerCase();
+    const type: "folder" | "file" = typeRaw === "folder" ? "folder" : "file";
+    if (!name && !pathOrNull) continue;
+    out.push({
+      name: name || pathOrNull || "Content item",
+      type,
+      path: pathOrNull,
+    });
+  }
+  return out.length ? out : null;
+}
+
 function mapLaunchActionSubstep(
   raw: unknown,
   index: number,
@@ -124,6 +153,9 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
   const failureKind = normalizeFailureKind(o.failureKind);
   const locRaw = String(o.targetLocation ?? "").trim();
   const targetLocation = locRaw ? locRaw.slice(0, MAX_LIST_STRING_LEN) : null;
+  const modeRaw = String(o.contentSubstepMode ?? "").trim().toLowerCase();
+  const contentSubstepMode: LaunchAction["contentSubstepMode"] =
+    modeRaw === "post-verify" || modeRaw === "parallel-launch" ? modeRaw : null;
   return {
     id,
     kind,
@@ -133,6 +165,9 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
     iconDataUrl: iconValidated ?? null,
     pills: normalizeStringList(o.pills),
     smartDecisions: normalizeStringList(o.smartDecisions),
+    contentItems: mapLaunchActionContentItems(o.contentItems),
+    contentSubstepMode,
+    contentOpenFailed: Boolean(o.contentOpenFailed),
     errorMessage,
     failureKind,
     startedAtMs: optionalFiniteMs(o.startedAtMs ?? o.startedAt),

@@ -141,3 +141,30 @@ test('cancelRun rejects non-active run id', () => {
   assert.equal(cancel.ok, false);
   assert.equal(store.isActiveRun('profile-1', second.runId), true);
 });
+
+test('launch action content items survive status cloning', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  store.publishStatus('profile-1', run.runId, {
+    state: 'complete',
+    actions: [
+      {
+        id: 'app:explorer',
+        kind: 'app',
+        title: 'File Explorer',
+        state: 'completed',
+        smartDecisions: ['3 folders opened with this app'],
+        contentItems: [
+          { name: 'styles', type: 'folder', path: 'C:\\Work\\styles' },
+          { name: 'product', type: 'folder', path: 'C:\\Work\\product' },
+        ],
+      },
+    ],
+  });
+
+  const status = store.getStatus('profile-1');
+  assert.deepEqual(status?.actions?.[0]?.contentItems, [
+    { name: 'styles', type: 'folder', path: 'C:\\Work\\styles' },
+    { name: 'product', type: 'folder', path: 'C:\\Work\\product' },
+  ]);
+});

@@ -345,7 +345,7 @@ export default function App() {
 
   const { apps: installedCatalogApps } = useInstalledApps();
   const installedAppsCatalogRef = useRef<
-    { name: string; iconPath: string | null }[] | null
+    { name: string; iconPath: string | null; executablePath?: string | null }[] | null
   >(null);
   installedAppsCatalogRef.current = installedCatalogApps;
   const getInstalledAppsCatalog = useCallback(
@@ -605,7 +605,7 @@ export default function App() {
 
   libraryFolderPlacementRef.current = currentProfile
     ? {
-        placeOnMonitor: (monitorId, folder) => {
+        placeOnMonitor: (monitorId, folder, preferredPlacement) => {
           placeSidebarLibraryFolderOnMonitor({
             profile: currentProfile,
             monitorId,
@@ -614,6 +614,7 @@ export default function App() {
             libraryItems: contentLibrary.items as ContentItem[],
             getInstalledAppsCatalog,
             addApp,
+            preferredPlacement,
           });
         },
         placeOnMinimized: (folder) => {
@@ -951,13 +952,14 @@ export default function App() {
   }, []);
 
   const handleLibraryPlaceOnMonitor = useCallback(
-    (monitorId: string) => {
-      if (!currentProfile || !contentInspectorSelection) return;
-      if (contentInspectorSelection.kind === "item") {
+    (monitorId: string, selectionOverride?: LibrarySelection | null) => {
+      const selection = selectionOverride || contentInspectorSelection;
+      if (!currentProfile || !selection) return;
+      if (selection.kind === "item") {
         placeSidebarContentOnMonitor({
           profile: currentProfile,
           monitorId,
-          item: contentInspectorSelection.item,
+          item: selection.item,
           getInstalledAppsCatalog,
           addApp,
           addBrowserTab,
@@ -966,7 +968,7 @@ export default function App() {
         placeSidebarLibraryFolderOnMonitor({
           profile: currentProfile,
           monitorId,
-          folder: contentInspectorSelection.folder,
+          folder: selection.folder,
           folders: contentLibrary.folders as ContentFolder[],
           libraryItems: contentLibrary.items as ContentItem[],
           getInstalledAppsCatalog,
@@ -987,12 +989,13 @@ export default function App() {
     ],
   );
 
-  const handleLibraryPlaceOnMinimized = useCallback(() => {
-    if (!currentProfile || !contentInspectorSelection) return;
-    if (contentInspectorSelection.kind === "item") {
+  const handleLibraryPlaceOnMinimized = useCallback((selectionOverride?: LibrarySelection | null) => {
+    const selection = selectionOverride || contentInspectorSelection;
+    if (!currentProfile || !selection) return;
+    if (selection.kind === "item") {
       placeSidebarContentOnMinimized({
         profile: currentProfile,
-        item: contentInspectorSelection.item,
+        item: selection.item,
         getInstalledAppsCatalog,
         addAppToMinimized,
         addBrowserTab,
@@ -1000,7 +1003,7 @@ export default function App() {
     } else {
       placeSidebarLibraryFolderOnMinimized({
         profile: currentProfile,
-        folder: contentInspectorSelection.folder,
+        folder: selection.folder,
         folders: contentLibrary.folders as ContentFolder[],
         libraryItems: contentLibrary.items as ContentItem[],
         getInstalledAppsCatalog,
@@ -2765,6 +2768,7 @@ export default function App() {
                   selection={contentInspectorSelection}
                   libraryItems={contentLibrary.items as ContentItem[]}
                   libraryFolders={contentLibrary.folders as ContentFolder[]}
+                  opensWithApps={installedCatalogApps.map((a) => String(a?.name || "").trim()).filter(Boolean)}
                   onChangeDefaultApp={handleLibraryChangeDefaultApp}
                   excludedFromActiveProfile={resolvedLibraryEntryExcluded}
                   onToggleExcludeFromActiveProfile={() => {
@@ -2860,9 +2864,11 @@ export default function App() {
                   }
                   return null;
                 })()}
-                {dragState.dragData.fileIcon && (
-                  <dragState.dragData.fileIcon className="w-4.5 h-4.5 text-white drop-shadow-sm" />
-                )}
+                {dragState.dragData.fileIcon ? (
+                  <span className="absolute -bottom-1 -left-1 inline-flex h-3.5 w-3.5 items-center justify-center rounded-full border border-white/70 bg-flow-bg-secondary">
+                    <dragState.dragData.fileIcon className="h-2.5 w-2.5 text-flow-text-primary" />
+                  </span>
+                ) : null}
               </div>
 
               {/* Direction indicator */}

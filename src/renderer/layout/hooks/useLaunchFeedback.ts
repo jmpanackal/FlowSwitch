@@ -8,6 +8,7 @@ export type AppLaunchRowProgress = {
     | "launching"
     | "placing"
     | "verifying"
+    | "opening-content"
     | "awaiting-confirmation"
     | "done"
     | "failed"
@@ -53,6 +54,15 @@ export type LaunchAction = {
   iconDataUrl?: string | null;
   pills?: string[] | null;
   smartDecisions?: string[] | null;
+  contentItems?: Array<{
+    name: string;
+    type?: "file" | "folder" | string | null;
+    path?: string | null;
+  }> | null;
+  /** When set, app timeline includes a `sub-content` substep (parallel with launch vs after verify). */
+  contentSubstepMode?: "post-verify" | "parallel-launch" | null;
+  /** Main-only hint: post-verify content automation failed (maps to failed `sub-content`). */
+  contentOpenFailed?: boolean | null;
   errorMessage?: string | null;
   failureKind?: "launch" | "placement" | "verification" | null;
   startedAtMs?: number | null;

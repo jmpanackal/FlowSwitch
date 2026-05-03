@@ -38,9 +38,10 @@ type Props = {
     nextApp: string,
     scope: "item" | "folder",
   ) => void;
-  onPlaceOnMonitor: (monitorId: string) => void;
-  onPlaceOnMinimized: () => void;
+  onPlaceOnMonitor: (monitorId: string, selection: LibrarySelection) => void;
+  onPlaceOnMinimized: (selection: LibrarySelection) => void;
   monitors: { id: string; name?: string; primary?: boolean }[];
+  opensWithApps?: string[];
   /** Hidden from the compact list for the active profile only (library entry remains). */
   excludedFromActiveProfile?: boolean;
   onToggleExcludeFromActiveProfile?: () => void;
@@ -58,6 +59,7 @@ export function SelectedContentDetails({
   onPlaceOnMonitor,
   onPlaceOnMinimized,
   monitors,
+  opensWithApps,
   excludedFromActiveProfile,
   onToggleExcludeFromActiveProfile,
   onDeleteFromLibrary,
@@ -272,7 +274,7 @@ export function SelectedContentDetails({
   };
 
   const appOptions = useMemo(() => {
-    const base = getCompatibleOpensWithApps(selection);
+    const base = getCompatibleOpensWithApps(selection, opensWithApps);
     const seen = new Set<string>();
     const out: string[] = [];
     const push = (a: string) => {
@@ -292,6 +294,7 @@ export function SelectedContentDetails({
     isFolder ? diskPath : selection.item.path,
     isFolder ? undefined : selection.item.url,
     isFolder ? undefined : selection.item.isFolder,
+    opensWithApps,
   ]);
 
   const tabs: { id: ContentInspectorTab; label: string; icon: LucideIcon }[] = [
@@ -574,7 +577,7 @@ export function SelectedContentDetails({
               <button
                 key={m.id}
                 type="button"
-                onClick={() => onPlaceOnMonitor(m.id)}
+                onClick={() => onPlaceOnMonitor(m.id, selection)}
                 className={inspectorPanelListButtonClass}
               >
                 {(m.name || m.id) + (m.primary ? " (primary)" : "")}
@@ -585,7 +588,7 @@ export function SelectedContentDetails({
           )}
           <button
             type="button"
-            onClick={onPlaceOnMinimized}
+            onClick={() => onPlaceOnMinimized(selection)}
             className={inspectorPanelListButtonClass}
           >
             Minimized row
@@ -596,8 +599,8 @@ export function SelectedContentDetails({
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col pt-12">
-      <div className="border-b border-flow-border/50 px-3 pb-3 sm:px-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-col">
+      <div className="border-b border-flow-border/50 px-3 pt-3 pb-3 sm:px-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 shrink-0 text-flow-text-muted">
             {isFolder ? (

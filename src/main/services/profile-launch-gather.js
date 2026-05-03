@@ -69,24 +69,83 @@ const createProfileLaunchGatherers = ({
         return fp;
       };
 
+      /**
+       * File Explorer: one argv per folder path, or `/select,<path>` for files (see ss64.com/nt/explorer.html).
+       * Order matches associatedFiles; de-duplicates by lowercase path.
+       */
+      const buildWindowsExplorerSpawnArgsFromAssociatedFiles = (associatedFiles) => {
+        if (process.platform !== 'win32') return [];
+        const rows = Array.isArray(associatedFiles) ? associatedFiles : [];
+        const out = [];
+        const seen = new Set();
+        const pushUnique = (token) => {
+          const t = String(token || '').trim();
+          if (!t) return;
+          const k = t.toLowerCase();
+          if (seen.has(k)) return;
+          seen.add(k);
+          out.push(t);
+        };
+        for (const row of rows) {
+          if (!row) continue;
+          const typ = String(row.type || '').trim().toLowerCase();
+          let fp = String(row.path || '').trim().replace(/\//g, '\\');
+          try {
+            fp = path.normalize(fp);
+          } catch {
+            continue;
+          }
+          if (!fp || fp.includes('..') || !/^([a-zA-Z]:|\\\\)/.test(fp)) continue;
+          try {
+            if (!fs.existsSync(fp)) continue;
+            const st = fs.statSync(fp);
+            if (st.isDirectory()) {
+              const folderPath = resolveWindowsFolderTargetPath({ ...row, type: 'folder', path: fp });
+              if (folderPath) pushUnique(folderPath);
+              continue;
+            }
+            if (!st.isFile()) continue;
+          } catch {
+            continue;
+          }
+          if (typ === 'folder') {
+            const folderPath = resolveWindowsFolderTargetPath(row);
+            if (folderPath) pushUnique(folderPath);
+            continue;
+          }
+          const norm = fp.replace(/\//g, '\\');
+          const selectArg = /\s/.test(norm) ? `/select,"${norm}"` : `/select,${norm}`;
+          pushUnique(selectArg);
+        }
+        return out;
+      };
+
+      const isWindowsExplorerExecutablePath = (exePath) => {
+        const p = String(exePath || '').trim().replace(/\//g, '\\').toLowerCase();
+        return p.endsWith('\\explorer.exe');
+      };
+
       let spawnArgsForExecutable = null;
       const af = Array.isArray(app?.associatedFiles) ? app.associatedFiles : [];
       const folderEntry = af.find((f) => f && String(f.type || '').toLowerCase() === 'folder'
         && String(f.path || '').trim());
       const folderTarget = folderEntry ? resolveWindowsFolderTargetPath(folderEntry) : '';
+      const explorerSpawnArgs = buildWindowsExplorerSpawnArgsFromAssociatedFiles(af);
 
-      if (folderTarget && executablePath) {
-        // Host .exe (Explorer, VS Code, etc.) should receive the folder path so it opens the content.
+      if (executablePath && isWindowsExplorerExecutablePath(executablePath) && explorerSpawnArgs.length > 0) {
+        spawnArgsForExecutable = explorerSpawnArgs;
+      } else if (folderTarget && executablePath) {
+        // Non-Explorer hosts (VS Code, etc.): first folder path only — same as before.
         spawnArgsForExecutable = [folderTarget];
       }
 
-      if (!executablePath && !shortcutPath && !launchUrl && process.platform === 'win32' && folderTarget) {
+      if (!executablePath && !shortcutPath && !launchUrl && process.platform === 'win32' && explorerSpawnArgs.length > 0) {
         const windir = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
         const explorerExe = path.join(windir, 'explorer.exe');
         try {
           if (fs.existsSync(explorerExe) && fs.statSync(explorerExe).isFile()) {
             executablePath = explorerExe;
-            spawnArgsForExecutable = [folderTarget];
+            spawnArgsForExecutable = explorerSpawnArgs;
           }
         } catch {
           // ignore

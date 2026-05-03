@@ -12,6 +12,7 @@ const normalizeAppLaunchStep = (value) => {
     'launching',
     'placing',
     'verifying',
+    'opening-content',
     'awaiting-confirmation',
     'done',
     'failed',
@@ -66,6 +67,12 @@ const normalizeLaunchFailureKind = (value) => {
   return allowed.has(normalized) ? normalized : null;
 };
 
+const normalizeContentSubstepMode = (value) => {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (normalized === 'post-verify' || normalized === 'parallel-launch') return normalized;
+  return null;
+};
+
 const clampString = (value, maxLen, { allowNull = false } = {}) => {
   if (value == null) return allowNull ? null : '';
   const s = String(value).trim();
@@ -93,6 +100,27 @@ const cloneStringList = (value, { cap = 32, maxItemLen = 256 } = {}) => {
     .slice(0, Math.max(0, cap))
     .map((item) => clampString(item, maxItemLen, { allowNull: false }))
     .filter((s) => Boolean(s));
+  return items.length ? items : [];
+};
+
+const cloneLaunchActionContentItems = (value) => {
+  if (value == null) return null;
+  if (!Array.isArray(value)) return null;
+  const items = value
+    .slice(0, 32)
+    .map((item) => {
+      const name = clampString(item?.name, 256);
+      const path = clampString(item?.path, 1000, { allowNull: true });
+      const typeRaw = clampString(item?.type, 32, { allowNull: true });
+      const type = typeRaw === 'folder' ? 'folder' : 'file';
+      if (!name && !path) return null;
+      return {
+        name: name || path || 'Content item',
+        type,
+        path,
+      };
+    })
+    .filter(Boolean);
   return items.length ? items : [];
 };
 
@@ -126,6 +154,9 @@ const cloneLaunchActions = (value) => {
     const endedAtMs = clampNullableFiniteNumber(item?.endedAtMs ?? item?.endedAt);
     const pills = cloneStringList(item?.pills, { cap: 16, maxItemLen: 256 });
     const smartDecisions = cloneStringList(item?.smartDecisions, { cap: 16, maxItemLen: 256 });
+    const contentItems = cloneLaunchActionContentItems(item?.contentItems);
+    const contentSubstepMode = normalizeContentSubstepMode(item?.contentSubstepMode);
+    const contentOpenFailed = Boolean(item?.contentOpenFailed);
     const errorMessage = clampString(item?.errorMessage, 4000, { allowNull: true });
     const failureKind = normalizeLaunchFailureKind(item?.failureKind);
     const substeps = cloneLaunchActionSubsteps(item?.substeps);
@@ -141,6 +172,9 @@ const cloneLaunchActions = (value) => {
       iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
       pills,
       smartDecisions,
+      contentItems,
+      contentSubstepMode,
+      contentOpenFailed,
       errorMessage,
       failureKind,
       startedAtMs,

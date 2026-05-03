@@ -20,6 +20,7 @@ import type {
   LaunchProgressSnapshot,
 } from "../hooks/useLaunchFeedback";
 import { safeIconSrc } from "../../utils/safeIconSrc";
+import { FileIcon } from "./FileIcon";
 import {
   computeEta,
   computeSubstepWeightedProgress,
@@ -138,6 +139,8 @@ function stepLabel(row: Row): string {
       return "Positioning";
     case "verifying":
       return "Verifying";
+    case "opening-content":
+      return "Opening content";
     case "awaiting-confirmation":
       return "Confirmation";
     case "done":
@@ -170,6 +173,7 @@ function actionLooksLaunched(
   if (
     step === "placing"
     || step === "verifying"
+    || step === "opening-content"
     || step === "awaiting-confirmation"
     || step === "done"
   ) {
@@ -200,6 +204,8 @@ function stepBadgeClasses(step: Row["step"]): string {
       return "bg-violet-500/20 text-violet-200 ring-1 ring-violet-400/35";
     case "verifying":
       return "bg-indigo-500/20 text-indigo-200 ring-1 ring-indigo-400/35";
+    case "opening-content":
+      return "bg-teal-500/20 text-teal-100 ring-1 ring-teal-400/35";
     case "awaiting-confirmation":
       return "bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/35";
     case "done":
@@ -369,12 +375,55 @@ function appSummaryBadgeMeta(status: AppSummaryStatus): {
   }
 }
 
-function cleanAppSummaryLine(action: LaunchAction): string {
+function appSummaryDecisionLines(action: LaunchAction): {
+  reusableNote: string | null;
+  contentNotes: string[];
+  contentItems: NonNullable<LaunchAction["contentItems"]>;
+} {
   const decisions = Array.isArray(action.smartDecisions)
     ? action.smartDecisions.map((d) => String(d || "").trim()).filter(Boolean)
     : [];
-  const reused = decisions.some((d) => /^(?:reusing|reused) existing window$/i.test(d));
-  return reused ? "Launched · Reused existing window" : "Launched";
+  const reused = decisions.find((d) => /^(?:reusing|reused) existing window$/i.test(d)) || null;
+  const contentNotes = decisions.filter((d) => {
+    const lc = d.toLowerCase();
+    return lc.includes("content item")
+      || lc.includes("file opened with this app")
+      || lc.includes("files opened with this app")
+      || lc.includes("folder opened with this app")
+      || lc.includes("folders opened with this app")
+      || lc.includes("files opened:")
+      || lc.includes("linked to this app")
+      || lc.includes("link opened with this app")
+      || lc.includes("links opened with this app")
+      || lc.includes("links opened:")
+      || lc.startsWith("content:")
+      || lc.startsWith("links:");
+  });
+  return {
+    reusableNote: reused ? "Reused existing window" : null,
+    contentNotes,
+    contentItems: Array.isArray(action.contentItems) ? action.contentItems : [],
+  };
+}
+
+/** Matches main-process aggregate copy from `buildInitialContentSmartDecisions`. */
+function isAggregateFolderFileOpenedSummaryLine(text: string): boolean {
+  const t = text.trim();
+  return /^\d+\s+folders?\s+opened\s+with\s+this\s+app\.?$/i.test(t)
+    || /^\d+\s+files?\s+opened\s+with\s+this\s+app\.?$/i.test(t);
+}
+
+function fileIconTypeForLaunchSummaryItem(item: {
+  type?: string | null;
+  path?: string | null;
+  name?: string | null;
+}): string {
+  if (String(item?.type || "").trim().toLowerCase() === "folder") return "folder";
+  const raw = String(item.path || item.name || "").trim();
+  const seg = raw.replace(/\\/g, "/").split("/").pop() || "";
+  const dot = seg.lastIndexOf(".");
+  if (dot <= 0 || dot >= seg.length - 1) return "default";
+  return seg.slice(dot + 1).toLowerCase() || "default";
 }
 
 function LaunchSummarySubstepIcon({
@@ -417,11 +466,18 @@ function LaunchSummaryAppRow({
     : null;
   const warningNote = status === "warn" ? pickNonTrivialSmartDecisionLine(action) : null;
   const errorNote = status === "error" ? (action.errorMessage || "").trim() : "";
-  const cleanLine = cleanAppSummaryLine(action);
-  const okReuseNote =
-    status === "ok" && cleanLine !== "Launched"
-      ? cleanLine.replace(/^Launched · /, "")
-      : null;
+  const decisionLines = appSummaryDecisionLines(action);
+  const contentItems = decisionLines.contentItems;
+  const structuredContent = contentItems.length > 0;
+  const contentNotesForOk = structuredContent
+    ? decisionLines.contentNotes.filter((n) => !isAggregateFolderFileOpenedSummaryLine(n))
+    : decisionLines.contentNotes;
+  const okNotes = status === "ok"
+    ? [
+      ...contentNotesForOk,
+      ...(decisionLines.reusableNote ? [decisionLines.reusableNote] : []),
+    ]
+    : [];
   const okPrimary = status === "ok" ? (
     <span
       className="flex h-6 w-6 shrink-0 items-center justify-center self-start text-emerald-400/95"
@@ -437,8 +493,36 @@ function LaunchSummaryAppRow({
   );
   const detailBody =
     status === "ok" ? (
-      okReuseNote ? (
-        <p className="text-[11px] leading-snug text-flow-text-secondary break-words">{okReuseNote}</p>
+      okNotes.length > 0 || contentItems.length > 0 ? (
+        <div className="space-y-1">
+          {okNotes.length > 0 ? (
+            <ul className="space-y-0.5">
+              {okNotes.map((note) => (
+                <li key={note} className="text-[11px] leading-snug text-flow-text-secondary break-words">
+                  {note}
+                </li>
+              ))}
+            </ul>
+          ) : null}
+          {contentItems.length > 0 ? (
+            <ul className="space-y-0.5 rounded-lg bg-white/[0.025] px-2 py-1 ring-1 ring-white/5">
+              {contentItems.map((item, index) => {
+                const name = String(item?.name || item?.path || "Content item").trim();
+                const key = `${String(item?.path || name)}:${index}`;
+                return (
+                  <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-snug text-flow-text-secondary">
+                    <span className="shrink-0 leading-none" aria-hidden>
+                      <FileIcon type={fileIconTypeForLaunchSummaryItem(item)} className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="min-w-0 truncate" title={String(item?.path || name)}>
+                      {name}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
       ) : null
     ) : (
       <ul className="space-y-0.5">
@@ -565,6 +649,8 @@ function stepProgress(step: Row["step"]): number {
       return 0.72;
     case "verifying":
       return 0.88;
+    case "opening-content":
+      return 0.93;
     case "awaiting-confirmation":
       return 0.85;
     case "done":

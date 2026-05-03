@@ -368,6 +368,25 @@ export function useMainLayoutProfileMutations({
       prev.map((profile) => {
         if (profile.id !== profileId) return profile;
 
+        const monitor = profile.monitors.find((m) => m.id === monitorId);
+        const appToRemove = monitor?.apps?.[appIndex];
+        const removedFilesCount = Array.isArray(appToRemove?.associatedFiles)
+          ? appToRemove.associatedFiles.length
+          : 0;
+        const removedInstanceId = String(appToRemove?.instanceId || "").trim();
+        const removedAppName = String(appToRemove?.name || "").trim();
+        const nextBrowserTabs = (profile.browserTabs || []).filter((tab: any) => {
+          const tabMonitorId = String(tab?.monitorId || "").trim();
+          const tabBrowser = String(tab?.browser || "").trim();
+          const tabInstanceId = String(tab?.appInstanceId || "").trim();
+          if (tabMonitorId !== monitorId) return true;
+          if (removedInstanceId && tabInstanceId) {
+            return tabInstanceId !== removedInstanceId;
+          }
+          return tabBrowser !== removedAppName;
+        });
+        const removedTabsCount = (profile.browserTabs || []).length - nextBrowserTabs.length;
+
         return {
           ...profile,
           monitors: profile.monitors.map((monitor) => {
@@ -380,7 +399,10 @@ export function useMainLayoutProfileMutations({
               ),
             };
           }),
+          browserTabs: nextBrowserTabs,
           appCount: Math.max(0, profile.appCount - 1),
+          tabCount: Math.max(0, (profile.tabCount || 0) - removedTabsCount),
+          fileCount: Math.max(0, (profile.fileCount || 0) - removedFilesCount),
         };
       }),
     );
@@ -402,12 +424,39 @@ export function useMainLayoutProfileMutations({
             "Unknown",
         });
 
+        const minimizedApp = (profile.minimizedApps || [])[appIndex];
+        const removedFilesCount = Array.isArray(minimizedApp?.associatedFiles)
+          ? minimizedApp.associatedFiles.length
+          : 0;
+        const removedInstanceId = String(minimizedApp?.instanceId || "").trim();
+        const removedAppName = String(minimizedApp?.name || "").trim();
+        const removedTargetMonitor = String(
+          minimizedApp?.targetMonitor
+            || profile.monitors.find((m) => m.primary)?.id
+            || profile.monitors[0]?.id
+            || "",
+        ).trim();
+        const nextBrowserTabs = (profile.browserTabs || []).filter((tab: any) => {
+          const tabMonitorId = String(tab?.monitorId || "").trim();
+          const tabBrowser = String(tab?.browser || "").trim();
+          const tabInstanceId = String(tab?.appInstanceId || "").trim();
+          if (removedTargetMonitor && tabMonitorId !== removedTargetMonitor) return true;
+          if (removedInstanceId && tabInstanceId) {
+            return tabInstanceId !== removedInstanceId;
+          }
+          return tabBrowser !== removedAppName;
+        });
+        const removedTabsCount = (profile.browserTabs || []).length - nextBrowserTabs.length;
+
         return {
           ...profile,
           minimizedApps: (profile.minimizedApps || []).filter(
             (_, index) => index !== appIndex,
           ),
+          browserTabs: nextBrowserTabs,
           appCount: Math.max(0, profile.appCount - 1),
+          tabCount: Math.max(0, (profile.tabCount || 0) - removedTabsCount),
+          fileCount: Math.max(0, (profile.fileCount || 0) - removedFilesCount),
         };
       }),
     );

@@ -8,18 +8,49 @@ export type CatalogRowForHostExe = {
   executablePath?: string | null;
 };
 
+const HOST_APP_ALIAS_GROUPS = [
+  ["file explorer", "windows explorer", "explorer"],
+  ["microsoft edge", "edge"],
+  ["google chrome", "chrome"],
+  ["mozilla firefox", "firefox"],
+  ["visual studio code", "vscode", "code"],
+  ["cursor", "cursor editor"],
+];
+
+function normalizeLabel(raw: string): string {
+  return String(raw || "")
+    .trim()
+    .toLowerCase()
+    .replace(/\s+/g, " ");
+}
+
+function candidateHostNames(appName: string): string[] {
+  const base = normalizeLabel(appName);
+  if (!base) return [];
+  const out = new Set<string>([base]);
+  const group = HOST_APP_ALIAS_GROUPS.find((g) => g.includes(base));
+  if (group) {
+    for (const alias of group) out.add(alias);
+  }
+  return Array.from(out);
+}
+
 export function resolveInstalledCatalogExecutableExact(
   catalog: CatalogRowForHostExe[] | null | undefined,
   appName: string,
 ): string | null {
   if (!catalog?.length || !String(appName || "").trim()) return null;
-  const tl = String(appName).trim().toLowerCase();
-  const row = catalog.find((a) => String(a?.name || "").trim().toLowerCase() === tl);
-  const ex = row?.executablePath;
-  if (typeof ex !== "string") return null;
-  const t = ex.trim();
-  if (!t.toLowerCase().endsWith(".exe")) return null;
-  return t;
+  const names = candidateHostNames(appName);
+  if (names.length === 0) return null;
+  for (const name of names) {
+    const row = catalog.find((a) => normalizeLabel(String(a?.name || "")) === name);
+    const ex = row?.executablePath;
+    if (typeof ex !== "string") continue;
+    const t = ex.trim();
+    if (!t.toLowerCase().endsWith(".exe")) continue;
+    return t;
+  }
+  return null;
 }
 
 /** Catalog miss: stable Windows host for the built-in File Explorer label. */
@@ -33,9 +64,10 @@ export function resolveHostExecutableForCatalogLabel(
   catalog: CatalogRowForHostExe[] | null | undefined,
   appName: string,
 ): string | null {
+  const normalized = normalizeLabel(appName);
   return (
     resolveInstalledCatalogExecutableExact(catalog, appName)
-    ?? (String(appName || "").trim().toLowerCase() === "file explorer"
+    ?? (normalized === "file explorer" || normalized === "windows explorer" || normalized === "explorer"
       ? fallbackWindowsFileExplorerExe()
       : null)
   );

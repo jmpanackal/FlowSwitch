@@ -3,6 +3,8 @@ const { isWindowOnTargetMonitor } = require('./monitor-map');
 
 const WINDOW_CLASS_RESIDUAL_POLICIES = {
   chrome_widgetwin_1: { left: 8, top: 0, width: -16, height: -8 },
+  /** Win11 File Explorer: DWM visible client vs outer frame differs from requested DIP bounds. */
+  cabinetwclass: { left: 8, top: 0, width: -16, height: -8 },
 };
 
 const normalizePlacementClassKey = (value) => String(value || '').trim().toLowerCase();
@@ -21,11 +23,40 @@ const getClassResidualCalibration = (className) => {
   };
 };
 
-const getVerificationTolerancePx = (processHintLc) => (
-  isChromiumFamilyProcessKey(String(processHintLc || '').trim().toLowerCase())
-    ? 6
-    : 5
-);
+const getVerificationTolerancePx = (processHintLc) => {
+  const key = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+  if (isChromiumFamilyProcessKey(key)) return 6;
+  if (key === 'explorer') return 18;
+  return 5;
+};
+
+/**
+ * Explorer often ignores exact client size; accept placement when the window substantially
+ * covers the requested slot on the target monitor.
+ */
+const explorerLoosePlacementAccepts = ({ visibleRect, bounds, monitor, processHintLc }) => {
+  const key = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+  if (key !== 'explorer') return false;
+  if (!visibleRect || !bounds || bounds.state !== 'normal' || !monitor) return false;
+  if (!isWindowOnTargetMonitor({ rect: visibleRect, monitor })) return false;
+  const bx = Number(bounds.left || 0);
+  const by = Number(bounds.top || 0);
+  const bw = Math.max(0, Number(bounds.width || 0));
+  const bh = Math.max(0, Number(bounds.height || 0));
+  const vx = Number(visibleRect.left || 0);
+  const vy = Number(visibleRect.top || 0);
+  const vw = Math.max(0, Number(visibleRect.width || 0));
+  const vh = Math.max(0, Number(visibleRect.height || 0));
+  const desiredArea = bw * bh;
+  if (desiredArea <= 0) return false;
+  const ix1 = Math.max(bx, vx);
+  const iy1 = Math.max(by, vy);
+  const ix2 = Math.min(bx + bw, vx + vw);
+  const iy2 = Math.min(by + bh, vy + vh);
+  if (ix2 <= ix1 || iy2 <= iy1) return false;
+  const intersectionArea = (ix2 - ix1) * (iy2 - iy1);
+  return (intersectionArea / desiredArea) >= 0.28;
+};
 
 const isRectCloseToTargetBounds = (rect, bounds, tolerancePx = 6) => {
   if (!rect || !bounds) return false;
@@ -113,6 +144,17 @@ const createVerifyAndCorrectWindowPlacement = (deps) => {
         verificationTolerancePx,
       );
       if (onTargetMonitor && closeToTargetBounds) {
+        return { verified: true, corrected: attempt > 0 };
+      }
+      if (
+        onTargetMonitor
+        && explorerLoosePlacementAccepts({
+          visibleRect,
+          bounds: desiredVisibleBounds,
+          monitor,
+          processHintLc,
+        })
+      ) {
         return { verified: true, corrected: attempt > 0 };
       }
       if (attempt >= maxCorrections) break;
@@ -217,4 +259,5 @@ const createVerifyAndCorrectWindowPlacement = (deps) => {
 module.exports = {
   createVerifyAndCorrectWindowPlacement,
   isRectCloseToTargetBounds,
+  explorerLoosePlacementAccepts,
 };

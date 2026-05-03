@@ -1433,9 +1433,22 @@ export function MonitorLayout({
     position: { x: number; y: number },
   ) => SnapZone | null;
 
+  const isAppLikeGlobalDragData = useCallback((dragData: any) => {
+    if (!dragData) return false;
+    if (dragData.type === "app") return true;
+    return (
+      dragData.source === "sidebar"
+      && (
+        dragData.type === "content"
+        || dragData.type === "file"
+        || dragData.type === "libraryFolder"
+      )
+    );
+  }, []);
+
   // Sidebar/minimized drags must not leave in-monitor drag state (was snapping wrong monitor).
   useEffect(() => {
-    if (!dragState?.isDragging || !dragState.dragData || dragState.dragData.type !== 'app') {
+    if (!dragState?.isDragging || !isAppLikeGlobalDragData(dragState.dragData)) {
       return;
     }
     const src = dragState.dragData.source;
@@ -1453,7 +1466,7 @@ export function MonitorLayout({
       stackHoverTargetAppIndex: null,
       lastValidSnapState: null,
     });
-  }, [dragState?.isDragging, dragState?.dragData?.source, dragState?.dragData?.type]);
+  }, [dragState?.isDragging, dragState?.dragData, isAppLikeGlobalDragData]);
 
   // Global layout drag (MainLayout) and in-monitor percent drag are supposed to end together.
   // If anything clears global first or `onUpdateApp` throws, never leave `localDragState.isDragging`
@@ -1495,7 +1508,7 @@ export function MonitorLayout({
       return;
     }
 
-    if (!dragState?.isDragging || !dragState.dragData || dragState.dragData.type !== 'app') {
+    if (!dragState?.isDragging || !isAppLikeGlobalDragData(dragState.dragData)) {
       dragPointerPositionRef.current = null;
       setMinimizedDropPreviewMonitorId(null);
       setExternalSnapState({
@@ -1680,6 +1693,7 @@ export function MonitorLayout({
     dragState?.dragData,
     isEditMode,
     monitors,
+    isAppLikeGlobalDragData,
   ]);
 
   const isItemInZone = (item: App, zone: SnapZone): boolean => {
@@ -2198,7 +2212,10 @@ export function MonitorLayout({
    * reflects the post-drop slot count (stacked apps count as one unit).
    */
   const getProspectiveAppCountForDropZones = (monitor: any): number | undefined => {
-    const globalAppDragActive = !!(dragState?.isDragging && dragState.dragData && dragState.dragData.type === 'app');
+    const globalAppDragActive = !!(
+      dragState?.isDragging
+      && isAppLikeGlobalDragData(dragState.dragData)
+    );
     if (!globalAppDragActive) return undefined;
 
     const source = dragState.dragData?.source;
@@ -2214,7 +2231,11 @@ export function MonitorLayout({
   };
 
   const appDragZonesActive =
-    isEditMode && (localDragState.isDragging || !!(dragState?.isDragging && dragState.dragData?.type === 'app'));
+    isEditMode
+    && (
+      localDragState.isDragging
+      || !!(dragState?.isDragging && isAppLikeGlobalDragData(dragState.dragData))
+    );
 
   const defaultMinimizedMonitorId =
     monitors.find((m) => m.primary)?.id ?? monitors[0]?.id ?? "monitor-1";
@@ -2305,7 +2326,10 @@ export function MonitorLayout({
 
   // Snap zone chrome is disabled during app drags — stacking uses icon hit targets + hover preview only.
   const renderSnapZones = (monitor: any) => {
-    const globalAppDragActive = !!(dragState?.isDragging && dragState.dragData && dragState.dragData.type === 'app');
+    const globalAppDragActive = !!(
+      dragState?.isDragging
+      && isAppLikeGlobalDragData(dragState.dragData)
+    );
 
     if (!isEditMode) {
       return null;
@@ -2323,7 +2347,10 @@ export function MonitorLayout({
       const localCurrentConflictItem = localDragState.conflictItem || localDragState.lastValidSnapState?.conflictItem || lastValidSnapStateRef.current?.conflictItem;
       const localCurrentDisplacementZone = localDragState.displacementZone || localDragState.lastValidSnapState?.displacementZone || lastValidSnapStateRef.current?.displacementZone;
 
-      const globalAppDrag = !!(dragState?.isDragging && dragState.dragData?.type === 'app');
+      const globalAppDrag = !!(
+        dragState?.isDragging
+        && isAppLikeGlobalDragData(dragState.dragData)
+      );
       const hasPointerDrop =
         globalAppDrag &&
         externalSnapState.monitorId != null &&
@@ -2357,10 +2384,9 @@ export function MonitorLayout({
           ? localDragState.dropBand
           : null;
 
-      const sourceMonitorForDraggedApp =
-        dragState?.dragData?.type === "app"
-          ? dragState.dragData.sourceMonitorId ?? dragState.dragData.monitorId ?? null
-          : null;
+      const sourceMonitorForDraggedApp = isAppLikeGlobalDragData(dragState?.dragData)
+        ? dragState?.dragData?.sourceMonitorId ?? dragState?.dragData?.monitorId ?? null
+        : null;
       const isSourceZoneForGlobalPointer =
         globalAppDrag &&
         sourceMonitorForDraggedApp === monitor.id &&
@@ -2848,7 +2874,7 @@ export function MonitorLayout({
                                   && localDragState.draggedItem?.itemType === "app"
                                   && !(
                                     dragState?.isDragging
-                                    && dragState.dragData?.type === "app"
+                                    && isAppLikeGlobalDragData(dragState.dragData)
                                     && externalSnapState.monitorId != null
                                     && localDragState.draggedItem?.monitorId
                                     && externalSnapState.monitorId
@@ -2912,7 +2938,7 @@ export function MonitorLayout({
                       const minimizedDropActive =
                         isEditMode &&
                         dragState?.isDragging &&
-                        dragState.dragData?.type === "app" &&
+                        isAppLikeGlobalDragData(dragState.dragData) &&
                         minimizedDropPreviewMonitorId === monitor.id;
                       return (
                     <div
@@ -2978,7 +3004,7 @@ export function MonitorLayout({
       </div>
       
       {dragState?.isDragging
-      && dragState.dragData?.type === "app"
+      && isAppLikeGlobalDragData(dragState.dragData)
       && externalSnapState.stackHoverTargetAppIndex != null
       && externalSnapState.monitorId
       ? (() => {
