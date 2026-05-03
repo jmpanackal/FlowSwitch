@@ -39,6 +39,7 @@ The capture flow must remain reliable: content capture is additive and must not 
    - `maxTabsPerWindow = 100`
    - `maxTabsPerCapture = 500`
 3. Hard failures in content providers never fail full capture; they degrade to base layout capture with warnings.
+4. Enrichment timeout budget is a hard limit: `maxContentEnrichmentMs = 4000`.
 
 ## Existing System Touchpoints
 
@@ -83,6 +84,17 @@ Provider results carry:
 - `confidence`: `high` | `medium` | `low`
 - `warnings`: string[]
 
+### Window identity and stability
+
+Content linking keys are scoped to one capture run only and must not be reused across runs.
+
+- Per-run ID: `captureRunId` (uuid).
+- Per-window key format: `${captureRunId}:${pid}:${hwnd}`.
+- Matching lifetime: valid only until the capture run finishes or times out.
+- Async provider tasks that outlive the run are ignored and cannot write results.
+
+This avoids HWND reuse bugs causing cross-window or cross-run mis-association.
+
 ## Provider Adapters
 
 ### Chromium-family shared adapter
@@ -111,6 +123,10 @@ Responsibilities:
 - Attempt Firefox-compatible tab enumeration path.
 - Normalize rows into shared tab model.
 - Fallback to UIA when protocol path unavailable.
+- Emit explicit warning when falling back from protocol to UIA:
+  - `provider_unavailable` and/or `uia_partial_capture`.
+
+V1 success target for Firefox is correctness under fallback, not parity with Chromium protocol capture rates.
 
 ### UIA fallback adapter
 
@@ -129,6 +145,7 @@ Responsibilities:
 Augment `MemoryCapture` with optional fields:
 
 - `capturedContentByWindow`: dictionary keyed by window identity (handle + pid key) containing:
+  - Key is `${captureRunId}:${pid}:${hwnd}` (run-scoped).
   - `tabs?: Array<{ url: string; title?: string; browser?: string }>`
   - `files?: Array<{ path: string; name?: string }>`
   - `folders?: Array<{ path: string; name?: string }>`
@@ -141,7 +158,8 @@ Augment `MemoryCapture` with optional fields:
     windowsConsidered: number;
     windowsEnriched: number;
     tabsCaptured: number;
-    tabsSkippedPerWindow: number;
+    tabsSkippedTotal: number;
+    tabsSkippedByWindow: Record<string, number>;
     tabsSkippedGlobal: number;
   }`
 
@@ -150,9 +168,18 @@ Augment `MemoryCapture` with optional fields:
 In `buildMemoryFlowProfileFromCapture`:
 
 - For each mapped app instance:
-  - Set `associatedFiles` from window content paths where available.
+  - Convert captured `files[]` and `folders[]` into app `associatedFiles[]` entries:
+    - folder -> `{ type: "folder", path, name }`
+    - file -> `{ type: "file", path, name }`
+  - Apply associated-content caps before write:
+    - `maxAssociatedContentPerWindow = 100`
+    - `maxAssociatedContentPerCapture = 500`
 - Populate profile `browserTabs` with `appInstanceId` linkage for mapped tabs.
 - Update `tabCount` / `fileCount` derived from captured content.
+- If captured content exists for an unmapped window:
+  - drop that content,
+  - increment mapping skip stats,
+  - emit `window_mapping_failed` warning.
 
 ## Overload Control and Dedupe
 
@@ -180,7 +207,7 @@ In `buildMemoryFlowProfileFromCapture`:
 
 ### Timeout budgets
 
-- Global enrichment budget (recommended: 3-5 seconds).
+- Global enrichment budget (hard): `maxContentEnrichmentMs = 4000`.
 - Per-provider short timeouts to avoid UI stalls.
 - If budget exceeded, stop enrichment and return partial data.
 
@@ -274,6 +301,12 @@ Scenarios:
 - Private/incognito windows
 - No protocol availability (forces UIA fallback)
 - Over-limit captures (>100 per window, >500 total)
+
+Expected behavior for private/incognito:
+
+- No guarantee of tab visibility.
+- Base layout capture still succeeds.
+- If content is unavailable, emit provider warning(s) and continue without hard failure.
 
 ## Acceptance Criteria
 
