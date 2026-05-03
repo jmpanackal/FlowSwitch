@@ -1,6 +1,9 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
-const { isRectCloseToTargetBounds } = require('./placement-orchestrator');
+const {
+  isRectCloseToTargetBounds,
+  explorerLoosePlacementAccepts,
+} = require('./placement-orchestrator');
 
 test('isRectCloseToTargetBounds accepts normal within tolerance', () => {
   assert.equal(
@@ -21,5 +24,37 @@ test('isRectCloseToTargetBounds ignores pixel checks when bounds not normal', ()
       6,
     ),
     true,
+  );
+});
+
+test('explorerLoosePlacementAccepts allows large explorer window overlapping slot', () => {
+  const monitor = {
+    workAreaPhysical: { x: 0, y: 0, width: 1920, height: 1080 },
+  };
+  const bounds = { left: 100, top: 100, width: 640, height: 480, state: 'normal' };
+  const visibleRect = { left: 80, top: 90, width: 1200, height: 800 };
+  assert.equal(
+    explorerLoosePlacementAccepts({
+      visibleRect,
+      bounds,
+      monitor,
+      processHintLc: 'explorer',
+    }),
+    true,
+  );
+});
+
+test('explorerLoosePlacementAccepts rejects non-explorer process key', () => {
+  const monitor = { workAreaPhysical: { x: 0, y: 0, width: 1920, height: 1080 } };
+  const bounds = { left: 100, top: 100, width: 640, height: 480, state: 'normal' };
+  const visibleRect = { left: 80, top: 90, width: 1200, height: 800 };
+  assert.equal(
+    explorerLoosePlacementAccepts({
+      visibleRect,
+      bounds,
+      monitor,
+      processHintLc: 'notepad',
+    }),
+    false,
   );
 });

@@ -91,3 +91,95 @@ test('gatherLegacyActionLaunches skips restricted legacy app actions', () => {
   assert.equal(skippedApps.length, 1);
   assert.equal(skippedApps[0].reason, 'restricted');
 });
+
+test('gatherProfileAppLaunches passes all folder paths to explorer.exe', { skip: process.platform !== 'win32' }, () => {
+  const { gatherProfileAppLaunches } = createProfileLaunchGatherers(stubDeps());
+  const tmpA = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-flow-a-'));
+  const tmpB = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-flow-b-'));
+  try {
+    const explorerExe = path.join(
+      process.env.SystemRoot || process.env.windir || 'C:\\Windows',
+      'explorer.exe',
+    );
+    if (!fs.existsSync(explorerExe)) {
+      return;
+    }
+    const monitorMap = new Map([['m1', { id: 'm1' }]]);
+    const profile = {
+      monitors: [
+        {
+          id: 'm1',
+          primary: true,
+          apps: [
+            {
+              name: 'File Explorer',
+              executablePath: explorerExe,
+              associatedFiles: [
+                { type: 'folder', path: tmpA },
+                { type: 'folder', path: tmpB },
+              ],
+            },
+          ],
+        },
+      ],
+      minimizedApps: [],
+      restrictedApps: [],
+    };
+    const { launches, skippedApps } = gatherProfileAppLaunches(profile, monitorMap);
+    assert.equal(skippedApps.length, 0);
+    assert.equal(launches.length, 1);
+    assert.ok(Array.isArray(launches[0].spawnArgsForExecutable));
+    assert.deepEqual(launches[0].spawnArgsForExecutable, [tmpA, tmpB]);
+  } finally {
+    try {
+      fs.rmSync(tmpA, { recursive: true });
+    } catch {
+      // ignore
+    }
+    try {
+      fs.rmSync(tmpB, { recursive: true });
+    } catch {
+      // ignore
+    }
+  }
+});
+
+test('gatherProfileAppLaunches uses explorer for file-only associated paths on win32', { skip: process.platform !== 'win32' }, () => {
+  const { gatherProfileAppLaunches } = createProfileLaunchGatherers(stubDeps());
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'fs-flow-file-'));
+  const filePath = path.join(tmp, 'x.txt');
+  fs.writeFileSync(filePath, 'x', 'utf8');
+  try {
+    const monitorMap = new Map([['m1', { id: 'm1' }]]);
+    const profile = {
+      monitors: [
+        {
+          id: 'm1',
+          primary: true,
+          apps: [
+            {
+              name: 'File Explorer',
+              associatedFiles: [{ type: 'file', path: filePath, name: 'x.txt' }],
+            },
+          ],
+        },
+      ],
+      minimizedApps: [],
+      restrictedApps: [],
+    };
+    const { launches, skippedApps } = gatherProfileAppLaunches(profile, monitorMap);
+    assert.equal(skippedApps.length, 0);
+    assert.equal(launches.length, 1);
+    const ex = String(launches[0].executablePath || '').toLowerCase().replace(/\//g, '\\');
+    assert.ok(ex.endsWith('\\explorer.exe'));
+    assert.ok(Array.isArray(launches[0].spawnArgsForExecutable));
+    assert.equal(launches[0].spawnArgsForExecutable.length, 1);
+    assert.ok(String(launches[0].spawnArgsForExecutable[0]).startsWith('/select,'));
+  } finally {
+    try {
+      fs.rmSync(tmp, { recursive: true });
+    } catch {
+      // ignore
+    }
+  }
+});

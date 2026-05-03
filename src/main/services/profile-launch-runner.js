@@ -1052,36 +1052,48 @@ const launchProfileById = async (profileId, options = {}) => {
     return `tab:${(h >>> 0).toString(36)}`;
   };
 
-  const makeAppSubsteps = () => ([
-    {
-      id: 'sub-launch',
-      label: 'Launching',
-      state: 'queued',
-      startedAtMs: null,
-      endedAtMs: null,
-    },
-    {
-      id: 'sub-place',
-      label: 'Positioning window',
-      state: 'queued',
-      startedAtMs: null,
-      endedAtMs: null,
-    },
-    {
-      id: 'sub-verify',
-      label: 'Verifying placement',
-      state: 'queued',
-      startedAtMs: null,
-      endedAtMs: null,
-    },
-    {
+  const makeAppSubsteps = (contentSubstepMode) => {
+    const steps = [
+      {
+        id: 'sub-launch',
+        label: 'Launching',
+        state: 'queued',
+        startedAtMs: null,
+        endedAtMs: null,
+      },
+      {
+        id: 'sub-place',
+        label: 'Positioning window',
+        state: 'queued',
+        startedAtMs: null,
+        endedAtMs: null,
+      },
+      {
+        id: 'sub-verify',
+        label: 'Verifying placement',
+        state: 'queued',
+        startedAtMs: null,
+        endedAtMs: null,
+      },
+    ];
+    if (contentSubstepMode) {
+      steps.push({
+        id: 'sub-content',
+        label: 'Opening content',
+        state: 'queued',
+        startedAtMs: null,
+        endedAtMs: null,
+      });
+    }
+    steps.push({
       id: 'sub-confirm',
       label: 'Waiting for confirmation',
       state: 'queued',
       startedAtMs: null,
       endedAtMs: null,
-    },
-  ]);
+    });
+    return steps;
+  };
 
   const buildInitialContentSmartDecisions = (launch) => {
     const decisions = [];
@@ -1089,18 +1101,13 @@ const launchProfileById = async (profileId, options = {}) => {
       ? launch.app.associatedFiles
       : [];
     if (associatedFiles.length > 0) {
+      const allFolders = associatedFiles.every((f) => String(f?.type || '').trim().toLowerCase() === 'folder');
+      const contentKind = allFolders ? 'folder' : 'file';
       decisions.push(
         associatedFiles.length === 1
-          ? '1 file opened with this app'
-          : `${associatedFiles.length} files opened with this app`,
+          ? `1 ${contentKind} opened with this app`
+          : `${associatedFiles.length} ${contentKind}s opened with this app`,
       );
-      const contentNames = associatedFiles
-        .map((f) => String(f?.name || path.basename(String(f?.path || '')) || '').trim())
-        .filter(Boolean)
-        .slice(0, 2);
-      if (contentNames.length > 0) {
-        decisions.push(`Files opened: ${contentNames.join(', ')}`);
-      }
     }
     const instanceId = String(launch?.app?.instanceId || '').trim();
     if (instanceId) {
@@ -1121,6 +1128,26 @@ const launchProfileById = async (profileId, options = {}) => {
       }
     }
     return decisions.length > 0 ? decisions : null;
+  };
+
+  const buildInitialContentItems = (launch) => {
+    const associatedFiles = Array.isArray(launch?.app?.associatedFiles)
+      ? launch.app.associatedFiles
+      : [];
+    const contentItems = associatedFiles
+      .map((f) => {
+        const name = String(f?.name || path.basename(String(f?.path || '')) || '').trim();
+        const type = String(f?.type || '').trim().toLowerCase() === 'folder' ? 'folder' : 'file';
+        const filePath = String(f?.path || '').trim();
+        if (!name && !filePath) return null;
+        return {
+          name: name || filePath,
+          type,
+          path: filePath || null,
+        };
+      })
+      .filter(Boolean);
+    return contentItems.length > 0 ? contentItems : null;
   };
 
   const delayTimelineIndexByApp = new Array(appLaunches.length).fill(-1);
@@ -1155,6 +1182,23 @@ const launchProfileById = async (profileId, options = {}) => {
     }
     appTimelineIndexByApp[i] = executionTimelineWrite;
     const targetLocationRaw = row?.location ? String(row.location).trim() : '';
+    const launchRowForContent = appLaunches[i];
+    const builtContentItemsForMode = buildInitialContentItems(launchRowForContent);
+    const phForContentMode = getPlacementProcessKey(launchRowForContent);
+    const spaForContentMode = Array.isArray(launchRowForContent.spawnArgsForExecutable)
+      ? launchRowForContent.spawnArgsForExecutable.filter((a) => typeof a === 'string' && a.trim())
+      : [];
+    const explorerMultiTabForMode = (
+      process.platform === 'win32'
+      && phForContentMode === 'explorer'
+      && spaForContentMode.length > 1
+      && launchRowForContent.executablePath
+    );
+    const contentSubstepMode = (
+      builtContentItemsForMode && builtContentItemsForMode.length > 0
+        ? (explorerMultiTabForMode ? 'post-verify' : 'parallel-launch')
+        : null
+    );
     executionActions.push({
       id: `app:${row.key}`,
       kind: 'app',
@@ -1164,11 +1208,14 @@ const launchProfileById = async (profileId, options = {}) => {
       iconDataUrl: row.iconDataUrl,
       pills: null,
       smartDecisions: buildInitialContentSmartDecisions(appLaunches[i]),
+      contentItems: builtContentItemsForMode,
+      contentSubstepMode,
+      contentOpenFailed: false,
       errorMessage: null,
       failureKind: null,
       startedAtMs: null,
       endedAtMs: null,
-      substeps: makeAppSubsteps(),
+      substeps: makeAppSubsteps(contentSubstepMode),
     });
     executionTimelineWrite += 1;
   }
@@ -1204,6 +1251,9 @@ const launchProfileById = async (profileId, options = {}) => {
     const step = row.step;
     const subs = action.substeps || [];
     const sl = (id) => subs.find((s) => s.id === id);
+    const hasContent = Boolean(sl('sub-content'));
+    const mode = action.contentSubstepMode || null;
+    const isParallel = mode === 'parallel-launch';
     const setSubs = (triples) => {
       for (const [id, st] of triples) {
         const s = sl(id);
@@ -1218,12 +1268,16 @@ const launchProfileById = async (profileId, options = {}) => {
     setSubLabel('sub-place', 'Positioning window');
     setSubLabel('sub-verify', 'Verifying placement');
     setSubLabel('sub-confirm', 'Waiting for confirmation');
+    if (hasContent) {
+      setSubLabel('sub-content', 'Opening content');
+    }
     if (step === 'pending') {
       action.state = 'queued';
       setSubs([
         ['sub-launch', 'queued'],
         ['sub-place', 'queued'],
         ['sub-verify', 'queued'],
+        ...(hasContent ? [['sub-content', 'queued']] : []),
         ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'launching') {
@@ -1232,15 +1286,20 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-launch', 'running'],
         ['sub-place', 'queued'],
         ['sub-verify', 'queued'],
+        ...(hasContent && isParallel ? [['sub-content', 'running']] : hasContent ? [['sub-content', 'queued']] : []),
         ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'placing') {
       action.state = 'running';
       setSubLabel('sub-launch', 'Launched');
+      if (hasContent && isParallel) {
+        setSubLabel('sub-content', 'Opened content');
+      }
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'running'],
         ['sub-verify', 'queued'],
+        ...(hasContent && isParallel ? [['sub-content', 'completed']] : hasContent ? [['sub-content', 'queued']] : []),
         ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'verifying') {
@@ -1251,6 +1310,20 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
         ['sub-verify', 'running'],
+        ...(hasContent ? [['sub-content', 'queued']] : []),
+        ['sub-confirm', 'queued'],
+      ]);
+    } else if (step === 'opening-content') {
+      action.state = 'running';
+      setSubLabel('sub-launch', 'Launched');
+      setSubLabel('sub-place', 'Positioned');
+      setSubLabel('sub-verify', 'Verified placement');
+      setSubLabel('sub-content', 'Opening content');
+      setSubs([
+        ['sub-launch', 'completed'],
+        ['sub-place', 'completed'],
+        ['sub-verify', 'completed'],
+        ['sub-content', 'running'],
         ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'awaiting-confirmation') {
@@ -1258,10 +1331,14 @@ const launchProfileById = async (profileId, options = {}) => {
       setSubLabel('sub-launch', 'Launched');
       setSubLabel('sub-place', 'Positioned');
       setSubLabel('sub-verify', 'Verified placement');
+      if (hasContent && isParallel) {
+        setSubLabel('sub-content', 'Opened content');
+      }
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
         ['sub-verify', 'completed'],
+        ...(hasContent ? [['sub-content', isParallel ? 'completed' : 'queued']] : []),
         ['sub-confirm', 'running'],
       ]);
     } else if (step === 'done') {
@@ -1285,10 +1362,14 @@ const launchProfileById = async (profileId, options = {}) => {
       setSubLabel('sub-launch', 'Launched');
       setSubLabel('sub-place', 'Positioned');
       setSubLabel('sub-verify', 'Verified placement');
+      if (hasContent) {
+        setSubLabel('sub-content', 'Opened content');
+      }
       setSubs([
         ['sub-launch', 'completed'],
         ['sub-place', 'completed'],
         ['sub-verify', 'completed'],
+        ...(hasContent ? [['sub-content', 'completed']] : []),
         ['sub-confirm', 'completed'],
       ]);
       const confirmSub = sl('sub-confirm');
@@ -1304,11 +1385,21 @@ const launchProfileById = async (profileId, options = {}) => {
     } else if (step === 'failed') {
       action.state = 'failed';
       const fk = action.failureKind || 'launch';
+      const contentFail = Boolean(action.contentOpenFailed);
       if (fk === 'placement') {
         setSubs([
           ['sub-launch', 'completed'],
           ['sub-place', 'failed'],
           ['sub-verify', 'queued'],
+          ...(hasContent ? [['sub-content', 'queued']] : []),
+          ['sub-confirm', 'queued'],
+        ]);
+      } else if (fk === 'verification' && contentFail && hasContent) {
+        setSubs([
+          ['sub-launch', 'completed'],
+          ['sub-place', 'completed'],
+          ['sub-verify', 'completed'],
+          ['sub-content', 'failed'],
           ['sub-confirm', 'queued'],
         ]);
       } else if (fk === 'verification') {
@@ -1316,6 +1407,7 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-launch', 'completed'],
           ['sub-place', 'completed'],
           ['sub-verify', 'failed'],
+          ...(hasContent ? [['sub-content', 'queued']] : []),
           ['sub-confirm', 'queued'],
         ]);
       } else {
@@ -1323,6 +1415,7 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-launch', 'failed'],
           ['sub-place', 'queued'],
           ['sub-verify', 'queued'],
+          ...(hasContent ? [['sub-content', 'queued']] : []),
           ['sub-confirm', 'queued'],
         ]);
       }
@@ -1420,19 +1513,206 @@ const launchProfileById = async (profileId, options = {}) => {
     return 'App opened an error dialog instead of a usable main window.';
   };
 
+  const parseExplorerTargetPath = (arg) => {
+    const raw = String(arg || '').trim();
+    if (!raw) return '';
+    if (!raw.toLowerCase().startsWith('/select,')) {
+      return raw.replace(/\//g, '\\');
+    }
+    let v = raw.slice('/select,'.length).trim();
+    if (v.startsWith('"') && v.endsWith('"') && v.length >= 2) {
+      v = v.slice(1, -1);
+    }
+    return String(v || '').trim().replace(/\//g, '\\');
+  };
+
+  const psSingleQuoted = (value) => `'${String(value || '').replace(/'/g, "''")}'`;
+
+  const openExplorerPathInWindow = ({
+    handle,
+    arg,
+    newTab = true,
+    diagnostics,
+  }) => new Promise((resolve) => {
+    if (process.platform !== 'win32') {
+      resolve({ ok: false, reason: 'non-win32' });
+      return;
+    }
+    const safeHandle = String(handle || '').trim();
+    const targetPath = parseExplorerTargetPath(arg);
+    if (!safeHandle || !targetPath) {
+      resolve({ ok: false, reason: 'missing-handle-or-path' });
+      return;
+    }
+    const psTargetPath = psSingleQuoted(targetPath);
+    const psScript = `
+$targetHwnd = [int64]"${safeHandle.replace(/"/g, '`"')}"
+if ($targetHwnd -le 0) { Write-Output "invalid-handle"; exit 0 }
+$targetPath = ${psTargetPath}
+Add-Type -TypeDefinition @"
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class ExplorerTabs {
+  public delegate bool EnumChildProc(IntPtr hWnd, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool EnumChildWindows(IntPtr hWndParent, EnumChildProc lpEnumFunc, IntPtr lParam);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll")] public static extern IntPtr SendMessage(IntPtr hWnd, uint Msg, IntPtr wParam, IntPtr lParam);
+  [DllImport("user32.dll")] public static extern bool SetForegroundWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool ShowWindowAsync(IntPtr hWnd, int nCmdShow);
+
+  public static List<IntPtr> FindChildWindowsByClass(IntPtr parent, string className) {
+    var found = new List<IntPtr>();
+    EnumChildWindows(parent, (h, l) => {
+      var sb = new StringBuilder(256);
+      GetClassName(h, sb, sb.Capacity);
+      if (String.Equals(sb.ToString(), className, StringComparison.OrdinalIgnoreCase)) {
+        found.Add(h);
+      }
+      return true;
+    }, IntPtr.Zero);
+    return found;
+  }
+}
+"@
+Add-Type -AssemblyName System.Windows.Forms
+
+function Get-LatestShellViewForFrame {
+  param($Shell, [int64]$FrameHwnd)
+  try {
+    $sw = $Shell.Windows()
+    $c = [int]$sw.Count
+    if ($c -le 0) { return $null }
+    for ($i = $c - 1; $i -ge 0; $i--) {
+      try {
+        $it = $sw.Item($i)
+        if ($null -eq $it) { continue }
+        if ([int64]$it.HWND -eq $FrameHwnd) { return $it }
+      } catch {}
+    }
+  } catch {}
+  return $null
+}
+
+function Open-ExplorerTab {
+  param([int64]$Handle)
+  $h = [IntPtr]::new($Handle)
+  [void][ExplorerTabs]::ShowWindowAsync($h, 9)
+  Start-Sleep -Milliseconds 80
+  [void][ExplorerTabs]::SetForegroundWindow($h)
+  Start-Sleep -Milliseconds 80
+
+  $sent = $false
+  try {
+    $tabWindows = [ExplorerTabs]::FindChildWindowsByClass($h, "ShellTabWindowClass")
+    if ($tabWindows.Count -gt 0) {
+      $tabHwnd = $tabWindows[0]
+      [void][ExplorerTabs]::SendMessage($tabHwnd, 0x0111, [IntPtr]::new(0xA21B), [IntPtr]::Zero)
+      $sent = $true
+    }
+  } catch {}
+  if (-not $sent) {
+    try {
+      [System.Windows.Forms.SendKeys]::SendWait("^{t}")
+      $sent = $true
+    } catch {}
+  }
+  return $sent
+}
+
+try {
+  $shell = New-Object -ComObject Shell.Application
+  $fileUrl = $null
+  try {
+    $fileUrl = ([Uri]::new($targetPath)).AbsoluteUri
+  } catch {
+    $norm = ($targetPath -replace '\\\\','/')
+    $fileUrl = 'file:///' + $norm
+  }
+  if (${!newTab ? '$true' : '$false'}) {
+    $targetItem = Get-LatestShellViewForFrame -Shell $shell -FrameHwnd $targetHwnd
+    if ($null -eq $targetItem) {
+      Write-Output "shell-item-not-found"
+      exit 0
+    }
+    $targetItem.Navigate2($fileUrl, 0)
+    Write-Output "ok"
+    exit 0
+  }
+
+  [void](Open-ExplorerTab -Handle $targetHwnd)
+  Start-Sleep -Milliseconds 1000
+  $targetItem = Get-LatestShellViewForFrame -Shell $shell -FrameHwnd $targetHwnd
+  if ($null -eq $targetItem) {
+    Write-Output "shell-item-not-found-after-new-tab"
+    exit 0
+  }
+  $targetItem.Navigate2($fileUrl, 0)
+  Write-Output "ok"
+  exit 0
+} catch {
+  Write-Output ("shell-com-failed|" + $_.Exception.Message)
+  exit 0
+}
+`;
+    execFile(
+      'powershell.exe',
+      ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+      { windowsHide: true, timeout: 12000, maxBuffer: 1024 * 128 },
+      (error, stdout) => {
+        const out = String(stdout || '').trim().toLowerCase();
+        const ok = !error && out.includes('ok');
+        if (!ok && diagnostics) {
+          diagnostics.failure({
+            strategy: 'explorer-multi-tab-spawn',
+            reason: 'open-path-in-tab-failed',
+            handle: safeHandle,
+            targetPath,
+            outputSnippet: out.slice(0, 160) || null,
+            error: error ? String(error?.message || error) : null,
+          });
+        }
+        resolve({ ok, targetPath });
+      },
+    );
+  });
+
   const isConstrainedPlacementAcceptable = ({
     finalRect,
     targetBounds,
     monitor,
+    processHintLc = '',
   }) => {
     if (!finalRect || !targetBounds || !monitor) return false;
     if (String(targetBounds.state || '').trim().toLowerCase() !== 'normal') return false;
+    const processKey = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
     const onTargetMonitor = isWindowOnTargetMonitor({
       rect: finalRect,
       monitor,
       bounds: targetBounds,
     });
     if (!onTargetMonitor) return false;
+    if (processKey === 'explorer') {
+      const bx = Number(targetBounds.left || 0);
+      const by = Number(targetBounds.top || 0);
+      const bw = Math.max(0, Number(targetBounds.width || 0));
+      const bh = Math.max(0, Number(targetBounds.height || 0));
+      const fx = Number(finalRect.left || 0);
+      const fy = Number(finalRect.top || 0);
+      const fw = Math.max(0, Number(finalRect.width || 0));
+      const fh = Math.max(0, Number(finalRect.height || 0));
+      const desiredArea = bw * bh;
+      if (desiredArea <= 0) return false;
+      const ix1 = Math.max(bx, fx);
+      const iy1 = Math.max(by, fy);
+      const ix2 = Math.min(bx + bw, fx + fw);
+      const iy2 = Math.min(by + bh, fy + fh);
+      if (ix2 <= ix1 || iy2 <= iy1) return false;
+      const overlapRatio = ((ix2 - ix1) * (iy2 - iy1)) / desiredArea;
+      return overlapRatio >= 0.24;
+    }
     const leftDelta = Math.abs(Number(finalRect.left || 0) - Number(targetBounds.left || 0));
     const topDelta = Math.abs(Number(finalRect.top || 0) - Number(targetBounds.top || 0));
     const widthDelta = Math.abs(Number(finalRect.width || 0) - Number(targetBounds.width || 0));
@@ -1494,6 +1774,8 @@ const launchProfileById = async (profileId, options = {}) => {
     });
     try {
       if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+        const tactReset = executionActions[appTimelineIndexByApp[appIndex]];
+        if (tactReset) tactReset.contentOpenFailed = false;
         activeUiPhase = 'launching';
         activeUiName = launchItem.appName;
         appLaunchProgress[appIndex].step = 'launching';
@@ -1533,6 +1815,15 @@ const launchProfileById = async (profileId, options = {}) => {
         .flat()
         .filter(Boolean);
       let launchArgs = [...profileSpawnArgs];
+      const explorerMultiTabSpawn = (
+        process.platform === 'win32'
+        && processHintLc === 'explorer'
+        && profileSpawnArgs.length > 1
+        && launchItem.executablePath
+      );
+      if (explorerMultiTabSpawn) {
+        launchArgs = [profileSpawnArgs[0]];
+      }
       if (
         isChromiumFamily
         && isDuplicateProcessLaunch
@@ -2844,7 +3135,8 @@ const launchProfileById = async (profileId, options = {}) => {
         }
 
         const shouldSuppressExtraContentWindows = (
-          profileSpawnArgs.length > 0
+          processHintLc !== 'explorer'
+          && profileSpawnArgs.length > 0
           && !launchItem.shortcutPath
           && !launchItem.launchUrl
           && preLaunchHandleSet.size === 0
@@ -2916,6 +3208,7 @@ const launchProfileById = async (profileId, options = {}) => {
             finalRect: finalPlacementRect,
             targetBounds: bounds,
             monitor: launchItem.monitor,
+            processHintLc,
           });
           if (constrainedPlacementAccepted) {
             launchDiagnostics.result({
@@ -2956,6 +3249,60 @@ const launchProfileById = async (profileId, options = {}) => {
           );
           }
         }
+
+        if (explorerMultiTabSpawn && result.applied && result.handle && launchItem.executablePath) {
+          const tactContent = executionActions[appTimelineIndexByApp[appIndex]];
+          if (
+            tactContent?.contentSubstepMode === 'post-verify'
+            && Number.isInteger(appIndex)
+            && appLaunchProgress[appIndex]
+          ) {
+            appLaunchProgress[appIndex].step = 'opening-content';
+            publishCurrentLaunchStatus('in-progress');
+          }
+          if (launchStatusMode === 'reused_existing_window') {
+            const firstOpened = await openExplorerPathInWindow({
+              handle: result.handle,
+              arg: profileSpawnArgs[0],
+              newTab: false,
+              diagnostics: launchDiagnostics,
+            });
+            launchDiagnostics.result({
+              processHintLc,
+              strategy: 'explorer-multi-tab-spawn',
+              reason: firstOpened.ok ? 'reused-window-current-tab-navigated' : 'reused-window-current-tab-not-navigated',
+              tabIndex: 0,
+              argPreview: String(profileSpawnArgs[0] || '').slice(0, 120),
+            });
+          }
+          for (let tabIdx = 1; tabIdx < profileSpawnArgs.length; tabIdx += 1) {
+            const extraArg = profileSpawnArgs[tabIdx];
+            await sleep(450);
+            try {
+              const openedInTab = await openExplorerPathInWindow({
+                handle: result.handle,
+                arg: extraArg,
+                newTab: true,
+                diagnostics: launchDiagnostics,
+              });
+              launchDiagnostics.result({
+                processHintLc,
+                strategy: 'explorer-multi-tab-spawn',
+                reason: openedInTab.ok ? 'opened-in-existing-window-tab' : 'explorer-tab-open-failed-no-spawn-fallback',
+                tabIndex: tabIdx,
+                argPreview: String(extraArg || '').slice(0, 120),
+              });
+            } catch (err) {
+              launchDiagnostics.failure({
+                processHintLc,
+                strategy: 'explorer-multi-tab-spawn',
+                reason: 'sequential-tab-path-open-failed',
+                tabIndex: tabIdx,
+                error: String(err?.message || err),
+              });
+            }
+          }
+        }
       }
       if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
         appLaunchProgress[appIndex].step = 'done';
@@ -2988,10 +3335,14 @@ const launchProfileById = async (profileId, options = {}) => {
         let failureKind = 'launch';
         if (prevStep === 'placing') failureKind = 'placement';
         if (prevStep === 'verifying') failureKind = 'verification';
+        if (prevStep === 'opening-content') {
+          failureKind = 'verification';
+        }
         const tact = executionActions[appTimelineIndexByApp[appIndex]];
         if (tact) {
           tact.failureKind = failureKind;
           tact.errorMessage = String(error?.message || error || 'Failed to launch app');
+          if (prevStep === 'opening-content') tact.contentOpenFailed = true;
         }
         appLaunchProgress[appIndex].step = 'failed';
       }
