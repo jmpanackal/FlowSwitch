@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-05-03  
+Last updated: 2026-05-04  
 Owner: active implementation branch owner
 
 **Release note (marketing):** `package.json` / `website/` prepared for **0.1.3** (`chore/release-0-1-3-website`). Live GitHub downloads require pushing annotated tag **`v0.1.3`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.3-win-x64-*.exe` assets matching `website/latest.json`.
@@ -60,9 +60,10 @@ Status legend:
    - **Evidence:** `docs/superpowers/specs/2026-05-03-ui-ux-evaluation-report.md` (C1); `ProfileCard` uses `div` + `onClick` without `tabIndex` — cards not in tab order; no Enter/Space semantics.
    - **Done when:** Profile rows are operable with keyboard only (prefer `<button type="button">` for card surface, preserve settings `stopPropagation`), with concise per-profile accessible naming.
 
-6. About dialog / chrome version source of truth (`not_started`)
+6. About dialog / chrome version source of truth (`done` — `fix/about-version-source-of-truth`)
    - **Evidence:** report M1; `AppChromeModals.tsx` hardcodes `APP_VERSION` out of sync with `package.json` (e.g. 0.1.0 vs shipped 0.1.3).
    - **Done when:** About (and any chrome copy) reads version from the same build-time or package source as release artifacts.
+   - **Latest:** Renderer `APP_VERSION` comes from root `package.json` via Vite `define` (`__FLOWSWITCH_APP_VERSION__` → `src/renderer/appVersion.ts`); About modal imports that constant.
 
 #### P1 - Next
 
@@ -128,7 +129,7 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 3. Start app-discovery trust pass (manual exe + launchability classification + non-system-drive icon/path robustness).
 4. Start large-profile guardrails (thresholds, warnings, sequencing policy).
 5. Continue orchestration P0 in-progress tasks to done before opening new P1 items.
-6. **UI/UX evaluation follow-ups:** pick up **P0 §5–6** (profile card keyboard, About version) early for trust and accessibility; batch **P1 §8–11** with the next renderer-focused PR or `fix/*` branch as appropriate.
+6. **UI/UX evaluation follow-ups:** **P0 §6 (About version)** is done on `fix/about-version-source-of-truth`; pick up **P0 §5** (profile card keyboard) next for trust and accessibility; batch **P1 §8–11** with the next renderer-focused PR or `fix/*` branch as appropriate.
 
 ## Recently Landed / Verified Status
 
