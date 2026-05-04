@@ -77,13 +77,15 @@ Status legend:
 6. Catalog curation quick commands (`not_started`)
 7. Edit/view affordance + first-run guidance (`not_started`)
 
-8. Renderer hygiene — remove `MainLayout` debug logging (`not_started`)
+8. Renderer hygiene — remove `MainLayout` debug logging (`done` — `chore/mainlayout-remove-debug-logs`)
    - **Evidence:** report M5; 10+ `console.log` in `src/renderer/layout/MainLayout.tsx` (profile switch, drag callbacks).
    - **Done when:** No stray `console.log` in production renderer paths (dev-only logger or delete).
+   - **Latest:** All `console.log` calls removed from `MainLayout.tsx` (app select/update/delete/move, profile switch, cross-monitor callbacks); no dev-only logger added — delete-only per scope.
 
-9. Shell landmarks + accessible name audit (`not_started`)
+9. Shell landmarks + accessible name audit (`mostly_done` — `chore/mainlayout-remove-debug-logs`)
    - **Evidence:** report M2; AX snapshots show a root `generic` whose name concatenates entire sidebar text; add `<main>` / `nav`, explicit card/region labels; validate with NVDA.
    - **Done when:** Screen reader rotor/navigation does not announce one blob for the whole library; spot-check with NVDA on Profiles / Apps / Content.
+   - **Latest:** Root shell `aria-label="FlowSwitch"`; title strip `<header aria-label="Menu and window controls">`; library column `<nav aria-label="Library">` (replaces `flow-shell-nav` div); center column `role="region"` + `aria-label="Profile workspace"`; monitor surface `<main aria-label="Monitor layout">`; fixed inspector `<aside aria-label="Inspector">`. **Remaining:** NVDA rotor spot-check on Profiles / Apps / Content.
 
 10. Library tab strip pointer hit-testing (`not_started`)
     - **Evidence:** report M3; CDP `click` on tab ref failed while `tab.click()` succeeded — verify no overlay intercepts real pointer events on Profiles/Apps/Content tabs.
@@ -130,7 +132,7 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 3. Start app-discovery trust pass (manual exe + launchability classification + non-system-drive icon/path robustness).
 4. Start large-profile guardrails (thresholds, warnings, sequencing policy).
 5. Continue orchestration P0 in-progress tasks to done before opening new P1 items.
-6. **UI/UX evaluation follow-ups:** **P0 §5–6** (profile card keyboard, About version) are done; batch **P1 §8–11** (renderer hygiene, landmarks, tab hit-testing, SR row semantics) with the next renderer-focused PR or `fix/*` branch as appropriate.
+6. **UI/UX evaluation follow-ups:** **P0 §5–6**, **P1 §8**, and **P1 §9** (landmarks + shell labels in `MainLayout`) are done or mostly done pending NVDA; next batch **P1 §10–11** (tab hit-testing, SR row semantics) with the next renderer PR or `fix/*` as appropriate.
 
 ## Recently Landed / Verified Status
 
@@ -148,3 +150,5 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - Canonical backlog process landed: `unified-backlog.md`, `AGENTS.md` post-commit sync rule, removal of superseded standalone launch plan docs under `docs/superpowers/plans/`.
 - First-launch blur: not fixed, low reproducibility.
 - Profile library keyboard parity landed (2026-05-04): `ProfileCard` primary selection is a focusable control with proper naming; nested actions remain separate buttons with `stopPropagation`.
+- `MainLayout` renderer hygiene (2026-05-04): stray `console.log` removed from production paths (`chore/mainlayout-remove-debug-logs`).
+- Shell landmarks (2026-05-04): named root/header/nav/region/main/aside wrappers in `MainLayout` to reduce AX “whole sidebar as one name” noise (M2 follow-up).
