@@ -100,6 +100,107 @@ const isLikelyMainPlacementWindow = (row, expectedBounds = null) => {
   return isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds);
 };
 
+/**
+ * Modal signals that must disqualify a post-dismissal *main* candidate. Narrower than
+ * `isLikelyModalBlockerWindow`: we omit `hasOwner && smallerThanTarget`, which matches many
+ * legitimate mains (e.g. wxWidgets) behind a snap rect and caused endless confirmation waits.
+ */
+const isLikelyPostModalResumeModalBlocker = (row, expectedBounds = null) => {
+  if (!row || row.cloaked || row.hung || !row.enabled || row.isMinimized) return false;
+  if (row.tool) return false;
+  const className = String(row.className || '').toLowerCase();
+  if (MODAL_DIALOG_CLASSES.has(className)) return true;
+  if (isLikelyInteractiveChooserBlocker(row, expectedBounds)) return true;
+  const titleLength = Number(row.titleLength || 0);
+  const hasOwner = Boolean(row.hasOwner);
+  const topMost = Boolean(row.topMost);
+  if (topMost && hasOwner && titleLength > 0) return true;
+  return false;
+};
+
+const getPostModalResumeCandidateRejectionReasons = (row, expectedBounds = null) => {
+  if (!row) return ['missing-row'];
+  const reasons = [];
+  if (row.cloaked) reasons.push('cloaked');
+  if (row.hung) reasons.push('hung');
+  if (row.tool) reasons.push('tool-window');
+  if (!row.enabled) reasons.push('disabled');
+  if (row.isMinimized) reasons.push('minimized');
+  if (reasons.length > 0) return reasons;
+  if (isLikelyPostModalResumeModalBlocker(row, expectedBounds)) {
+    reasons.push('modal-like');
+    return reasons;
+  }
+
+  if (String(expectedBounds?.state || '').toLowerCase() === 'maximized') {
+    if (!isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds)) {
+      reasons.push('maximized-size-mismatch');
+    }
+    return reasons;
+  }
+
+  const ew = Math.max(1, Number(expectedBounds?.width || 0));
+  const eh = Math.max(1, Number(expectedBounds?.height || 0));
+  const expectedArea = ew * eh;
+  const expectedAspect = ew / Math.max(1, eh);
+  const w = Number(row.width || 0);
+  const h = Number(row.height || 0);
+  const minW = Math.max(360, Math.floor(ew * 0.32));
+  const minH = Math.max(220, Math.floor(eh * 0.24));
+  if (w < minW) reasons.push('too-narrow');
+  if (h < minH) reasons.push('too-short');
+
+  const area = Math.max(0, w * h);
+  const minArea = Math.max(220_000, Math.floor(expectedArea * 0.19));
+  if (area < minArea) reasons.push('area-too-small');
+
+  const aspect = w / Math.max(1, h);
+  const minAspect = Math.max(0.82, expectedAspect * 0.72);
+  const maxAspect = Math.min(3.2, expectedAspect * 2.1);
+  if (aspect < minAspect) reasons.push('portrait-companion-shape');
+  if (aspect > maxAspect) reasons.push('ultrawide-mismatch');
+  return reasons;
+};
+
+/**
+ * After a confirmation dialog closes, the real main window may still be smaller than the
+ * profile snap rect (e.g. Audacity default ~800×600 vs a 1441×1250 tile). The strict 52% rule
+ * would never mark it "ready" and post-modal resume times out (`main-window-timeout`).
+ */
+const isLikelyPostModalResumeMainWindowCandidate = (row, expectedBounds = null) => {
+  return getPostModalResumeCandidateRejectionReasons(row, expectedBounds).length === 0;
+};
+
+const scorePostModalResumeCandidate = (
+  row,
+  expectedBounds,
+  scoreWindowCandidate,
+  processHint = '',
+) => {
+  const baseScore = Number(scoreWindowCandidate(row, processHint) || 0);
+  const ew = Math.max(1, Number(expectedBounds?.width || 0));
+  const eh = Math.max(1, Number(expectedBounds?.height || 0));
+  const expectedAspect = ew / Math.max(1, eh);
+  const w = Math.max(1, Number(row?.width || 0));
+  const h = Math.max(1, Number(row?.height || 0));
+  const widthRatio = w / ew;
+  const heightRatio = h / eh;
+  const aspect = w / h;
+  const aspectDelta = Math.abs(aspect - expectedAspect);
+  const sizeBalanceDelta = Math.abs(widthRatio - heightRatio);
+  let score = baseScore;
+
+  score += Math.max(0, 1 - Math.min(1.5, aspectDelta)) * 1_600_000;
+  score += Math.max(0, 1 - Math.min(1, sizeBalanceDelta)) * 900_000;
+  score += Math.min(1.1, widthRatio) * 450_000;
+  score += Math.min(1.1, heightRatio) * 450_000;
+  score += Math.min(30, Number(row?.titleLength || 0)) * 18_000;
+
+  if (aspect < Math.max(0.82, expectedAspect * 0.72)) score -= 2_200_000;
+  if (aspect > Math.min(3.2, expectedAspect * 2.1)) score -= 1_200_000;
+  return score;
+};
+
 const isLikelyMainPlacementWindowIgnoringBlocker = (row, expectedBounds = null) => {
   if (!row || row.cloaked || row.hung || row.tool || !row.enabled || row.isMinimized) return false;
   const width = Number(row.width || 0);
@@ -181,6 +282,9 @@ const waitForMainWindowReadyOrBlocker = async ({
   scoreWindowCandidate,
   excludeHandles = null,
   onAmbiguousCandidates = null,
+  onPoll = null,
+  /** When true (post-confirmation resume), allow smaller top-level windows vs `expectedBounds`. */
+  postModalResumeSizing = false,
 }) => {
   const safeProcess = String(processHintLc || '').trim().toLowerCase();
   const normalizedHints = Array.from(
@@ -212,9 +316,11 @@ const waitForMainWindowReadyOrBlocker = async ({
   let stableCount = 0;
   let lastRows = [];
   let ambiguityHoldCount = 0;
+  let pollCount = 0;
   const candidateProcessHint = safeProcess || normalizedHints[0];
 
   while (Date.now() <= deadline) {
+    pollCount += 1;
     const windowsByHint = await Promise.all(
       normalizedHints.map((hint) => (
         listWindows(hint, {
@@ -249,14 +355,53 @@ const waitForMainWindowReadyOrBlocker = async ({
       scoreWindowCandidate,
       candidateProcessHint,
     );
+    const postModalLooseCandidates = postModalResumeSizing
+      ? [...rows.filter((row) => isLikelyPostModalResumeMainWindowCandidate(row, expectedBounds))]
+        .sort((a, b) => (
+          scorePostModalResumeCandidate(b, expectedBounds, scoreWindowCandidate, candidateProcessHint)
+          - scorePostModalResumeCandidate(a, expectedBounds, scoreWindowCandidate, candidateProcessHint)
+        ))
+      : [];
     const candidateHandleSet = new Set(
-      relaxedCandidates.map((row) => String(row?.handle || '').trim()).filter(Boolean),
+      [...relaxedCandidates, ...postModalLooseCandidates]
+        .map((row) => String(row?.handle || '').trim())
+        .filter(Boolean),
     );
     lastRows = rows;
     const blockers = rows.filter((row) => isLikelyModalBlockerWindow(row, expectedBounds));
     const blockingOnlyRows = blockers.filter((row) => (
       !candidateHandleSet.has(String(row?.handle || '').trim())
     ));
+    if (typeof onPoll === 'function') {
+      onPoll({
+        pollIndex: pollCount,
+        rows: rows.slice(0, 8).map((row) => {
+          const handle = String(row?.handle || '').trim();
+          return {
+            handle,
+            className: String(row?.className || ''),
+            rect: {
+              width: Number(row?.width || 0),
+              height: Number(row?.height || 0),
+            },
+            hasOwner: Boolean(row?.hasOwner),
+            topMost: Boolean(row?.topMost),
+            score: postModalResumeSizing
+              ? scorePostModalResumeCandidate(row, expectedBounds, scoreWindowCandidate, candidateProcessHint)
+              : Number(scoreWindowCandidate(row, candidateProcessHint) || 0),
+            acceptedAs: [
+              strictCandidates.some((candidate) => String(candidate?.handle || '').trim() === handle) ? 'strict' : null,
+              relaxedCandidates.some((candidate) => String(candidate?.handle || '').trim() === handle) ? 'relaxed' : null,
+              postModalLooseCandidates.some((candidate) => String(candidate?.handle || '').trim() === handle) ? 'post-modal' : null,
+              blockers.some((candidate) => String(candidate?.handle || '').trim() === handle) ? 'blocker' : null,
+            ].filter(Boolean),
+            rejectionReasons: postModalResumeSizing
+              ? getPostModalResumeCandidateRejectionReasons(row, expectedBounds)
+              : [],
+          };
+        }),
+      });
+    }
     if (blockingOnlyRows.length > 0) {
       const rankedBlockers = [...blockingOnlyRows].sort((a, b) => Number(b.area || 0) - Number(a.area || 0));
       const blocker = rankedBlockers[0];
@@ -316,9 +461,16 @@ const waitForMainWindowReadyOrBlocker = async ({
     blockerFirstSeenAt = 0;
     lastBlockerHandle = null;
     blockerStableCount = 0;
-    const candidates = (blockers.length > 0 && blockingOnlyRows.length === 0)
+    let candidates = (blockers.length > 0 && blockingOnlyRows.length === 0)
       ? relaxedCandidates
       : strictCandidates;
+    if (
+      candidates.length === 0
+      && postModalResumeSizing
+      && postModalLooseCandidates.length > 0
+    ) {
+      candidates = postModalLooseCandidates;
+    }
     if (candidates.length === 0) {
       stableHandle = null;
       stableCount = 0;
@@ -327,7 +479,10 @@ const waitForMainWindowReadyOrBlocker = async ({
     }
 
     const topCandidate = candidates[0];
-    const ambiguity = getTopCandidateAmbiguity(candidates, scoreWindowCandidate, candidateProcessHint);
+    const ambiguityScore = postModalResumeSizing && candidates === postModalLooseCandidates
+      ? ((row, hint) => scorePostModalResumeCandidate(row, expectedBounds, scoreWindowCandidate, hint))
+      : scoreWindowCandidate;
+    const ambiguity = getTopCandidateAmbiguity(candidates, ambiguityScore, candidateProcessHint);
     if (ambiguity.ambiguous && ambiguityHoldCount < MAX_AMBIGUITY_HOLDS) {
       ambiguityHoldCount += 1;
       stableHandle = null;
@@ -365,7 +520,10 @@ const waitForMainWindowReadyOrBlocker = async ({
   }
 
   const timeoutPlausibleMainRows = sortCandidateRows(
-    lastRows.filter((row) => isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds)),
+    lastRows.filter((row) => (
+      isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds)
+      || (postModalResumeSizing && isLikelyPostModalResumeMainWindowCandidate(row, expectedBounds))
+    )),
     scoreWindowCandidate,
     candidateProcessHint,
   );
@@ -414,6 +572,8 @@ module.exports = {
   compareCandidateRows,
   isLikelyModalBlockerWindow,
   isLikelyMainPlacementWindow,
+  isLikelyMainPlacementWindowIgnoringBlocker,
+  isLikelyPostModalResumeMainWindowCandidate,
   sortCandidateRows,
   waitForMainWindowReadyOrBlocker,
 };

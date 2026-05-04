@@ -18,6 +18,7 @@ test('createProfileLaunchRunner returns launchProfileById function', () => {
       timedOut: true,
       handle: null,
     }),
+    isLikelyMainPlacementWindowIgnoringBlocker: () => false,
     verifyAndCorrectWindowPlacement: async () => ({ verified: false, corrected: false }),
     stabilizePlacementForSlowLaunch: async () => ({ verified: false, handle: null }),
     readProfilesFromDisk: () => ({}),

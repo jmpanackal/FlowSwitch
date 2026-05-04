@@ -26,7 +26,10 @@ const {
   hiddenWindowTitlePatterns,
   getRunningWindowProcesses,
 } = require('./services/windows-process-service');
-const { waitForMainWindowReadyOrBlocker } = require('./services/window-ready-gate');
+const {
+  waitForMainWindowReadyOrBlocker,
+  isLikelyMainPlacementWindowIgnoringBlocker,
+} = require('./services/window-ready-gate');
 const {
   isChromiumFamilyProcessKey,
   isChromiumTopLevelWindowRow,
@@ -818,6 +821,7 @@ const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
   getWindowPlacementRectsByHandle,
   isWindowOnTargetMonitor,
   waitForMainWindowReadyOrBlocker,
+  isLikelyMainPlacementWindowIgnoringBlocker,
   verifyAndCorrectWindowPlacement,
   stabilizePlacementForSlowLaunch,
   readProfilesFromDisk,

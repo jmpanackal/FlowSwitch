@@ -12,6 +12,8 @@ type LaunchControlProps = {
   primaryLabel?: string;
   /** Extra tooltip lines (apps, tabs, startup, monitors). */
   breakdownLines?: string[] | null;
+  /** When true, elapsed seconds stop advancing (e.g. confirmation dialog open). */
+  waitingOnConfirmation?: boolean;
 };
 
 const launchCardClass =
@@ -35,14 +37,19 @@ export function LaunchControl({
   hotkey,
   primaryLabel = "Launch profile",
   breakdownLines = null,
+  waitingOnConfirmation = false,
 }: LaunchControlProps) {
   const [elapsedSec, setElapsedSec] = useState(0);
   const startedAtRef = useRef<number | null>(null);
+  const pauseAccumRef = useRef(0);
+  const pauseAnchorRef = useRef<number | null>(null);
   const hk = hotkey?.trim() || null;
 
   useEffect(() => {
     if (!isLaunching) {
       startedAtRef.current = null;
+      pauseAccumRef.current = 0;
+      pauseAnchorRef.current = null;
       setElapsedSec(0);
       return;
     }
@@ -51,14 +58,32 @@ export function LaunchControl({
     }
     const tick = () => {
       if (startedAtRef.current === null) return;
+      let pauseTotal = pauseAccumRef.current;
+      if (waitingOnConfirmation && pauseAnchorRef.current != null) {
+        pauseTotal += Date.now() - pauseAnchorRef.current;
+      }
       setElapsedSec(
-        Math.floor((Date.now() - startedAtRef.current) / 1000),
+        Math.floor((Date.now() - startedAtRef.current - pauseTotal) / 1000),
       );
     };
     tick();
     const id = window.setInterval(tick, 1000);
     return () => window.clearInterval(id);
-  }, [isLaunching]);
+  }, [isLaunching, waitingOnConfirmation]);
+
+  useEffect(() => {
+    if (!isLaunching) {
+      pauseAccumRef.current = 0;
+      pauseAnchorRef.current = null;
+      return;
+    }
+    if (waitingOnConfirmation) {
+      if (pauseAnchorRef.current === null) pauseAnchorRef.current = Date.now();
+    } else if (pauseAnchorRef.current !== null) {
+      pauseAccumRef.current += Date.now() - pauseAnchorRef.current;
+      pauseAnchorRef.current = null;
+    }
+  }, [isLaunching, waitingOnConfirmation]);
 
   const tooltipLabel = useMemo(() => {
     const base = hk

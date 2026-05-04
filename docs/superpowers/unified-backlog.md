@@ -13,6 +13,7 @@ It consolidates:
 - `docs/superpowers/feature-braindump.md`
 - `docs/superpowers/specs/workflow-orchestration-rewrite-plan.md`
 - `docs/superpowers/specs/workflow-orchestration-execution-checklist.md`
+- `docs/superpowers/specs/2026-05-03-ui-ux-evaluation-report.md` (shell accessibility, chrome version, renderer hygiene; agent-browser + heuristic pass)
 
 Status legend:
 - `not_started`
@@ -55,6 +56,14 @@ Status legend:
    - Launch-time risk/duration messaging.
    - Optional sequencing for dependency-sensitive launches.
 
+5. Shell accessibility — profile library keyboard parity (`not_started`)
+   - **Evidence:** `docs/superpowers/specs/2026-05-03-ui-ux-evaluation-report.md` (C1); `ProfileCard` uses `div` + `onClick` without `tabIndex` — cards not in tab order; no Enter/Space semantics.
+   - **Done when:** Profile rows are operable with keyboard only (prefer `<button type="button">` for card surface, preserve settings `stopPropagation`), with concise per-profile accessible naming.
+
+6. About dialog / chrome version source of truth (`not_started`)
+   - **Evidence:** report M1; `AppChromeModals.tsx` hardcodes `APP_VERSION` out of sync with `package.json` (e.g. 0.1.0 vs shipped 0.1.3).
+   - **Done when:** About (and any chrome copy) reads version from the same build-time or package source as release artifacts.
+
 #### P1 - Next
 
 1. Layout preview runtime status semantics (`not_started`)
@@ -65,6 +74,27 @@ Status legend:
    - **Done on branch `fix/content-launch-followups` (2026-05-01):** associated-content **+ Add** menu stays within the narrow inspector (full-width grid row + width cap); removed dead **`pt-12`** top padding on app/content inspect roots (Launch tab unchanged).
 6. Catalog curation quick commands (`not_started`)
 7. Edit/view affordance + first-run guidance (`not_started`)
+
+8. Renderer hygiene — remove `MainLayout` debug logging (`not_started`)
+   - **Evidence:** report M5; 10+ `console.log` in `src/renderer/layout/MainLayout.tsx` (profile switch, drag callbacks).
+   - **Done when:** No stray `console.log` in production renderer paths (dev-only logger or delete).
+
+9. Shell landmarks + accessible name audit (`not_started`)
+   - **Evidence:** report M2; AX snapshots show a root `generic` whose name concatenates entire sidebar text; add `<main>` / `nav`, explicit card/region labels; validate with NVDA.
+   - **Done when:** Screen reader rotor/navigation does not announce one blob for the whole library; spot-check with NVDA on Profiles / Apps / Content.
+
+10. Library tab strip pointer hit-testing (`not_started`)
+    - **Evidence:** report M3; CDP `click` on tab ref failed while `tab.click()` succeeded — verify no overlay intercepts real pointer events on Profiles/Apps/Content tabs.
+
+11. Apps / Content sidebar SR verbosity + row semantics (`not_started`)
+    - **Evidence:** report m2, m4; long `aria-label` on Info help buttons; mixed folder/file row exposure in AX tree.
+    - **Done when:** Short `aria-label` or `aria-describedby` for help controls; consistent row button/heading pattern for content entries.
+
+12. Optional keyboard skip affordance (`not_started`)
+    - **Evidence:** report m5; skip-to-main style pattern for heavy sidebar + canvas layouts.
+
+13. QA harness note — agent-browser snapshots (`not_started` / process)
+    - **Evidence:** report M4; `snapshot -i` omits portaled `menuitem`s — document in test playbook: use full `snapshot` for menus/modals.
 
 ### B) Workflow Orchestration Rewrite Backlog (from spec + execution checklist)
 
@@ -81,6 +111,8 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 7. Candidate-set trigger coverage validation (`not_started`)
 8. Manual out-of-order confirmation validation pass (`in_progress`)
 
+- **Latest (2026-05-04, `fix/audacity-confirmation-resume`):** Audacity confirmation-flow hardening landed on the active fix branch: post-dismiss candidate scans now log accepted/rejected windows with reasons, narrow/portrait `wxWindowNR` companion panes are rejected before placement, and the resume path escalates to launched-PID main-window placement when lightweight process-name enumeration never surfaces the true main window.
+
 #### P1 - Reliability Expansion
 
 1. Status-store degraded mode path (`not_started`)
@@ -96,9 +128,11 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 3. Start app-discovery trust pass (manual exe + launchability classification + non-system-drive icon/path robustness).
 4. Start large-profile guardrails (thresholds, warnings, sequencing policy).
 5. Continue orchestration P0 in-progress tasks to done before opening new P1 items.
+6. **UI/UX evaluation follow-ups:** pick up **P0 §5–6** (profile card keyboard, About version) early for trust and accessibility; batch **P1 §8–11** with the next renderer-focused PR or `fix/*` branch as appropriate.
 
 ## Recently Landed / Verified Status
 
+- Orchestration Phase 2: `processHintsVersion` emitted on profile launch diagnostics `start` and on `companion-hints-discovered` (`PROCESS_HINTS_VERSION` in `process-hints.js`); execution checklist §C process-hint versioning marked `done` (2026-05-03).
 - Drag freeze: mostly fixed.
 - Secondary-monitor minimized target bug: fixed.
 - Launch progress UX: partially implemented through launch sidebar.

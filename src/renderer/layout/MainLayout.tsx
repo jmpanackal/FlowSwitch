@@ -1670,7 +1670,7 @@ export default function App() {
               ? status.pendingConfirmations
                   .filter(
                     (item) =>
-                      String(item?.status || "waiting").toLowerCase() !== "resolved",
+                      String(item?.status || "waiting").toLowerCase() === "waiting",
                   )
                   .map((item) => String(item?.name || "").trim())
                   .filter(Boolean)
@@ -1685,6 +1685,8 @@ export default function App() {
             setLastLaunchDetailMessage(
               `Waiting for ${unresolved} confirmation${unresolved === 1 ? "" : "s"}${namesList}.`,
             );
+          } else {
+            setLastLaunchDetailMessage(null);
           }
         } else {
           setLastLaunchDetailMessage(null);
@@ -2440,6 +2442,10 @@ export default function App() {
                       hotkey={currentProfile.hotkey?.trim() || null}
                       primaryLabel={`Launch ${currentProfile.name}`}
                       breakdownLines={profileLaunchBreakdownLines}
+                      waitingOnConfirmation={
+                        Boolean(isLaunching)
+                        && (lastLaunchProgress?.unresolvedPendingConfirmationCount ?? 0) > 0
+                      }
                     />
                   </div>
                 </div>
@@ -2729,12 +2735,14 @@ export default function App() {
             <div className="flex min-h-0 min-w-0 flex-1 overflow-hidden">
               {inspectorMode === "launch" ? (
                 launchInspectorProfile ? (
-                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden px-3 pb-3 pt-3">
+                  <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden pl-3 pr-0 pb-3 pt-3 sm:pl-4">
                     <LaunchCenterInspector
                       profile={launchInspectorProfile}
                       progress={lastLaunchProgress}
                       summaryMessage={
-                        (lastLaunchDetailMessage
+                        (((lastLaunchProgress?.unresolvedPendingConfirmationCount ?? 0) > 0
+                          ? ""
+                          : lastLaunchDetailMessage)
                           || (launchFeedback.status !== "idle" && launchFeedback.status !== "in-progress"
                             ? launchFeedback.message
                             : "")

@@ -1,6 +1,7 @@
 import {
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -9,6 +10,7 @@ import {
   Check,
   ChevronRight,
   Globe,
+  Link2,
   Loader2,
   Sparkles,
   X,
@@ -26,6 +28,7 @@ import {
   computeSubstepWeightedProgress,
   deriveBuckets,
 } from "../utils/launchTimeline";
+import { orderLaunchActionsForProgressDisplay } from "../utils/launchTimelineDisplayOrder";
 
 type LaunchCenterInspectorProps = {
   profile: FlowProfile;
@@ -90,7 +93,9 @@ function isTerminalActionState(state: LaunchAction["state"]): boolean {
 
 function formatEta(
   eta: ReturnType<typeof computeEta>,
+  waitingConfirmation?: boolean,
 ): string {
+  if (waitingConfirmation) return "Paused — waiting for you";
   if (eta.kind === "estimating") return "Estimating…";
   const sec = Math.max(1, Math.round(eta.remainingMs / 1000));
   const prefix = eta.confidence === "high" ? "" : "~";
@@ -418,7 +423,9 @@ function fileIconTypeForLaunchSummaryItem(item: {
   path?: string | null;
   name?: string | null;
 }): string {
-  if (String(item?.type || "").trim().toLowerCase() === "folder") return "folder";
+  const kind = String(item?.type || "").trim().toLowerCase();
+  if (kind === "folder") return "folder";
+  if (kind === "link") return "link";
   const raw = String(item.path || item.name || "").trim();
   const seg = raw.replace(/\\/g, "/").split("/").pop() || "";
   const dot = seg.lastIndexOf(".");
@@ -537,7 +544,7 @@ function LaunchSummaryAppRow({
   const hasDetailRow = detailBody != null || warningNote != null || errorNote != null;
 
   return (
-    <li className="grid grid-cols-[auto,1fr,auto] gap-x-2.5 gap-y-1.5 px-0 py-2.5">
+    <li className="grid min-w-0 grid-cols-[auto,1fr,auto] gap-x-2.5 gap-y-1.5 px-0 py-2.5">
       <div className={`pt-0.5 ${hasDetailRow ? "row-span-2" : ""}`}>
         <ActionIcon action={action} size="sm" />
       </div>
@@ -596,6 +603,67 @@ function resolveActionDisplayLocation(
   return null;
 }
 
+type TabHostMeta = {
+  appTitle: string;
+  appIconDataUrl?: string | null;
+};
+
+function normalizeActionUrlKey(raw: string | null | undefined): string {
+  const s = String(raw || "").trim();
+  if (!s) return "";
+  try {
+    const u = new URL(s);
+    return u.href.replace(/\/$/, "").toLowerCase();
+  } catch {
+    return s.toLowerCase();
+  }
+}
+
+function actionUrlMatchKeys(raw: string | null | undefined): string[] {
+  const full = normalizeActionUrlKey(raw);
+  if (!full) return [];
+  const keys = new Set([full]);
+  try {
+    const host = new URL(String(raw || "")).hostname.trim().toLowerCase();
+    if (host) keys.add(`host:${host}`);
+  } catch {
+    // ignore non-URL strings
+  }
+  return Array.from(keys);
+}
+
+function buildTabHostLookup(actions: LaunchAction[] | null | undefined): Map<string, TabHostMeta> {
+  const out = new Map<string, TabHostMeta>();
+  const list = Array.isArray(actions) ? actions : [];
+  for (const a of list) {
+    if (a.kind !== "app") continue;
+    const host: TabHostMeta = {
+      appTitle: String(a.title || "").trim() || "Browser",
+      appIconDataUrl: a.iconDataUrl ?? null,
+    };
+    for (const item of a.contentItems ?? []) {
+      if (String(item?.type || "").toLowerCase() !== "link") continue;
+      for (const k of actionUrlMatchKeys(item?.path ?? "")) {
+        if (!k || out.has(k)) continue;
+        out.set(k, host);
+      }
+    }
+  }
+  return out;
+}
+
+function resolveTabHostForAction(
+  action: LaunchAction,
+  tabHostLookup: Map<string, TabHostMeta>,
+): TabHostMeta | null {
+  if (action.kind !== "tab") return null;
+  for (const k of actionUrlMatchKeys(action.browserTabUrl)) {
+    const host = tabHostLookup.get(k);
+    if (host) return host;
+  }
+  return null;
+}
+
 function ActionPlacementSummary({
   action,
   progress,
@@ -605,6 +673,7 @@ function ActionPlacementSummary({
   progress: LaunchProgressSnapshot | null;
   compact?: boolean;
 }) {
+  if (action.kind === "tab") return null;
   const loc = resolveActionDisplayLocation(action, progress);
   if (!loc) return null;
   if (compact) {
@@ -729,12 +798,15 @@ function ActionIcon({
 function LaunchActionLeadSurface({
   action,
   progress,
+  tabHost,
   trailing,
 }: {
   action: LaunchAction;
   progress: LaunchProgressSnapshot | null;
+  tabHost?: TabHostMeta | null;
   trailing?: ReactNode;
 }) {
+  const tabHostIconSrc = safeIconSrc(tabHost?.appIconDataUrl ?? undefined);
   return (
     <div className="flex min-w-0 flex-1 items-center gap-2.5">
       <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/35 ring-1 ring-white/12">
@@ -744,6 +816,26 @@ function LaunchActionLeadSurface({
         <span className="block truncate text-[11px] font-semibold leading-tight text-flow-text-primary">
           {action.title}
         </span>
+        {action.kind === "tab" && tabHost?.appTitle ? (
+          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-flow-text-muted">
+            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/12">
+              <Link2 className="h-2.5 w-2.5 text-flow-text-muted/90" aria-hidden />
+            </span>
+            <span className="shrink-0 text-[9px] uppercase tracking-wide text-flow-text-muted/80">
+              Opens with:
+            </span>
+            {tabHostIconSrc ? (
+              <img
+                src={tabHostIconSrc}
+                alt=""
+                className="h-3 w-3 shrink-0 rounded object-cover ring-1 ring-white/20"
+                draggable={false}
+              />
+            ) : (
+              <Globe className="h-3 w-3 shrink-0 text-flow-text-muted" aria-hidden />
+            )}
+          </span>
+        ) : null}
         <ActionPlacementSummary action={action} progress={progress} compact />
       </div>
       {trailing}
@@ -1013,6 +1105,18 @@ export function LaunchCenterInspector({
 }: LaunchCenterInspectorProps) {
   const rows = useMemo(() => (progress?.appLaunchProgress ?? []).slice(), [progress]);
   const actions = progress?.actions;
+  const timelineActions = useMemo(
+    () => orderLaunchActionsForProgressDisplay(actions ?? []),
+    [actions],
+  );
+  const tabHostLookup = useMemo(
+    () => buildTabHostLookup(timelineActions),
+    [timelineActions],
+  );
+
+  const pauseAccumRef = useRef(0);
+  const pauseAnchorRef = useRef<number | null>(null);
+  const prevRunIdRef = useRef<string | null>(null);
 
   const [reducedMotion, setReducedMotion] = useState(false);
   useEffect(() => {
@@ -1046,33 +1150,77 @@ export function LaunchCenterInspector({
     }
   }, [isLaunching]);
 
+  useEffect(() => {
+    if (!isLaunching) {
+      prevRunIdRef.current = null;
+      pauseAccumRef.current = 0;
+      pauseAnchorRef.current = null;
+      return;
+    }
+    const rid = progress?.runId != null ? String(progress.runId).trim() : "";
+    if (rid && prevRunIdRef.current !== rid) {
+      prevRunIdRef.current = rid;
+      pauseAccumRef.current = 0;
+      pauseAnchorRef.current = null;
+    }
+  }, [isLaunching, progress?.runId]);
+
+  useEffect(() => {
+    if (!isLaunching) {
+      pauseAccumRef.current = 0;
+      pauseAnchorRef.current = null;
+      return;
+    }
+    const pending = (progress?.unresolvedPendingConfirmationCount ?? 0) > 0;
+    if (pending) {
+      if (pauseAnchorRef.current === null) pauseAnchorRef.current = Date.now();
+    } else if (pauseAnchorRef.current !== null) {
+      pauseAccumRef.current += Date.now() - pauseAnchorRef.current;
+      pauseAnchorRef.current = null;
+    }
+  }, [isLaunching, progress?.unresolvedPendingConfirmationCount]);
+
   const progressModel = useMemo(() => {
-    if (!hasTimeline || !actions) return null;
-    return computeSubstepWeightedProgress(actions);
-  }, [actions, hasTimeline]);
+    if (!hasTimeline || !timelineActions.length) return null;
+    return computeSubstepWeightedProgress(timelineActions);
+  }, [timelineActions, hasTimeline]);
 
   const progressLabelUnit = useMemo(() => {
-    if (!actions?.length) return "steps";
-    const anyMultiSubstep = actions.some((a) => (a.substeps?.length ?? 0) > 1);
+    if (!timelineActions.length) return "steps";
+    const anyMultiSubstep = timelineActions.some((a) => (a.substeps?.length ?? 0) > 1);
     return anyMultiSubstep ? "steps" : "actions";
-  }, [actions]);
+  }, [timelineActions]);
 
   const eta = useMemo(() => {
-    if (!hasTimeline || !actions || !progressModel) return { kind: "estimating" as const };
-    return computeEta({ nowMs: Date.now(), actions, progress: progressModel });
-  }, [actions, hasTimeline, progressModel]);
+    if (!hasTimeline || !timelineActions.length || !progressModel) {
+      return { kind: "estimating" as const };
+    }
+    return computeEta({ nowMs: Date.now(), actions: timelineActions, progress: progressModel });
+  }, [timelineActions, hasTimeline, progressModel]);
 
   const buckets = useMemo(() => {
-    if (!hasTimeline || !actions || !progressModel) return null;
+    if (!hasTimeline || !timelineActions.length || !progressModel) return null;
     const cap = showAllCompleted ? 999 : COMPLETED_CAP;
     return deriveBuckets({
-      actions,
+      actions: timelineActions,
       activeActionId: progress?.activeActionId ?? null,
       completedCap: cap,
     });
-  }, [actions, hasTimeline, progressModel, progress?.activeActionId, showAllCompleted]);
+  }, [timelineActions, hasTimeline, progressModel, progress?.activeActionId, showAllCompleted]);
 
   const renderBuckets = buckets;
+
+  /** Total attached content targets across timeline actions (for Run overview). */
+  const runOverviewContentItemCount = useMemo(() => {
+    const acts = progress?.actions;
+    if (!Array.isArray(acts)) return 0;
+    let total = 0;
+    for (const a of acts) {
+      if (!Array.isArray(a.contentItems)) continue;
+      total += a.contentItems.length;
+    }
+    return total;
+  }, [progress?.actions]);
 
   const [nowMs, setNowMs] = useState(() => Date.now());
   useEffect(() => {
@@ -1082,10 +1230,25 @@ export function LaunchCenterInspector({
 
   const elapsedSec = useMemo(() => {
     const start = progress?.startedAtMs;
-    const end = progress?.updatedAtMs ?? nowMs;
     if (!start || !Number.isFinite(start)) return null;
-    return Math.max(0, Math.round((end - start) / 1000));
-  }, [progress?.startedAtMs, progress?.updatedAtMs, nowMs]);
+    const end = isLaunching ? nowMs : (progress?.updatedAtMs ?? nowMs);
+    if (!Number.isFinite(Number(end))) return null;
+    let pauseTotal = pauseAccumRef.current;
+    if (
+      isLaunching
+      && (progress?.unresolvedPendingConfirmationCount ?? 0) > 0
+      && pauseAnchorRef.current != null
+    ) {
+      pauseTotal += nowMs - pauseAnchorRef.current;
+    }
+    return Math.max(0, Math.round((Number(end) - start - pauseTotal) / 1000));
+  }, [
+    progress?.startedAtMs,
+    progress?.updatedAtMs,
+    nowMs,
+    isLaunching,
+    progress?.unresolvedPendingConfirmationCount,
+  ]);
 
   const legacyOverallPct = useMemo(() => {
     if (!progress) return null;
@@ -1128,14 +1291,18 @@ export function LaunchCenterInspector({
   }, [actions, progress?.failedAppCount, progress?.skippedAppCount, runState]);
 
   const summaryAppActions = useMemo(
-    () => (actions ?? []).filter((a) => a.kind === "app"),
-    [actions],
+    () => timelineActions.filter((a) => a.kind === "app"),
+    [timelineActions],
   );
 
   const completedAllList = useMemo(() => {
-    if (!actions) return [];
-    return actions.filter((a) => isTerminalActionState(a.state));
-  }, [actions]);
+    if (!timelineActions.length) return [];
+    return timelineActions.filter((a) => isTerminalActionState(a.state));
+  }, [timelineActions]);
+
+  const waitingOnConfirmationUi = Boolean(
+    isLaunching && (progress?.unresolvedPendingConfirmationCount ?? 0) > 0,
+  );
 
   if (!hasTimeline) {
     return (
@@ -1207,7 +1374,7 @@ export function LaunchCenterInspector({
     );
   }
 
-  if (detailsOpen && hasTimeline && actions && !showSummaryChrome) {
+  if (detailsOpen && hasTimeline && timelineActions.length > 0 && !showSummaryChrome) {
     return (
       <div className="flex min-h-0 min-w-0 flex-1 flex-col">
         {summaryMessage?.trim() ? (
@@ -1256,11 +1423,11 @@ export function LaunchCenterInspector({
         </div>
 
         <ActionDetailsList
-          actions={actions}
+          actions={timelineActions}
           reducedMotion={reducedMotion}
           progress={progress}
           runState={runState}
-          className="scrollbar-elegant mt-3 min-h-0 flex-1 overflow-y-auto pr-0.5"
+          className="scrollbar-elegant mt-3 min-h-0 flex-1 overflow-y-auto pr-2 sm:pr-3"
         />
       </div>
     );
@@ -1287,9 +1454,9 @@ export function LaunchCenterInspector({
 
       {showSummaryChrome ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="min-w-0 shrink-0 overflow-visible">
+          <div className="min-w-0 overflow-visible pr-2 sm:pr-3">
             <div className="border-b border-white/10 pb-2">
-              <div className="flex items-start justify-between gap-3">
+              <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
                   <p className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-flow-text-muted">
                     Launch summary
@@ -1309,7 +1476,7 @@ export function LaunchCenterInspector({
                     <span>{summaryOutcomeHeaderChip(summaryOutcome).label}</span>
                   </span>
                 </div>
-                <div className="shrink-0 text-right">
+                <div className="min-w-0 shrink-0 text-right">
                   <p className="tabular-nums text-xl font-semibold leading-none text-flow-text-primary">
                     {progress?.launchedAppCount ?? summaryAppActions.filter((a) => actionLooksLaunched(a, progress, runState)).length}
                     <span className="text-flow-text-secondary">/{progress?.requestedAppCount ?? summaryAppActions.length}</span>
@@ -1334,7 +1501,7 @@ export function LaunchCenterInspector({
               </p>
             ) : null}
             {summaryAppActions.length > 0 ? (
-              <ul className="divide-y divide-white/10">
+              <ul className="min-w-0 divide-y divide-white/10">
                 {summaryAppActions.map((a) => (
                   <LaunchSummaryAppRow
                     key={a.id}
@@ -1350,7 +1517,7 @@ export function LaunchCenterInspector({
           </div>
         </div>
       ) : (
-        <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto">
+        <div className="scrollbar-elegant flex min-h-0 min-w-0 flex-1 flex-col overflow-y-auto pr-2 sm:pr-3">
           <div className="flex items-start justify-between gap-2">
             <div className="min-w-0">
               <p className="text-[11px] font-semibold uppercase tracking-wide text-flow-text-muted">
@@ -1383,7 +1550,7 @@ export function LaunchCenterInspector({
                 {pctRounded}
                 %
                 {" · "}
-                {formatEta(eta)}
+                {formatEta(eta, waitingOnConfirmationUi)}
               </span>
             </div>
               <div
@@ -1402,67 +1569,101 @@ export function LaunchCenterInspector({
             && (
               (progress?.requestedAppCount ?? 0) > 0
               || (progress?.requestedBrowserTabCount ?? 0) > 0
+              || runOverviewContentItemCount > 0
               || (progress?.failedAppCount ?? 0) > 0
               || (progress?.skippedAppCount ?? 0) > 0
               || (progress?.unresolvedPendingConfirmationCount ?? 0) > 0
             ) ? (
-              <p className="mt-2 text-[11px] leading-snug text-flow-text-secondary">
-                <span className="font-semibold text-flow-text-muted">Run overview:</span>
-                {" "}
-                {(progress?.requestedAppCount ?? 0) > 0 ? (
-                  <>
-                    Apps
-                    {" "}
-                    <span className="tabular-nums text-flow-text-primary">
-                      {progress?.launchedAppCount ?? 0}
-                      /
-                      {progress?.requestedAppCount ?? 0}
-                    </span>
-                  </>
+              <div className="mt-2 space-y-1 text-[11px] leading-snug text-flow-text-secondary">
+                <p className="font-semibold text-flow-text-muted">Run overview</p>
+                {((progress?.requestedAppCount ?? 0) > 0
+                || (progress?.requestedBrowserTabCount ?? 0) > 0
+                || runOverviewContentItemCount > 0) ? (
+                  <p className="min-w-0 text-flow-text-secondary">
+                    {(progress?.requestedAppCount ?? 0) > 0 ? (
+                      <>
+                        Apps
+                        {" "}
+                        <span className="tabular-nums text-flow-text-primary">
+                          {progress?.launchedAppCount ?? 0}
+                          /
+                          {progress?.requestedAppCount ?? 0}
+                        </span>
+                      </>
+                    ) : null}
+                    {(progress?.requestedAppCount ?? 0) > 0
+                    && ((progress?.requestedBrowserTabCount ?? 0) > 0
+                      || runOverviewContentItemCount > 0)
+                      ? " · "
+                      : null}
+                    {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
+                      <>
+                        Tabs
+                        {" "}
+                        <span className="tabular-nums text-flow-text-primary">
+                          {progress?.launchedTabCount ?? 0}
+                          /
+                          {progress?.requestedBrowserTabCount ?? 0}
+                        </span>
+                      </>
+                    ) : null}
+                    {((progress?.requestedBrowserTabCount ?? 0) > 0
+                    && runOverviewContentItemCount > 0)
+                      ? " · "
+                      : null}
+                    {runOverviewContentItemCount > 0 ? (
+                      <>
+                        Content
+                        {" "}
+                        <span className="tabular-nums text-flow-text-primary">
+                          {runOverviewContentItemCount}
+                        </span>
+                      </>
+                    ) : null}
+                  </p>
                 ) : null}
-                {(progress?.requestedAppCount ?? 0) > 0
-                && (progress?.requestedBrowserTabCount ?? 0) > 0
-                  ? " · "
-                  : null}
-                {(progress?.requestedBrowserTabCount ?? 0) > 0 ? (
-                  <>
-                    Tabs
-                    {" "}
-                    <span className="tabular-nums text-flow-text-primary">
-                      {progress?.launchedTabCount ?? 0}
-                      /
-                      {progress?.requestedBrowserTabCount ?? 0}
-                    </span>
-                  </>
+                {((progress?.failedAppCount ?? 0) > 0
+                || (progress?.skippedAppCount ?? 0) > 0
+                || (progress?.unresolvedPendingConfirmationCount ?? 0) > 0) ? (
+                  <p className="min-w-0 whitespace-normal text-flow-text-secondary">
+                    {(progress?.failedAppCount ?? 0) > 0 ? (
+                      <span className="text-rose-200/95">
+                        {progress?.failedAppCount}
+                        {" failed"}
+                      </span>
+                    ) : null}
+                    {(progress?.failedAppCount ?? 0) > 0
+                    && ((progress?.skippedAppCount ?? 0) > 0
+                      || (progress?.unresolvedPendingConfirmationCount ?? 0) > 0)
+                      ? " · "
+                      : null}
+                    {(progress?.skippedAppCount ?? 0) > 0 ? (
+                      <span className="text-flow-text-muted">
+                        {progress?.skippedAppCount}
+                        {" skipped"}
+                      </span>
+                    ) : null}
+                    {(progress?.skippedAppCount ?? 0) > 0
+                    && (progress?.unresolvedPendingConfirmationCount ?? 0) > 0
+                      ? " · "
+                      : null}
+                    {(progress?.unresolvedPendingConfirmationCount ?? 0) > 0 ? (
+                      <span className="whitespace-nowrap text-amber-200/90">
+                        {progress?.unresolvedPendingConfirmationCount}
+                        {" awaiting confirmation"}
+                      </span>
+                    ) : null}
+                  </p>
                 ) : null}
-                {(progress?.failedAppCount ?? 0) > 0 ? (
-                  <>
-                    {" · "}
-                    <span className="text-rose-200/95">
-                      {progress?.failedAppCount}
-                      {" failed"}
-                    </span>
-                  </>
-                ) : null}
-                {(progress?.skippedAppCount ?? 0) > 0 ? (
-                  <>
-                    {" · "}
-                    <span className="text-flow-text-muted">
-                      {progress?.skippedAppCount}
-                      {" skipped"}
-                    </span>
-                  </>
-                ) : null}
-                {(progress?.unresolvedPendingConfirmationCount ?? 0) > 0 ? (
-                  <>
-                    {" · "}
-                    <span className="text-amber-200/90">
-                      {progress?.unresolvedPendingConfirmationCount}
-                      {" awaiting confirmation"}
-                    </span>
-                  </>
-                ) : null}
-              </p>
+              </div>
+            ) : null}
+            {isLaunching && waitingOnConfirmationUi ? (
+              <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-100/95 ring-1 ring-amber-400/20">
+                <p className="font-semibold text-amber-50/95">Waiting on a confirmation dialog</p>
+                <p className="mt-0.5 text-amber-100/85">
+                  The launch timer is paused. Queued steps stay deferred until the dialog is dismissed.
+                </p>
+              </div>
             ) : null}
             {isLaunching ? (
               <div className="mt-2 flex justify-end">
@@ -1494,10 +1695,14 @@ export function LaunchCenterInspector({
                       className={LAUNCH_LEAD_LAYOUT_SHELL_CLASS}
                       style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
                     >
-                      <LaunchActionLeadSurface action={renderBuckets.current} progress={progress} />
+                      <LaunchActionLeadSurface
+                        action={renderBuckets.current}
+                        progress={progress}
+                        tabHost={resolveTabHostForAction(renderBuckets.current, tabHostLookup)}
+                      />
                     </div>
                   </div>
-                  <div className="relative overflow-hidden">
+                  <div className="relative min-w-0 overflow-hidden">
                     <CurrentActionExpandedBody
                       action={renderBuckets.current}
                       reducedMotion={reducedMotion}
@@ -1507,14 +1712,14 @@ export function LaunchCenterInspector({
                 </div>
               ) : null}
 
-              {renderBuckets && renderBuckets.upcoming.length > 0 && (actions?.length ?? 0) > 1 ? (
+              {renderBuckets && renderBuckets.upcoming.length > 0 && timelineActions.length > 1 ? (
                 <div className="mt-3">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-flow-text-muted">
                     Upcoming
                   </p>
-                  <ul className="scrollbar-elegant max-h-[min(28vh,12rem)] space-y-1 overflow-y-auto overscroll-contain pr-0.5">
+                  <ul className="scrollbar-elegant max-h-[min(28vh,12rem)] min-w-0 space-y-1 overflow-y-auto overscroll-contain pr-2 sm:pr-3">
                     {renderBuckets.upcoming.map((a) => (
-                      <li key={a.id} className="list-none text-flow-text-secondary">
+                      <li key={a.id} className="list-none min-w-0 text-flow-text-secondary">
                         <div className="rounded-[10px] p-px ring-1 ring-inset ring-transparent">
                           <div
                             className={LAUNCH_LEAD_LAYOUT_SHELL_CLASS}
@@ -1523,14 +1728,22 @@ export function LaunchCenterInspector({
                             <LaunchActionLeadSurface
                               action={a}
                               progress={progress}
-                              trailing={
-                                a.state === "running" ? (
-                                  <Loader2
-                                    className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/70"
-                                    aria-hidden
-                                  />
-                                ) : null
-                              }
+                              tabHost={resolveTabHostForAction(a, tabHostLookup)}
+                              trailing={(
+                                <>
+                                  {waitingOnConfirmationUi && a.state === "queued" ? (
+                                    <span className="shrink-0 rounded bg-white/8 px-1.5 py-0.5 text-[9px] font-medium text-flow-text-muted ring-1 ring-white/10">
+                                      Deferred
+                                    </span>
+                                  ) : null}
+                                  {a.state === "running" ? (
+                                    <Loader2
+                                      className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/70"
+                                      aria-hidden
+                                    />
+                                  ) : null}
+                                </>
+                              )}
                             />
                           </div>
                         </div>
@@ -1565,7 +1778,7 @@ export function LaunchCenterInspector({
                     </button>
                   ) : null}
                 </div>
-                <ul className="scrollbar-elegant max-h-[min(32vh,14rem)] space-y-1 overflow-y-auto overscroll-contain pr-0.5">
+                <ul className="scrollbar-elegant max-h-[min(32vh,14rem)] min-w-0 space-y-1 overflow-y-auto overscroll-contain pr-2 sm:pr-3">
                   {renderBuckets?.completed.length ? (
                     renderBuckets.completed.map((a) => (
                       <li key={a.id} className="list-none space-y-1 rounded-[10px] bg-white/[0.04] p-0.5">
@@ -1577,6 +1790,7 @@ export function LaunchCenterInspector({
                             <LaunchActionLeadSurface
                               action={a}
                               progress={progress}
+                              tabHost={resolveTabHostForAction(a, tabHostLookup)}
                               trailing={<TerminalCompletedTrailing action={a} />}
                             />
                           </div>

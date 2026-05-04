@@ -56,9 +56,11 @@ export type LaunchAction = {
   smartDecisions?: string[] | null;
   contentItems?: Array<{
     name: string;
-    type?: "file" | "folder" | string | null;
+    type?: "file" | "folder" | "link" | string | null;
     path?: string | null;
   }> | null;
+  /** Tab actions only: canonical URL for grouping tabs with the owning browser app in the UI. */
+  browserTabUrl?: string | null;
   /** When set, app timeline includes a `sub-content` substep (parallel with launch vs after verify). */
   contentSubstepMode?: "post-verify" | "parallel-launch" | null;
   /** Main-only hint: post-verify content automation failed (maps to failed `sub-content`). */

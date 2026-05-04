@@ -1,9 +1,14 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const {
+  PROCESS_HINTS_VERSION,
   buildCompanionProcessHints,
   computeCompanionHintsFromProcessRows,
 } = require('./process-hints');
+
+test('PROCESS_HINTS_VERSION is a non-empty semver-style token', () => {
+  assert.match(PROCESS_HINTS_VERSION, /^\d+\.\d+\.\d+$/);
+});
 
 test('buildCompanionProcessHints returns empty list for blank base', async () => {
   const hints = await buildCompanionProcessHints({ baseProcessHintLc: '' });

@@ -391,7 +391,7 @@ export function ProfileLaunchProgressPanel({
 
       {rows.length > 0 ? (
         <ul
-          className={`mt-3 space-y-1.5 overflow-y-auto pr-0.5 ${
+          className={`mt-3 space-y-1.5 overflow-y-auto pr-2 sm:pr-3 ${
             isInspector ? "max-h-[min(40vh,28rem)]" : "max-h-[min(14rem,40vh)]"
           }`}
         >

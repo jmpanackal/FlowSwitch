@@ -6,6 +6,7 @@
  */
 const path = require('path');
 const { execFile } = require('child_process');
+const { PROCESS_HINTS_VERSION } = require('./process-hints');
 const { hiddenProcessNamePatterns } = require('./windows-process-service');
 const { launchIconDataUrlFromProfileApp } = require('../utils/launch-ui-icons');
 
@@ -30,6 +31,7 @@ const createProfileLaunchRunner = (deps) => {
     getWindowPlacementRectsByHandle,
     isWindowOnTargetMonitor,
     waitForMainWindowReadyOrBlocker,
+    isLikelyMainPlacementWindowIgnoringBlocker,
     verifyAndCorrectWindowPlacement,
     stabilizePlacementForSlowLaunch,
     readProfilesFromDisk,
@@ -352,6 +354,7 @@ const createProfileLaunchRunner = (deps) => {
   processHintLc,
   processHints = [],
   blockedHandles = [],
+  launchedPid = 0,
   placementBounds,
   monitor,
   aggressiveMaximize = false,
@@ -360,28 +363,57 @@ const createProfileLaunchRunner = (deps) => {
   launchDiagnostics,
   diagnosticsContext = {},
 }) => {
+  const launchedPidNumber = Number(launchedPid || 0);
   const blockedHandleSet = new Set(
     (Array.isArray(blockedHandles) ? blockedHandles : [])
       .map((handle) => String(handle || '').trim())
       .filter(Boolean),
   );
   const blockerPresenceHandleSet = new Set(blockedHandleSet);
+  const rejectedPostModalHandleSet = new Set();
 
-  const isMeaningfulRectForBounds = (rect, targetBounds) => {
+  const isPlausibleRectForPlacement = (rect, targetBounds) => {
     if (!rect || !targetBounds) return false;
-    const rectWidth = Number(rect.width || 0);
-    const rectHeight = Number(rect.height || 0);
+    const rectWidth = Math.max(0, Number(rect.width || 0));
+    const rectHeight = Math.max(0, Number(rect.height || 0));
     const targetWidth = Math.max(1, Number(targetBounds.width || 0));
     const targetHeight = Math.max(1, Number(targetBounds.height || 0));
+    if (rectWidth < Math.max(360, Math.floor(targetWidth * 0.3))) return false;
+    if (rectHeight < Math.max(220, Math.floor(targetHeight * 0.24))) return false;
+    const expectedAspect = targetWidth / Math.max(1, targetHeight);
+    const aspect = rectWidth / Math.max(1, rectHeight);
+    if (aspect < Math.max(0.82, expectedAspect * 0.72) || aspect > Math.min(3.2, expectedAspect * 2.1)) {
+      return false;
+    }
     const areaRatio = (rectWidth * rectHeight) / (targetWidth * targetHeight);
-    const widthRatio = rectWidth / targetWidth;
-    const heightRatio = rectHeight / targetHeight;
-    return (
-      areaRatio >= 0.38
-      && widthRatio >= 0.55
-      && heightRatio >= 0.45
-      && (widthRatio >= 0.72 || heightRatio >= 0.72)
-    );
+    if (areaRatio < 0.22) return false;
+    return true;
+  };
+  const isHandlePlausibleAndStable = async (candidateHandle) => {
+    const stableSamplesNeeded = 2;
+    const samples = 3;
+    let stableCount = 0;
+    let prevArea = null;
+    for (let i = 0; i < samples; i += 1) {
+      const rects = await getWindowPlacementRectsByHandle(candidateHandle);
+      const rect = rects?.visibleRect || rects?.outerRect || null;
+      if (!isPlausibleRectForPlacement(rect, placementBounds)) return false;
+      const area = Number(rect?.width || 0) * Number(rect?.height || 0);
+      if (prevArea != null) {
+        const ratio = area / Math.max(1, prevArea);
+        if (ratio < 0.7 || ratio > 1.35) {
+          stableCount = 0;
+          prevArea = area;
+          await sleep(180);
+          continue;
+        }
+      }
+      stableCount += 1;
+      prevArea = area;
+      if (stableCount >= stableSamplesNeeded) return true;
+      await sleep(180);
+    }
+    return false;
   };
 
   const normalizedRootHint = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
@@ -389,11 +421,37 @@ const createProfileLaunchRunner = (deps) => {
   // runs in `steamwebhelper.exe`, not `steam.exe`). Expanded hints are REQUIRED for enumeration
   // so we can actually see/find the main window. Companion-process auxiliary windows that were
   // visible pre-dismissal are filtered out via the blocked-era quarantine, not via hint scope.
-  const normalizedScanHints = Array.from(new Set(
+  let normalizedScanHints = Array.from(new Set(
     [processHintLc, ...(Array.isArray(processHints) ? processHints : [])]
       .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
       .filter(Boolean),
   ));
+  if (typeof buildCompanionProcessHints === 'function') {
+    const expanded = await buildCompanionProcessHints({
+      baseProcessHintLc: normalizedRootHint || processHintLc,
+      appNameHint: diagnosticsContext?.appName,
+      diagnostics: launchDiagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-hints',
+      },
+    });
+    const merged = Array.from(new Set(
+      [...normalizedScanHints, ...(Array.isArray(expanded) ? expanded : [])]
+        .map((hint) => String(hint || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+        .filter(Boolean),
+    ));
+    if (merged.length > normalizedScanHints.length && launchDiagnostics) {
+      launchDiagnostics.decision({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-hints',
+        reason: 'expanded-process-hints-applied',
+        initialProcessHints: normalizedScanHints,
+        expandedProcessHints: merged,
+      });
+    }
+    normalizedScanHints = merged;
+  }
   const collectResumeCandidates = async (_ignoredExpandedHints = [], options = {}) => {
     const includeBlocked = options?.includeBlocked === true;
     const rowsByHint = await Promise.all(
@@ -439,120 +497,71 @@ const createProfileLaunchRunner = (deps) => {
       });
   };
 
-  const placeHandleFirstWithFallback = async (primaryHandle) => {
-    const orderedHandles = [];
-    const primary = String(primaryHandle || '').trim();
-    if (primary && !blockedHandleSet.has(primary)) orderedHandles.push(primary);
-    const fallbackRows = await collectResumeCandidates();
-    for (const row of fallbackRows) {
-      const handle = String(row?.handle || '').trim();
-      if (!handle || orderedHandles.includes(handle)) continue;
-      orderedHandles.push(handle);
+  const placeChosenHandle = async (candidateHandle, handleSource = 'ready-gate') => (
+    moveSpecificWindowHandleToBounds({
+      handle: candidateHandle,
+      bounds: placementBounds,
+      processHintLc,
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+      skipFrameChanged,
+      diagnostics: launchDiagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-placement',
+        candidateHandle,
+        handleSource,
+      },
+    })
+  );
+
+  const tryPidTreePlacement = async (reason = 'pid-tree-main-window-attempt') => {
+    if (!Number.isFinite(launchedPidNumber) || launchedPidNumber <= 0) {
+      return { applied: false, handle: null };
     }
-    let lastAttempt = { applied: false, handle: null };
-    for (const candidateHandle of orderedHandles) {
-      lastAttempt = await moveSpecificWindowHandleToBounds({
-        handle: candidateHandle,
-        bounds: placementBounds,
-        processHintLc,
-        aggressiveMaximize,
-        positionOnlyBeforeMaximize,
-        skipFrameChanged,
-        diagnostics: launchDiagnostics,
-        diagnosticsContext: {
+    const attempt = await moveWindowToBounds({
+      pid: launchedPidNumber,
+      bounds: placementBounds,
+      processNameHint: '',
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+      preferNameEnumeration: false,
+      excludedWindowHandles: Array.from(new Set([
+        ...blockedHandleSet,
+        ...rejectedPostModalHandleSet,
+      ])),
+      skipFrameChanged,
+      diagnostics: launchDiagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-pid-tree',
+        reason,
+      },
+    });
+    if (!attempt?.applied || !attempt?.handle) return { applied: false, handle: null };
+    const placedHandle = String(attempt.handle || '').trim();
+    const stable = await isHandlePlausibleAndStable(placedHandle);
+    if (!stable) {
+      rejectedPostModalHandleSet.add(placedHandle);
+      if (launchDiagnostics) {
+        launchDiagnostics.decision({
           ...diagnosticsContext,
-          strategy: 'post-modal-resume-placement',
-          candidateHandle,
-          handleSource: candidateHandle === primary ? 'ready-gate' : 'fallback-candidate',
-        },
-      });
-      if (lastAttempt.applied) {
-        return {
-          ...lastAttempt,
-          fallbackUsed: candidateHandle !== primary,
-        };
-      }
-    }
-    return {
-      ...lastAttempt,
-      fallbackUsed: orderedHandles.length > 1,
-    };
-  };
-
-  const settlePostModalMaximizedWinner = async (initialHandle) => {
-    const settleDeadline = Date.now() + 2800;
-    let stableCount = 0;
-    let selectedHandle = String(initialHandle || '').trim() || null;
-    while (Date.now() <= settleDeadline) {
-      const candidates = await collectResumeCandidates();
-      if (candidates.length === 0) {
-        stableCount = 0;
-        await sleep(220);
-        continue;
-      }
-      const topCandidate = candidates[0];
-      const topHandle = String(topCandidate?.handle || '').trim() || null;
-      if (!topHandle) {
-        stableCount = 0;
-        await sleep(220);
-        continue;
-      }
-      if (!selectedHandle || selectedHandle !== topHandle) {
-        const reelectAttempt = await moveSpecificWindowHandleToBounds({
-          handle: topHandle,
-          bounds: placementBounds,
-          processHintLc,
-          aggressiveMaximize,
-          positionOnlyBeforeMaximize,
-          skipFrameChanged,
-          diagnostics: launchDiagnostics,
-          diagnosticsContext: {
-            ...diagnosticsContext,
-            strategy: 'post-modal-resume-reelect-placement',
-            candidateHandle: topHandle,
-          },
+          strategy: 'post-modal-resume-pid-tree',
+          reason: 'pid-tree-handle-rejected-as-unstable-or-implausible',
+          handle: placedHandle,
         });
-        if (reelectAttempt.applied) {
-          selectedHandle = String(reelectAttempt.handle || topHandle).trim() || topHandle;
-          stableCount = 0;
-          if (launchDiagnostics) {
-            launchDiagnostics.decision({
-              ...diagnosticsContext,
-              strategy: 'post-modal-resume-reelect',
-              reason: 'switched-to-top-candidate',
-              handle: selectedHandle,
-            });
-          }
-        }
       }
-
-      const measuredRects = selectedHandle
-        ? await getWindowPlacementRectsByHandle(selectedHandle)
-        : null;
-      const measuredRect = measuredRects?.visibleRect || measuredRects?.outerRect || null;
-      const onTarget = isWindowOnTargetMonitor({
-        rect: measuredRect,
-        monitor,
-        bounds: placementBounds,
-      });
-      const meaningful = isMeaningfulRectForBounds(measuredRect, placementBounds);
-      if (selectedHandle && selectedHandle === topHandle && onTarget && meaningful) {
-        stableCount += 1;
-        if (stableCount >= 2) {
-          return {
-            verified: true,
-            handle: selectedHandle,
-          };
-        }
-      } else {
-        stableCount = 0;
-      }
-      await sleep(220);
+      return { applied: false, handle: placedHandle };
     }
-    return {
-      verified: false,
-      handle: selectedHandle,
-    };
+    if (launchDiagnostics) {
+      launchDiagnostics.decision({
+        ...diagnosticsContext,
+        strategy: 'post-modal-resume-pid-tree',
+        reason: 'pid-tree-main-window-placed',
+        handle: placedHandle,
+      });
+    }
+    return { applied: true, handle: placedHandle };
   };
 
   const resumeDeadline = Date.now() + 120000;
@@ -577,6 +586,12 @@ const createProfileLaunchRunner = (deps) => {
         for (const row of rows) {
           const handle = String(row?.handle || '').trim();
           if (!handle || blockedHandleSet.has(handle)) continue;
+          // Do not quarantine handles that already look like the real main window (e.g. Audacity
+          // main visible behind a small confirmation dialog). Quarantining them caused
+          // post-dismissal resume to loop on `ready-handle-quarantined` forever.
+          if (isLikelyMainPlacementWindowIgnoringBlocker(row, placementBounds)) {
+            continue;
+          }
           blockedHandleSet.add(handle);
           quarantinedDuringWait += 1;
         }
@@ -619,18 +634,29 @@ const createProfileLaunchRunner = (deps) => {
   // destroy pre-confirmation windows and spawn its real main window before we attempt winner
   // selection, avoiding latching onto transient or companion-process windows (e.g. steamwebhelper
   // overlay / friends list) that were visible pre-dismissal.
-  await sleep(1500);
+  await sleep(800);
+
+  const pidTreePreflight = await tryPidTreePlacement('pid-tree-main-window-preflight');
+  if (pidTreePreflight.applied && pidTreePreflight.handle) {
+    return {
+      resolved: true,
+      status: 'resolved',
+      handle: String(pidTreePreflight.handle || '').trim() || null,
+    };
+  }
 
   // Phase 2: run resume gate with expanded hints for discovery, but still exclude quarantined
   // pre-dismissal handles from eligibility.
+  const postDismissDeadline = Date.now() + 12000;
   let resumeGate = null;
-  while (Date.now() <= resumeDeadline) {
-    const remainingMs = Math.max(2200, resumeDeadline - Date.now());
+  while (Date.now() <= postDismissDeadline) {
+    const remainingMs = postDismissDeadline - Date.now();
+    const gateTimeoutMs = Math.max(1200, Math.min(2600, remainingMs));
     resumeGate = await waitForMainWindowReadyOrBlocker({
       processHintLc,
-      processHints,
+      processHints: normalizedScanHints,
       expectedBounds: placementBounds,
-      timeoutMs: remainingMs,
+      timeoutMs: gateTimeoutMs,
       pollMs: 320,
       diagnostics: launchDiagnostics,
       listWindows: getVisibleWindowInfos,
@@ -640,6 +666,23 @@ const createProfileLaunchRunner = (deps) => {
         scoreWindowCandidate(row, { chromiumProcessHint: hint })
       ),
       excludeHandles: blockedHandleSet,
+      onPoll: ({ pollIndex, rows }) => {
+        if (!launchDiagnostics) return;
+        for (const row of (Array.isArray(rows) ? rows : [])) {
+          if (Array.isArray(row?.rejectionReasons) && row.rejectionReasons.length > 0) {
+            const rejectedHandle = String(row?.handle || '').trim();
+            if (rejectedHandle) rejectedPostModalHandleSet.add(rejectedHandle);
+          }
+        }
+        launchDiagnostics.decision({
+          ...diagnosticsContext,
+          strategy: 'post-modal-resume-gate-poll',
+          reason: 'candidate-scan',
+          pollIndex,
+          candidateRows: rows,
+        });
+      },
+      postModalResumeSizing: true,
       diagnosticsContext: {
         ...diagnosticsContext,
         strategy: 'post-modal-resume-gate',
@@ -665,13 +708,46 @@ const createProfileLaunchRunner = (deps) => {
       await sleep(260);
       continue;
     }
-    if (resumeGate.ready && resumeGate.handle) break;
+    if (resumeGate.ready && resumeGate.handle) {
+      const readyHandle = String(resumeGate.handle || '').trim();
+      if (!readyHandle) break;
+      const stableReady = await isHandlePlausibleAndStable(readyHandle);
+      if (!stableReady) {
+        blockedHandleSet.add(readyHandle);
+        if (launchDiagnostics) {
+          launchDiagnostics.decision({
+            ...diagnosticsContext,
+            strategy: 'post-modal-resume-gate',
+            reason: 'ready-handle-rejected-as-unstable-or-implausible',
+            handle: readyHandle,
+          });
+        }
+        await sleep(220);
+        continue;
+      }
+      break;
+    }
+    if (!resumeGate.ready && !resumeGate.blocked) {
+      const pidTreeRetry = await tryPidTreePlacement('pid-tree-main-window-retry');
+      if (pidTreeRetry.applied && pidTreeRetry.handle) {
+        resumeGate = {
+          ready: true,
+          blocked: false,
+          timedOut: Boolean(resumeGate?.timedOut),
+          handle: String(pidTreeRetry.handle || '').trim(),
+        };
+        break;
+      }
+    }
     if (resumeGate.blocked && resumeGate.blockerKind === 'confirmation') {
       const blockedEraRows = await collectResumeCandidates([], { includeBlocked: true });
       let quarantinedCount = 0;
       for (const row of blockedEraRows) {
         const handle = String(row?.handle || '').trim();
         if (!handle || blockedHandleSet.has(handle)) continue;
+        if (isLikelyMainPlacementWindowIgnoringBlocker(row, placementBounds)) {
+          continue;
+        }
         blockedHandleSet.add(handle);
         quarantinedCount += 1;
       }
@@ -688,24 +764,94 @@ const createProfileLaunchRunner = (deps) => {
     }
     break;
   }
-  if (!resumeGate.ready || !resumeGate.handle) {
+  if (!resumeGate?.ready || !resumeGate?.handle) {
+    // Fallback for apps that expose a usable post-dismiss window that misses strict winner
+    // heuristics (e.g. atypical class/topmost flags). Try one best-effort candidate before fail.
+    const fallbackRows = await collectResumeCandidates([], { includeBlocked: false });
+    const expectedW = Math.max(1, Number(placementBounds?.width || 0));
+    const expectedH = Math.max(1, Number(placementBounds?.height || 0));
+    const timeoutFallbackCandidates = fallbackRows.filter((row) => {
+      const handle = String(row?.handle || '').trim();
+      if (!handle || blockedHandleSet.has(handle)) return false;
+      if (String(row?.className || '').trim().toLowerCase() === '#32770') return false;
+      const w = Number(row?.width || 0);
+      const h = Number(row?.height || 0);
+      const area = Number(row?.area || (Number(row?.width || 0) * Number(row?.height || 0)));
+      const titleLength = Number(row?.titleLength || 0);
+      if (w < Math.max(360, Math.floor(expectedW * 0.3))) return false;
+      if (h < Math.max(220, Math.floor(expectedH * 0.24))) return false;
+      const expectedAspect = expectedW / Math.max(1, expectedH);
+      const aspect = w / Math.max(1, h);
+      if (aspect < Math.max(0.82, expectedAspect * 0.72) || aspect > Math.min(3.2, expectedAspect * 2.1)) {
+        return false;
+      }
+      if (area < 240_000) return false;
+      if (titleLength < 10 && area < 400_000) return false;
+      return true;
+    });
+    const timeoutFallback = timeoutFallbackCandidates
+      .sort((a, b) => {
+        const aw = Number(a?.width || 0);
+        const ah = Number(a?.height || 0);
+        const bw = Number(b?.width || 0);
+        const bh = Number(b?.height || 0);
+        const aMismatch = Math.abs((aw / expectedW) - 1) + Math.abs((ah / expectedH) - 1);
+        const bMismatch = Math.abs((bw / expectedW) - 1) + Math.abs((bh / expectedH) - 1);
+        if (aMismatch !== bMismatch) return aMismatch - bMismatch;
+        const areaA = Number(a?.area || (aw * ah));
+        const areaB = Number(b?.area || (bw * bh));
+        return areaB - areaA;
+      })[0];
+    if (timeoutFallback?.handle) {
+      const fallbackHandle = String(timeoutFallback.handle || '').trim();
+      if (fallbackHandle) {
+        if (launchDiagnostics) {
+          launchDiagnostics.decision({
+            ...diagnosticsContext,
+            strategy: 'post-modal-resume-gate',
+            reason: 'timeout-fallback-candidate-selected',
+            handle: fallbackHandle,
+            candidateSample: summarizeWindowRows([timeoutFallback], 1),
+          });
+        }
+        resumeGate = {
+          ready: true,
+          blocked: false,
+          timedOut: Boolean(resumeGate?.timedOut),
+          handle: fallbackHandle,
+        };
+      }
+    }
+  }
+  if (!resumeGate?.ready || !resumeGate?.handle) {
     if (launchDiagnostics) {
       launchDiagnostics.failure({
         ...diagnosticsContext,
         strategy: 'post-modal-resume',
         reason: 'post-modal-main-window-not-ready',
-        blocked: Boolean(resumeGate.blocked),
-        timedOut: Boolean(resumeGate.timedOut),
+        blocked: Boolean(resumeGate?.blocked),
+        timedOut: Boolean(resumeGate?.timedOut),
       });
     }
     return {
       resolved: false,
-      status: (resumeGate.blocked && resumeGate.blockerKind === 'confirmation') ? 'waiting' : 'timeout',
+      status: (resumeGate?.blocked && resumeGate?.blockerKind === 'confirmation') ? 'waiting' : 'timeout',
       handle: null,
     };
   }
 
-  const placed = await placeHandleFirstWithFallback(resumeGate.handle);
+  const lockedHandle = String(resumeGate.handle || '').trim() || null;
+  if (launchDiagnostics && lockedHandle) {
+    launchDiagnostics.decision({
+      ...diagnosticsContext,
+      strategy: 'post-modal-resume-handle-lock',
+      reason: 'locked-selected-handle-for-placement',
+      handle: lockedHandle,
+    });
+  }
+  const placed = lockedHandle
+    ? await placeChosenHandle(lockedHandle, resumeGate?.timedOut ? 'timeout-fallback' : 'ready-gate')
+    : { applied: false, handle: null };
   const resolvedHandle = String(placed?.handle || resumeGate.handle || '').trim() || null;
   let finalResolvedHandle = resolvedHandle;
   if (!placed.applied) {
@@ -723,31 +869,26 @@ const createProfileLaunchRunner = (deps) => {
       handle: resolvedHandle,
     };
   }
-  if (placed.fallbackUsed && launchDiagnostics) {
-    launchDiagnostics.decision({
-      ...diagnosticsContext,
-      strategy: 'post-modal-resume-placement',
-      reason: 'handle-first-fallback-applied',
-      handle: resolvedHandle,
-    });
-  }
 
   if (placementBounds.state === 'normal' && monitor) {
-    const verification = await verifyAndCorrectWindowPlacement({
-      handle: resolvedHandle,
+    const verifyHandle = async (candidateHandle) => verifyAndCorrectWindowPlacement({
+      handle: candidateHandle,
       monitor,
       bounds: placementBounds,
       aggressiveMaximize,
       positionOnlyBeforeMaximize,
       skipFrameChanged,
-      maxCorrections: 2,
-      initialCheckDelayMs: 120,
+      maxCorrections: 0,
+      initialCheckDelayMs: 180,
       diagnostics: launchDiagnostics,
       diagnosticsContext: {
         ...diagnosticsContext,
         strategy: 'post-modal-resume-verification',
+        candidateHandle,
       },
     });
+
+    let verification = await verifyHandle(resolvedHandle);
     if (launchDiagnostics) {
       launchDiagnostics.result({
         ...diagnosticsContext,
@@ -759,40 +900,34 @@ const createProfileLaunchRunner = (deps) => {
       });
     }
     if (!verification.verified) {
-      return {
-        resolved: false,
-        status: 'placement-failed',
-        handle: resolvedHandle,
-      };
+      await sleep(320);
+      verification = await verifyHandle(resolvedHandle);
+      if (!verification.verified) {
+        return {
+          resolved: false,
+          status: 'placement-failed',
+          handle: resolvedHandle,
+        };
+      }
     }
   }
 
   if (placementBounds.state === 'maximized' && monitor) {
-    // Surface intermediate statuses for fullscreen/maximized apps too.
-    // Stabilize across the same expanded hint set used for enumeration. Companion-process
-    // windows that were pre-dismissal (splash/overlay/friends/chooser) are already excluded
-    // from candidate pools by the blocked-era quarantine, so the hint scope is safe here.
-    let stabilized = { verified: false, handle: resolvedHandle };
-    for (const hint of normalizedScanHints) {
-      stabilized = await stabilizePlacementForSlowLaunch({
-        processHintLc: hint,
-        bounds: placementBounds,
-        monitor,
-        initialHandle: stabilized.handle || resolvedHandle,
-        excludedWindowHandles: Array.from(blockedHandleSet),
-        aggressiveMaximize,
-        positionOnlyBeforeMaximize,
-        skipFrameChanged,
-        durationMs: 2200,
-        diagnostics: launchDiagnostics,
-        diagnosticsContext: {
-          ...diagnosticsContext,
-          processHintLc: hint,
-          strategy: 'post-modal-resume-stabilize',
-        },
-      });
-      if (stabilized.verified) break;
-    }
+    const stabilized = await stabilizeKnownHandlePlacement({
+      handle: resolvedHandle,
+      bounds: placementBounds,
+      monitor,
+      aggressiveMaximize,
+      positionOnlyBeforeMaximize,
+      skipFrameChanged,
+      durationMs: 2600,
+      diagnostics: launchDiagnostics,
+      diagnosticsContext: {
+        ...diagnosticsContext,
+        processHintLc,
+        strategy: 'post-modal-resume-known-handle-stabilize',
+      },
+    });
     if (launchDiagnostics) {
       launchDiagnostics.result({
         ...diagnosticsContext,
@@ -811,29 +946,7 @@ const createProfileLaunchRunner = (deps) => {
         handle: stabilized.handle || resolvedHandle,
       };
     }
-
-    const settledWinner = await settlePostModalMaximizedWinner(
-      stabilized.handle || resolvedHandle,
-    );
-    if (launchDiagnostics) {
-      launchDiagnostics.result({
-        ...diagnosticsContext,
-        strategy: 'post-modal-resume',
-        reason: settledWinner.verified
-          ? 'post-modal-maximized-winner-verified'
-          : 'post-modal-maximized-winner-not-verified',
-        verified: Boolean(settledWinner.verified),
-        handle: settledWinner.handle || stabilized.handle || resolvedHandle,
-      });
-    }
-    if (!settledWinner.verified) {
-      return {
-        resolved: false,
-        status: 'placement-failed',
-        handle: settledWinner.handle || stabilized.handle || resolvedHandle,
-      };
-    }
-    finalResolvedHandle = settledWinner.handle || stabilized.handle || resolvedHandle;
+    finalResolvedHandle = stabilized.handle || resolvedHandle;
   }
   return {
     resolved: true,
@@ -1042,6 +1155,15 @@ const launchProfileById = async (profileId, options = {}) => {
     pushTabEntry(raw);
   }
   const requestedBrowserTabCount = tabUrlList.length;
+  const tabEntriesByAppInstanceId = new Map();
+  for (const entry of tabUrlList) {
+    const iid = String(entry?.appInstanceId || '').trim();
+    if (!iid) continue;
+    const existing = tabEntriesByAppInstanceId.get(iid);
+    if (existing) existing.push(entry);
+    else tabEntriesByAppInstanceId.set(iid, [entry]);
+  }
+  const openedTabKeySet = new Set();
 
   const tabActionIdForUrl = (tabKey) => {
     let h = 2166136261;
@@ -1109,32 +1231,14 @@ const launchProfileById = async (profileId, options = {}) => {
           : `${associatedFiles.length} ${contentKind}s opened with this app`,
       );
     }
-    const instanceId = String(launch?.app?.instanceId || '').trim();
-    if (instanceId) {
-      const linkedTabs = tabUrlList.filter((t) => String(t?.appInstanceId || '').trim() === instanceId);
-      if (linkedTabs.length > 0) {
-        decisions.push(
-          linkedTabs.length === 1
-            ? '1 link opened with this app'
-            : `${linkedTabs.length} links opened with this app`,
-        );
-        const linkNames = linkedTabs
-          .map((t) => String(t?.label || t?.url || '').trim())
-          .filter(Boolean)
-          .slice(0, 2);
-        if (linkNames.length > 0) {
-          decisions.push(`Links opened: ${linkNames.join(', ')}`);
-        }
-      }
-    }
     return decisions.length > 0 ? decisions : null;
   };
 
-  const buildInitialContentItems = (launch) => {
+  const buildAssociatedFileContentItems = (launch) => {
     const associatedFiles = Array.isArray(launch?.app?.associatedFiles)
       ? launch.app.associatedFiles
       : [];
-    const contentItems = associatedFiles
+    return associatedFiles
       .map((f) => {
         const name = String(f?.name || path.basename(String(f?.path || '')) || '').trim();
         const type = String(f?.type || '').trim().toLowerCase() === 'folder' ? 'folder' : 'file';
@@ -1147,7 +1251,28 @@ const launchProfileById = async (profileId, options = {}) => {
         };
       })
       .filter(Boolean);
-    return contentItems.length > 0 ? contentItems : null;
+  };
+
+  const buildLinkedTabContentItems = (launch) => {
+    const instanceId = String(launch?.app?.instanceId || '').trim();
+    if (!instanceId) return [];
+    return tabUrlList
+      .filter((t) => String(t?.appInstanceId || '').trim() === instanceId)
+      .map((t) => {
+        const url = String(t?.url || '').trim();
+        if (!url) return null;
+        const label = String(t?.label || '').trim();
+        const name = label || url;
+        return { name, type: 'link', path: url };
+      })
+      .filter(Boolean);
+  };
+
+  const buildInitialContentItems = (launch) => {
+    const fromFiles = buildAssociatedFileContentItems(launch);
+    const fromLinks = buildLinkedTabContentItems(launch);
+    const merged = [...fromFiles, ...fromLinks];
+    return merged.length > 0 ? merged : null;
   };
 
   const delayTimelineIndexByApp = new Array(appLaunches.length).fill(-1);
@@ -1183,7 +1308,8 @@ const launchProfileById = async (profileId, options = {}) => {
     appTimelineIndexByApp[i] = executionTimelineWrite;
     const targetLocationRaw = row?.location ? String(row.location).trim() : '';
     const launchRowForContent = appLaunches[i];
-    const builtContentItemsForMode = buildInitialContentItems(launchRowForContent);
+    const builtFileContentItemsForMode = buildAssociatedFileContentItems(launchRowForContent);
+    const builtContentItemsForAction = buildInitialContentItems(launchRowForContent);
     const phForContentMode = getPlacementProcessKey(launchRowForContent);
     const spaForContentMode = Array.isArray(launchRowForContent.spawnArgsForExecutable)
       ? launchRowForContent.spawnArgsForExecutable.filter((a) => typeof a === 'string' && a.trim())
@@ -1195,7 +1321,7 @@ const launchProfileById = async (profileId, options = {}) => {
       && launchRowForContent.executablePath
     );
     const contentSubstepMode = (
-      builtContentItemsForMode && builtContentItemsForMode.length > 0
+      builtFileContentItemsForMode && builtFileContentItemsForMode.length > 0
         ? (explorerMultiTabForMode ? 'post-verify' : 'parallel-launch')
         : null
     );
@@ -1208,7 +1334,7 @@ const launchProfileById = async (profileId, options = {}) => {
       iconDataUrl: row.iconDataUrl,
       pills: null,
       smartDecisions: buildInitialContentSmartDecisions(appLaunches[i]),
-      contentItems: builtContentItemsForMode,
+      contentItems: builtContentItemsForAction,
       contentSubstepMode,
       contentOpenFailed: false,
       errorMessage: null,
@@ -1221,13 +1347,14 @@ const launchProfileById = async (profileId, options = {}) => {
   }
 
   const tabUrlToTimelineIndex = new Map();
-  for (const { key, label } of tabUrlList) {
+  for (const { key, label, url } of tabUrlList) {
     tabUrlToTimelineIndex.set(key, executionActions.length);
     executionActions.push({
       id: tabActionIdForUrl(key),
       kind: 'tab',
       title: label,
       targetLocation: 'Browser',
+      browserTabUrl: url,
       state: 'queued',
       iconDataUrl: null,
       pills: null,
@@ -1485,6 +1612,29 @@ const launchProfileById = async (profileId, options = {}) => {
       actions: executionActions,
     });
   };
+  const countUnresolvedPendingConfirmations = () => pendingConfirmations
+    .filter((item) => String(item?.status || '').toLowerCase() === 'waiting')
+    .length;
+  const countFailedPendingConfirmations = () => pendingConfirmations
+    .filter((item) => String(item?.status || '').toLowerCase() === 'failed')
+    .length;
+  const finalizeRunIfPendingConfirmationsSettled = () => {
+    if (!isCurrentRunActive()) return;
+    const unresolvedCount = countUnresolvedPendingConfirmations();
+    if (unresolvedCount > 0) {
+      publishCurrentLaunchStatus('awaiting-confirmations');
+      return;
+    }
+    const terminalState = (
+      failedApps.length === 0 && countFailedPendingConfirmations() === 0
+        ? 'complete'
+        : 'failed'
+    );
+    activeUiPhase = null;
+    activeUiName = null;
+    publishCurrentLaunchStatus(terminalState);
+    launchStatusStore.sealRun(normalizedProfileId, activeRunId, terminalState);
+  };
 
   const isLikelyFatalLaunchDialog = (row, processHintLc) => {
     const hint = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
@@ -1725,6 +1875,7 @@ try {
     strategy: 'launch-profile',
     reason: 'launch-profile-requested',
     latestRunLogFile,
+    processHintsVersion: PROCESS_HINTS_VERSION,
     launchOrder,
     appCount: appLaunches.length,
     modernLaunchCount: modernLaunchData.launches.length,
@@ -2313,6 +2464,7 @@ try {
               ...(Array.isArray(readyGate?.blockerHandles) ? readyGate.blockerHandles : []),
               String(readyGate?.blockerHandle || '').trim(),
             ].filter(Boolean))),
+            launchedPid: launchedChild?.pid || 0,
             placementBounds,
             monitor: launchItem.monitor,
             aggressiveMaximize,
@@ -2340,11 +2492,92 @@ try {
             if (mappedStatus === 'resolved') {
               pendingEntry.resolvedAt = Date.now();
             }
-            publishCurrentLaunchStatus('awaiting-confirmations');
+            if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+              const nowTs = Date.now();
+              const row = appLaunchProgress[appIndex];
+              const tact = executionActions[appTimelineIndexByApp[appIndex]];
+              if (mappedStatus === 'resolved') {
+                row.step = 'done';
+                const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
+                row.outcomes = Array.from(new Set([...prev, 'Confirmed']));
+                if (tact) {
+                  const confirmSub = Array.isArray(tact.substeps)
+                    ? tact.substeps.find((s) => s.id === 'sub-confirm')
+                    : null;
+                  if (confirmSub) {
+                    if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
+                    confirmSub.state = 'completed';
+                    confirmSub.endedAtMs = nowTs;
+                    confirmSub.label = 'Confirmed';
+                  }
+                  if (tact.state === 'running' || tact.state === 'queued') {
+                    tact.state = 'completed';
+                  }
+                  if (!tact.endedAtMs) tact.endedAtMs = nowTs;
+                }
+              } else if (mappedStatus === 'failed') {
+                row.step = 'failed';
+                const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
+                row.outcomes = Array.from(new Set([...prev, 'Confirmation failed']));
+                const failReason = (
+                  status === 'placement-failed'
+                    ? 'Confirmation dialog closed, but placement verification failed.'
+                    : 'Confirmation dialog flow ended without a usable main window.'
+                );
+                if (!failedApps.some(
+                  (item) => String(item?.name || '').trim() === String(launchItem.appName || '').trim()
+                    && String(item?.path || '').trim() === String(launchItem.executablePath || '').trim(),
+                )) {
+                  failedApps.push({
+                    name: launchItem.appName,
+                    path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
+                    error: failReason,
+                    mode: launchStatusMode,
+                    reasonCode: launchStatusReasonCode,
+                  });
+                }
+                if (tact) {
+                  const confirmSub = Array.isArray(tact.substeps)
+                    ? tact.substeps.find((s) => s.id === 'sub-confirm')
+                    : null;
+                  if (confirmSub) {
+                    if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
+                    confirmSub.state = 'failed';
+                    confirmSub.endedAtMs = nowTs;
+                    confirmSub.label = 'Confirmation failed';
+                  }
+                  tact.state = 'failed';
+                  tact.failureKind = 'placement';
+                  tact.errorMessage = failReason;
+                  tact.endedAtMs = nowTs;
+                }
+              }
+            }
+            finalizeRunIfPendingConfirmationsSettled();
           }).catch(() => {
             if (!isCurrentRunActive()) return;
             pendingEntry.status = 'failed';
-            publishCurrentLaunchStatus('awaiting-confirmations');
+            if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
+              const nowTs = Date.now();
+              appLaunchProgress[appIndex].step = 'failed';
+              const tact = executionActions[appTimelineIndexByApp[appIndex]];
+              if (tact) {
+                const confirmSub = Array.isArray(tact.substeps)
+                  ? tact.substeps.find((s) => s.id === 'sub-confirm')
+                  : null;
+                if (confirmSub) {
+                  if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
+                  confirmSub.state = 'failed';
+                  confirmSub.endedAtMs = nowTs;
+                  confirmSub.label = 'Confirmation failed';
+                }
+                tact.state = 'failed';
+                tact.failureKind = 'placement';
+                tact.errorMessage = 'Confirmation dialog flow ended without a usable main window.';
+                tact.endedAtMs = nowTs;
+              }
+            }
+            finalizeRunIfPendingConfirmationsSettled();
           });
           return;
         }
@@ -3364,42 +3597,9 @@ try {
     executionMode: launchOrder,
   });
 
-  for (let appIndex = 0; appIndex < appLaunches.length; appIndex += 1) {
-    const launchItem = appLaunches[appIndex];
-    if (!isCurrentRunActive()) break;
-    const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
-    const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
-    const delayIdx = delayTimelineIndexByApp[appIndex];
-    if (delayIdx >= 0) {
-      const dAct = executionActions[delayIdx];
-      if (safeDelayMs > 0) {
-        const t0 = Date.now();
-        dAct.state = 'running';
-        dAct.startedAtMs = t0;
-        dAct.substeps[0].state = 'running';
-        dAct.substeps[0].startedAtMs = t0;
-        publishCurrentLaunchStatus('in-progress');
-        await sleep(safeDelayMs);
-        const t1 = Date.now();
-        dAct.substeps[0].state = 'completed';
-        dAct.substeps[0].endedAtMs = t1;
-        dAct.state = 'completed';
-        dAct.endedAtMs = t1;
-        publishCurrentLaunchStatus('in-progress');
-      } else {
-        const t1 = Date.now();
-        dAct.substeps[0].state = 'completed';
-        dAct.substeps[0].endedAtMs = t1;
-        dAct.state = 'completed';
-        dAct.endedAtMs = t1;
-        publishCurrentLaunchStatus('in-progress');
-      }
-    }
-    await runLaunch(launchItem, appIndex);
-  }
-
-  for (const { key, url, label, browser, appInstanceId } of tabUrlList) {
-    if (!isCurrentRunActive()) break;
+  const launchTabEntry = async ({ key, url, label, browser, appInstanceId }) => {
+    if (!isCurrentRunActive()) return;
+    if (openedTabKeySet.has(key)) return;
     const tIdx = tabUrlToTimelineIndex.get(key);
     const tAct = tIdx != null ? executionActions[tIdx] : null;
     try {
@@ -3437,6 +3637,7 @@ try {
       if (!opened) {
         await shell.openExternal(url);
       }
+      openedTabKeySet.add(key);
       launchedTabCount += 1;
       if (tAct) {
         const t1 = Date.now();
@@ -3449,6 +3650,53 @@ try {
     } catch {
       // Keep profile launch resilient if one tab URL fails.
     }
+  };
+
+  for (let appIndex = 0; appIndex < appLaunches.length; appIndex += 1) {
+    const launchItem = appLaunches[appIndex];
+    if (!isCurrentRunActive()) break;
+    const delaySeconds = Number(appLaunchDelays[launchItem.appName] || 0);
+    const safeDelayMs = Math.max(0, Math.floor(delaySeconds * 1000));
+    const delayIdx = delayTimelineIndexByApp[appIndex];
+    if (delayIdx >= 0) {
+      const dAct = executionActions[delayIdx];
+      if (safeDelayMs > 0) {
+        const t0 = Date.now();
+        dAct.state = 'running';
+        dAct.startedAtMs = t0;
+        dAct.substeps[0].state = 'running';
+        dAct.substeps[0].startedAtMs = t0;
+        publishCurrentLaunchStatus('in-progress');
+        await sleep(safeDelayMs);
+        const t1 = Date.now();
+        dAct.substeps[0].state = 'completed';
+        dAct.substeps[0].endedAtMs = t1;
+        dAct.state = 'completed';
+        dAct.endedAtMs = t1;
+        publishCurrentLaunchStatus('in-progress');
+      } else {
+        const t1 = Date.now();
+        dAct.substeps[0].state = 'completed';
+        dAct.substeps[0].endedAtMs = t1;
+        dAct.state = 'completed';
+        dAct.endedAtMs = t1;
+        publishCurrentLaunchStatus('in-progress');
+      }
+    }
+    await runLaunch(launchItem, appIndex);
+    const launchInstanceId = String(launchItem?.app?.instanceId || '').trim();
+    if (launchInstanceId && tabEntriesByAppInstanceId.has(launchInstanceId)) {
+      const linkedTabs = tabEntriesByAppInstanceId.get(launchInstanceId) || [];
+      for (const tabEntry of linkedTabs) {
+        if (!isCurrentRunActive()) break;
+        await launchTabEntry(tabEntry);
+      }
+    }
+  }
+
+  for (const tabEntry of tabUrlList) {
+    if (!isCurrentRunActive()) break;
+    await launchTabEntry(tabEntry);
   }
 
   activeUiPhase = null;
@@ -3476,7 +3724,7 @@ try {
       skippedAppCount: skippedApps.length,
       pendingConfirmationCount: pendingConfirmations.length,
       unresolvedPendingConfirmationCount: pendingConfirmations
-        .filter((item) => String(item?.status || '').toLowerCase() !== 'resolved').length,
+        .filter((item) => String(item?.status || '').toLowerCase() === 'waiting').length,
       requestedAppCount: appLaunches.length,
     });
     return {
@@ -3493,7 +3741,7 @@ try {
       pendingConfirmations,
       pendingConfirmationCount: pendingConfirmations.length,
       unresolvedPendingConfirmationCount: pendingConfirmations.filter(
-        (item) => String(item?.status || '').toLowerCase() !== 'resolved',
+        (item) => String(item?.status || '').toLowerCase() === 'waiting',
       ).length,
       requestedAppCount: appLaunches.length,
       placementRecords,
@@ -3528,7 +3776,7 @@ try {
   }
 
   const unresolvedPendingConfirmations = pendingConfirmations
-    .filter((item) => String(item?.status || '').toLowerCase() !== 'resolved');
+    .filter((item) => String(item?.status || '').toLowerCase() === 'waiting');
   profileDiagnostics.result({
     strategy: 'launch-profile',
     reason: unresolvedPendingConfirmations.length > 0

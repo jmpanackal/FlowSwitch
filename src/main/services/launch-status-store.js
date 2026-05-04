@@ -112,7 +112,7 @@ const cloneLaunchActionContentItems = (value) => {
       const name = clampString(item?.name, 256);
       const path = clampString(item?.path, 1000, { allowNull: true });
       const typeRaw = clampString(item?.type, 32, { allowNull: true });
-      const type = typeRaw === 'folder' ? 'folder' : 'file';
+      const type = typeRaw === 'folder' ? 'folder' : typeRaw === 'link' ? 'link' : 'file';
       if (!name && !path) return null;
       return {
         name: name || path || 'Content item',
@@ -163,6 +163,9 @@ const cloneLaunchActions = (value) => {
     const targetLocation = item?.targetLocation != null
       ? (clampString(item.targetLocation, 256, { allowNull: true }) || null)
       : null;
+    const browserTabUrl = item?.browserTabUrl != null
+      ? (clampString(item.browserTabUrl, 1000, { allowNull: true }) || null)
+      : null;
 
     return {
       id,
@@ -181,6 +184,7 @@ const cloneLaunchActions = (value) => {
       endedAtMs,
       substeps,
       targetLocation,
+      browserTabUrl,
     };
   });
 };
@@ -260,7 +264,7 @@ const createLaunchStatusStore = (options = {}) => {
     }
     const pendingConfirmations = clonePending(status.pendingConfirmations);
     const unresolvedPendingConfirmationCount = pendingConfirmations
-      .filter((item) => item.status !== 'resolved')
+      .filter((item) => String(item?.status || '').toLowerCase() === 'waiting')
       .length;
     const rawPhase = status.activePhase != null ? String(status.activePhase).trim().toLowerCase() : '';
     const activePhase = rawPhase === 'launching' || rawPhase === 'placing' || rawPhase === 'tabs'

@@ -55,6 +55,20 @@ test('publishStatus rejects inactive run and accepts active run', () => {
   assert.equal(activeWrite.status.pendingConfirmations[0]?.reasonCode, 'reused_existing_window');
 });
 
+test('failed pending confirmations are not counted as unresolved', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  const write = store.publishStatus('profile-1', run.runId, {
+    state: 'awaiting-confirmations',
+    pendingConfirmations: [
+      { name: 'Audacity', path: '', reason: 'Confirm', status: 'failed' },
+    ],
+  });
+  assert.equal(write.published, true);
+  assert.equal(write.status.pendingConfirmationCount, 1);
+  assert.equal(write.status.unresolvedPendingConfirmationCount, 0);
+});
+
 test('sealRun prevents late async status writes from same run', () => {
   const store = createLaunchStatusStore({ now: () => 1700000000000 });
   const run = store.startRun('profile-1');
@@ -167,4 +181,48 @@ test('launch action content items survive status cloning', () => {
     { name: 'styles', type: 'folder', path: 'C:\\Work\\styles' },
     { name: 'product', type: 'folder', path: 'C:\\Work\\product' },
   ]);
+});
+
+test('launch action content items preserve link type when cloning', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  store.publishStatus('profile-1', run.runId, {
+    state: 'complete',
+    actions: [
+      {
+        id: 'app:chrome',
+        kind: 'app',
+        title: 'Chrome',
+        state: 'completed',
+        smartDecisions: null,
+        contentItems: [
+          { name: 'github.com', type: 'link', path: 'https://github.com/org/repo' },
+        ],
+      },
+    ],
+  });
+
+  const status = store.getStatus('profile-1');
+  assert.deepEqual(status?.actions?.[0]?.contentItems, [
+    { name: 'github.com', type: 'link', path: 'https://github.com/org/repo' },
+  ]);
+});
+
+test('launch action keeps browserTabUrl when cloning', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  store.publishStatus('profile-1', run.runId, {
+    state: 'in-progress',
+    actions: [
+      {
+        id: 'tab:github',
+        kind: 'tab',
+        title: 'github.com',
+        state: 'completed',
+        browserTabUrl: 'https://github.com/org/repo',
+      },
+    ],
+  });
+  const status = store.getStatus('profile-1');
+  assert.equal(status?.actions?.[0]?.browserTabUrl, 'https://github.com/org/repo');
 });

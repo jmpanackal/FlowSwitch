@@ -1,7 +1,7 @@
 # FlowSwitch Workflow Orchestration - Execution Checklist
 
-Last updated: 2026-04-17  
-Branch: `feature/workflow-orchestration-rewrite`  
+Last updated: 2026-05-03  
+Branch: `feature/workflow-orchestration-phase-2` (continues orchestration work; prior notes on `feature/workflow-orchestration-rewrite`)  
 Primary spec: `docs/superpowers/specs/workflow-orchestration-rewrite-plan.md`
 
 ## Purpose
@@ -92,7 +92,7 @@ Progress note (2026-04-18):
 - [x] (P0, owner: agent) Extract process hints to `process-hints.js` (`done`)  
   depends_on: none  
   done_when: hint expansion logic is module-owned and testable (`src/main/services/process-hints.js`)
-- [ ] (P0, owner: agent) Implement process hint versioning + diagnostics key (`not_started`)  
+- [x] (P0, owner: agent) Implement process hint versioning + diagnostics key (`done`)  
   depends_on: process-hints extraction  
   done_when: `processHintsVersion` emitted without `pre-module` transitional marker
 - [ ] (P0, owner: agent) Harden launcher->child indirection and handle lineage (`in_progress`)  
@@ -101,6 +101,18 @@ Progress note (2026-04-18):
 - [ ] (P0, owner: agent) Implement post-confirmation candidate tie-break contract (`in_progress`)  
   depends_on: classifier scoring + lineage  
   done_when: post-confirmation candidate selection is deterministic and logged
+
+Progress note (2026-05-03, post-modal quarantine vs visible main):
+- Bug: apps such as **Audacity** could stay on “Waiting for confirmation” after the user dismissed the dialog — post-modal resume looped on `ready-handle-quarantined`.
+- Root cause: while the confirmation blocker was still visible, `awaitBlockerDismissal` (and the blocked-era branch) added **every** enumerated window to `blockedHandleSet`, including an already-visible **main** window behind the dialog. That handle stayed quarantined after dismissal, so the ready gate’s chosen handle was always rejected.
+- Fix: when accumulating quarantine handles, **skip** rows that already satisfy `isLikelyMainPlacementWindowIgnoringBlocker(row, placementBounds)` so legitimate main surfaces are not excluded from post-dismissal placement.
+- Code: `profile-launch-runner.js` (`resumePlacementAfterConfirmationModal`); export `isLikelyMainPlacementWindowIgnoringBlocker` from `window-ready-gate.js`.
+
+Progress note (2026-05-03, `processHintsVersion` diagnostics):
+- Added `PROCESS_HINTS_VERSION` (`1.0.0`) in `src/main/services/process-hints.js` (bump when companion-hint matching rules change).
+- `launchProfileById` profile-level diagnostics `start` payload includes `processHintsVersion`.
+- `buildCompanionProcessHints` diagnostics decision `companion-hints-discovered` includes `processHintsVersion` for expansion events.
+- Verified: `npm run lint`, `npm run test`, `npm run typecheck` (baseline).
 
 ### D) Placement, Stabilization, and Budgets
 - [ ] (P0, owner: agent) Implement handle-first post-confirmation fallback path (`in_progress`)  
