@@ -1029,16 +1029,6 @@ export default function App() {
       monitorId?: string,
       appIndex?: number,
     ) => {
-      console.log("🎯 APP SELECTED:", {
-        appName: appData.name,
-        source,
-        monitorId,
-        appIndex,
-        instanceId: appData.instanceId,
-        hasInstanceId: !!appData.instanceId,
-        appData: appData,
-      });
-
       if (!currentProfile) return;
 
       setLibrarySelection(null);
@@ -1084,35 +1074,9 @@ export default function App() {
             url: tab.url,
             isActive: tab.isActive || false,
           }));
-
-          console.log(
-            "🌐 BROWSER TABS FOR MONITOR APP INSTANCE:",
-            {
-              browser: appData.name,
-              instanceId: appData.instanceId,
-              monitor: monitorId,
-              tabCount: freshAppData.browserTabs.length,
-              tabs: freshAppData.browserTabs.map((t: any) => t.name),
-            },
-          );
         } else if (source === "minimized") {
           // For minimized apps, tabs are stored directly in the app data
           freshAppData.browserTabs = appData.browserTabs || [];
-
-          console.log(
-            "🌐 BROWSER TABS FOR MINIMIZED APP INSTANCE:",
-            {
-              browser: appData.name,
-              instanceId: appData.instanceId,
-              tabCount: freshAppData.browserTabs.length,
-              tabs: freshAppData.browserTabs.map((t: any) => t.name),
-              rawAppData: {
-                name: appData.name,
-                instanceId: appData.instanceId,
-                browserTabs: appData.browserTabs,
-              },
-            },
-          );
         }
       }
 
@@ -1324,8 +1288,6 @@ export default function App() {
       if (!selectedApp || !currentProfile) return;
       if (selectedApp.source === "sidebar") return;
 
-      console.log("💾 UPDATING SELECTED APP:", updates);
-
       if (
         selectedApp.source === "monitor" &&
         selectedApp.monitorId &&
@@ -1422,8 +1384,6 @@ export default function App() {
       if (!selectedApp || !currentProfile) return;
       if (selectedApp.source === "sidebar") return;
 
-      console.log("📁 UPDATING ASSOCIATED FILES:", files);
-
       if (
         selectedApp.source === "monitor" &&
         selectedApp.monitorId &&
@@ -1480,8 +1440,6 @@ export default function App() {
     if (!selectedApp || !currentProfile) return;
     if (selectedApp.source === "sidebar") return;
 
-    console.log("🗑️ DELETING SELECTED APP");
-
     if (
       selectedApp.source === "monitor" &&
       selectedApp.monitorId &&
@@ -1511,11 +1469,6 @@ export default function App() {
     (targetMonitorId: string) => {
       if (!selectedApp || !currentProfile) return;
       if (selectedApp.source === "sidebar") return;
-
-      console.log(
-        "📱 MOVING SELECTED APP TO MONITOR:",
-        targetMonitorId,
-      );
 
       if (
         selectedApp.source === "minimized" &&
@@ -1573,8 +1526,6 @@ export default function App() {
   const handleSelectedAppMoveToMinimized = useCallback(() => {
     if (!selectedApp || !currentProfile) return;
     if (selectedApp.source === "sidebar") return;
-
-    console.log("📦 MOVING SELECTED APP TO MINIMIZED");
 
     if (
       selectedApp.source === "monitor" &&
@@ -1815,25 +1766,13 @@ export default function App() {
   // FIXED: Simplified profile switching
   const handleProfileSwitch = useCallback(
     (profileId: string) => {
-      console.log("🔄 PROFILE SWITCH INITIATED:", {
-        profileId,
-        isEditMode,
-        currentProfile: selectedProfile,
-      });
-
       if (isEditMode) {
-        console.log(
-          "🚫 PROFILE SWITCHING BLOCKED - Edit mode is active",
-        );
         return;
       }
 
       if (profileId === selectedProfile) {
-        console.log("⚠️ PROFILE ALREADY SELECTED:", profileId);
         return;
       }
-
-      console.log("✅ SWITCHING PROFILE:", profileId);
 
       // Update selected profile immediately
       setSelectedProfile(profileId);
@@ -1843,8 +1782,6 @@ export default function App() {
       setLibrarySelection(null);
       setOpenLibraryFolderId(null);
       setRightSidebarOpen(false);
-
-      console.log("🎉 PROFILE SWITCH COMPLETED:", profileId);
     },
     [isEditMode, selectedProfile],
   );
@@ -1860,7 +1797,10 @@ export default function App() {
     currentView === "profiles" ? 0 : currentView === "apps" ? 1 : 2;
 
   return (
-    <div className="flow-shell-canvas flex h-screen min-h-0 flex-col overflow-hidden">
+    <div
+      className="flow-shell-canvas flex h-screen min-h-0 flex-col overflow-hidden"
+      aria-label="FlowSwitch"
+    >
       {profileStoreError ? (
         <div
           className="shrink-0 px-4 py-2 bg-amber-950/80 border-b border-amber-700/60 text-amber-100 text-xs"
@@ -1873,7 +1813,10 @@ export default function App() {
           Autosave is disabled until you restart the app after the issue is resolved, to avoid overwriting your data.
         </div>
       ) : null}
-      <div className="app-drag-region flow-shell-titlebar flex h-9 shrink-0 select-none items-start pl-1.5 pt-1.5 pr-2 md:pl-2 md:pt-2 md:pr-3">
+      <header
+        className="app-drag-region flow-shell-titlebar flex h-9 shrink-0 select-none items-start pl-1.5 pt-1.5 pr-2 md:pl-2 md:pt-2 md:pr-3"
+        aria-label="Menu and window controls"
+      >
         <TitleBarAppMenu
           onAppPreferences={() => setAppChromeModal("preferences")}
           onAbout={() => setAppChromeModal("about")}
@@ -1930,7 +1873,7 @@ export default function App() {
           </FlowTooltip>
         </div>
         <div className="min-h-0 min-w-0 flex-1" aria-hidden />
-      </div>
+      </header>
       <input
         type="file"
         accept=".json"
@@ -1948,10 +1891,11 @@ export default function App() {
               : "w-0 min-w-0"
           }`}
         >
-        <div
+        <nav
           className={`flow-shell-nav flex h-full max-h-full min-h-0 min-w-[16rem] w-[clamp(16rem,24vw,24rem)] flex-col overflow-hidden transition-opacity duration-200 ${
             isEditMode ? "opacity-[0.78] saturate-[0.92]" : ""
           }`}
+          aria-label="Library"
         >
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
@@ -2217,7 +2161,7 @@ export default function App() {
               </div>
             </div>
           </div>
-        </div>
+        </nav>
         </div>
 
         {/* Main Content Area with Header and Right Sidebar */}
@@ -2225,6 +2169,8 @@ export default function App() {
           className={`flex min-h-0 min-w-0 flex-1 flex-col bg-flow-bg-primary transition-none ${
             rightSidebarOpen ? FLOW_SHELL_INSPECTOR_MARGIN_CLASS : "mr-0"
           }`}
+          role="region"
+          aria-label="Profile workspace"
         >
           {/* Header - Spans across Main Content and Right Sidebar area */}
           {currentProfile ? (
@@ -2508,7 +2454,10 @@ export default function App() {
 
           {/* Main Content Area */}
           {currentProfile && (
-            <main className="relative min-h-0 min-w-0 flex-1 overflow-hidden flow-shell-canvas">
+            <main
+              className="relative min-h-0 min-w-0 flex-1 overflow-hidden flow-shell-canvas"
+              aria-label="Monitor layout"
+            >
               <div className="h-full min-w-0 px-4 pb-4 pt-0 md:px-6 md:pb-6 xl:px-8">
                 <MonitorLayout
                   monitors={currentProfile.monitors}
@@ -2611,16 +2560,6 @@ export default function App() {
                     newPosition,
                     newSize,
                   ) => {
-                    console.log(
-                      "📱 APP.TSX - CROSS-MONITOR CALLBACK:",
-                      {
-                        sourceMonitorId,
-                        appIndex,
-                        targetMonitorId,
-                        newPosition,
-                        newSize,
-                      },
-                    );
                     moveAppBetweenMonitors(
                       currentProfile.id,
                       sourceMonitorId,
@@ -2637,15 +2576,6 @@ export default function App() {
                     newPosition,
                     newSize,
                   ) => {
-                    console.log(
-                      "📱 APP.TSX - MINIMIZED TO MONITOR CALLBACK:",
-                      {
-                        appIndex,
-                        targetMonitorId,
-                        newPosition,
-                        newSize,
-                      },
-                    );
                     moveMinimizedAppToMonitor(
                       currentProfile.id,
                       appIndex,
@@ -2679,10 +2609,11 @@ export default function App() {
 
         {/* Right Sidebar - Fixed position, animated visibility */}
         {rightSidebarOpen && (
-          <div
+          <aside
             className={`fixed right-0 top-9 ${FLOW_SHELL_INSPECTOR_WIDTH_CLASS} h-[calc(100vh-2.25rem)] flow-shell-inspector flow-inspector-panel-enter flex min-w-0 max-w-full flex-col overflow-x-hidden z-30 transition-opacity duration-200 ${
               isEditMode ? "opacity-[0.82] saturate-[0.94]" : ""
             }`}
+            aria-label="Inspector"
           >
             {/* Sidebar Header */}
             <div className="flex items-center justify-between gap-2 border-b border-flow-border px-3 py-2">
@@ -2836,7 +2767,7 @@ export default function App() {
                 />
               ) : null}
             </div>
-          </div>
+          </aside>
         )}
 
         {/* Drag Overlay — pointer-events-none so hit-testing uses the cursor, not the preview */}
