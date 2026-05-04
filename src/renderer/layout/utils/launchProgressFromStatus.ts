@@ -105,7 +105,8 @@ function mapLaunchActionContentItems(
     if (path.length > MAX_CONTENT_PATH_LEN) path = path.slice(0, MAX_CONTENT_PATH_LEN);
     const pathOrNull = path || null;
     const typeRaw = String(o.type ?? "").trim().toLowerCase();
-    const type: "folder" | "file" = typeRaw === "folder" ? "folder" : "file";
+    const type: "folder" | "file" | "link" =
+      typeRaw === "folder" ? "folder" : typeRaw === "link" ? "link" : "file";
     if (!name && !pathOrNull) continue;
     out.push({
       name: name || pathOrNull || "Content item",
@@ -153,6 +154,8 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
   const failureKind = normalizeFailureKind(o.failureKind);
   const locRaw = String(o.targetLocation ?? "").trim();
   const targetLocation = locRaw ? locRaw.slice(0, MAX_LIST_STRING_LEN) : null;
+  const tabUrlRaw = String(o.browserTabUrl ?? "").trim();
+  const browserTabUrl = tabUrlRaw ? tabUrlRaw.slice(0, MAX_CONTENT_PATH_LEN) : null;
   const modeRaw = String(o.contentSubstepMode ?? "").trim().toLowerCase();
   const contentSubstepMode: LaunchAction["contentSubstepMode"] =
     modeRaw === "post-verify" || modeRaw === "parallel-launch" ? modeRaw : null;
@@ -173,6 +176,7 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
     startedAtMs: optionalFiniteMs(o.startedAtMs ?? o.startedAt),
     endedAtMs: optionalFiniteMs(o.endedAtMs ?? o.endedAt),
     substeps: substeps.length ? substeps : null,
+    browserTabUrl,
   };
 }
 
