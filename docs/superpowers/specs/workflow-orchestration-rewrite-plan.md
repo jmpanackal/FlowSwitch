@@ -826,8 +826,8 @@ Required correlation keys:
 
 Sequencing note:
 
-- `processHintsVersion` becomes mandatory and meaningful only after `process-hints.js` extraction/versioning is delivered in Phase 2.
-- Until then, emit `processHintsVersion: "pre-module"` as explicit transitional marker.
+- `process-hints.js` extraction is done; `PROCESS_HINTS_VERSION` is emitted on launch `start` and on `companion-hints-discovered` decisions (see execution checklist 2026-05-03). Bump that constant when companion-hint rules change.
+- The transitional `processHintsVersion: "pre-module"` marker was never wired in code; no runtime change required beyond the versioned payload above.
 
 Artifacts:
 
