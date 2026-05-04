@@ -2,6 +2,13 @@ const { getRunningWindowProcesses } = require('./windows-process-service');
 const { isChromiumFamilyProcessKey } = require('./window-candidate-classifier');
 
 /**
+ * Schema / algorithm generation for companion process-hint expansion.
+ * Bump when `computeCompanionHintsFromProcessRows` matching rules or exports change
+ * so `launch-latest.jsonl` can be correlated without relying on app semver.
+ */
+const PROCESS_HINTS_VERSION = '1.0.0';
+
+/**
  * Expands a base process hint using running top-level window processes.
  * Guards against substring false positives (e.g. "vival" matching Chromium "vivaldi")
  * that would pull unrelated browser HWNDs into placement fallbacks.
@@ -55,6 +62,7 @@ const buildCompanionProcessHints = async ({
       ...diagnosticsContext,
       strategy: 'process-hint-expansion',
       reason: 'companion-hints-discovered',
+      processHintsVersion: PROCESS_HINTS_VERSION,
       baseProcessHintLc: base,
       processHints: result,
     });
@@ -63,6 +71,7 @@ const buildCompanionProcessHints = async ({
 };
 
 module.exports = {
+  PROCESS_HINTS_VERSION,
   buildCompanionProcessHints,
   computeCompanionHintsFromProcessRows,
 };
