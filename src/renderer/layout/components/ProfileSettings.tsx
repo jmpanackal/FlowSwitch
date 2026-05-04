@@ -1049,7 +1049,7 @@ function ProfileSettingsInner({
                 <div>
                   <h3 className="font-medium text-flow-text-primary">Pre-launch app behavior</h3>
                   <p className="text-xs text-flow-text-muted">
-                    Windows · visible windows only · never FlowSwitch, Explorer, or protected shells.
+                    Windows · visible windows only · never FlowSwitch or protected shells. File Explorer is captured when folder paths are detected (tabs → profile content).
                   </p>
                 </div>
               </div>

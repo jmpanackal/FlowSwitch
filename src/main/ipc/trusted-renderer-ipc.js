@@ -12,6 +12,9 @@ const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 const { readAppPreferences, writeAppPreferences } = require('../services/app-preferences-store');
 const { getSteamAppsCommonRootDirsSync } = require('../services/steam-library-roots');
+const {
+  listExplorerFilesystemFolderPathsForRootHwnd,
+} = require('../services/explorer-window-tab-paths');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
@@ -1809,6 +1812,17 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     let spotifyDebugData = null;
     let nvidiaDebugData = null;
     for (const windowInfo of uniqueWindows) {
+      const processNameEarlyLc = String(windowInfo.name || '').toLowerCase();
+      if (processNameEarlyLc === 'explorer' && windowInfo.mainWindowHandle) {
+        const tabPaths = await listExplorerFilesystemFolderPathsForRootHwnd(
+          windowInfo.mainWindowHandle,
+        );
+        if (tabPaths.length === 0) {
+          continue;
+        }
+        windowInfo.__explorerCapturedFolders = tabPaths;
+      }
+
       const bounds = (
         windowInfo.isMinimized
         && windowInfo.normalBounds
@@ -2059,7 +2073,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         processName.toLowerCase() === 'steamwebhelper'
         || processName.toLowerCase() === 'steam'
       ) ? 'Steam' : processName;
-      const mappedWindow = {
+      let mappedWindow = {
         name: normalizedAppName,
         iconPath,
         executablePath: windowInfo.executablePath || null,
@@ -2072,6 +2086,24 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           height: Math.max(1, Math.min(100, round1(relH))),
         },
       };
+
+      const explorerFolders = windowInfo.__explorerCapturedFolders;
+      if (Array.isArray(explorerFolders) && explorerFolders.length > 0) {
+        const windir = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+        const explorerExe = path.join(windir, 'explorer.exe').replace(/\//g, '\\');
+        const exeFinal = fs.existsSync(explorerExe)
+          ? explorerExe
+          : (windowInfo.executablePath || explorerExe);
+        mappedWindow = {
+          ...mappedWindow,
+          name: 'File Explorer',
+          executablePath: exeFinal,
+          associatedFiles: explorerFolders.map((folderPath) => ({
+            type: 'folder',
+            path: folderPath,
+          })),
+        };
+      }
 
       if (windowInfo.isMinimized) {
         minimizedApps.push({

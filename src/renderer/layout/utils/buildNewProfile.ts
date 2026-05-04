@@ -23,6 +23,7 @@ export type MemoryCapture = {
       executablePath?: string | null;
       position: { x: number; y: number };
       size: { width: number; height: number };
+      associatedFiles?: Array<{ type?: string; path?: string }>;
     }>;
   }>;
   minimizedApps?: Array<{
@@ -34,6 +35,7 @@ export type MemoryCapture = {
     targetMonitor?: string;
     sourcePosition?: { x: number; y: number };
     sourceSize?: { width: number; height: number };
+    associatedFiles?: Array<{ type?: string; path?: string }>;
   }>;
   error?: string;
 };
@@ -168,6 +170,72 @@ const normalizeMonitorLayout = <
     layoutPosition: positionsById.get(monitor.id) || monitor.layoutPosition || { x: 50, y: 50 },
   }));
 };
+
+const folderLabelFromPath = (folderPath: string) => {
+  const trimmed = folderPath.replace(/[/\\]+$/, "");
+  const i = Math.max(trimmed.lastIndexOf("/"), trimmed.lastIndexOf("\\"));
+  return i >= 0 ? trimmed.slice(i + 1) || trimmed : trimmed;
+};
+
+const normalizedFolderDedupeKey = (raw: string) => (
+  String(raw || "")
+    .trim()
+    .replace(/\//g, "\\")
+    .replace(/\\+/g, "\\")
+    .toLowerCase()
+);
+
+/** One content-library row per captured Explorer folder tab (deduped paths). */
+export function collectCapturedExplorerContentItems(
+  capture: MemoryCapture,
+  idPrefix: string,
+): Array<{
+  id: string;
+  type: "file";
+  name: string;
+  path: string;
+  isFolder: boolean;
+  defaultApp: string;
+  fileType: string;
+  dateAdded: string;
+}> {
+  const paths: string[] = [];
+  const seen = new Set<string>();
+  const consider = (app: {
+    name?: string;
+    associatedFiles?: Array<{ type?: string; path?: string }>;
+  }) => {
+    const nm = String(app.name || "").trim().toLowerCase();
+    if (nm !== "file explorer" && nm !== "explorer") return;
+    for (const f of app.associatedFiles || []) {
+      if (String(f?.type || "").toLowerCase() !== "folder") continue;
+      const p = String(f?.path || "").trim();
+      if (!p) continue;
+      const k = normalizedFolderDedupeKey(p);
+      if (seen.has(k)) continue;
+      seen.add(k);
+      paths.push(
+        p.replace(/\//g, "\\").replace(/\\+/g, "\\"),
+      );
+    }
+  };
+  for (const m of capture.monitors) {
+    for (const a of m.apps) consider(a);
+  }
+  for (const a of capture.minimizedApps || []) consider(a);
+
+  const stamp = Date.now();
+  return paths.map((folderPath, index) => ({
+    id: `${idPrefix}-explorer-${stamp}-${index}`,
+    type: "file" as const,
+    name: folderLabelFromPath(folderPath) || folderPath,
+    path: folderPath,
+    isFolder: true,
+    defaultApp: "File Explorer",
+    fileType: "Folder",
+    dateAdded: new Date().toISOString(),
+  }));
+}
 
 const getStableColor = (name: string) => {
   let hash = 0;
@@ -313,6 +381,10 @@ export function buildMemoryFlowProfileFromCapture(
     (sum, monitor) => sum + monitor.apps.length,
     0,
   ) + (capture.minimizedApps?.length || 0);
+  const explorerContentItems = collectCapturedExplorerContentItems(
+    capture,
+    profileId,
+  );
 
   let orderedMonitors = normalizeMonitorLayout([...capture.monitors].sort((a, b) => {
     const ay = a.layoutPosition?.y ?? 0;
@@ -335,7 +407,7 @@ export function buildMemoryFlowProfileFromCapture(
     description: `Captured layout with ${formatUnit(totalCapturedApps, "app")}`,
     appCount: totalCapturedApps,
     tabCount: 0,
-    fileCount: 0,
+    fileCount: explorerContentItems.length,
     globalVolume: 70,
     applyProfileVolumesOnLaunch: false,
     backgroundBehavior: "keep",
@@ -375,6 +447,9 @@ export function buildMemoryFlowProfileFromCapture(
         size: app.size,
         volume: 50,
         launchBehavior: "new" as const,
+        ...(Array.isArray(app.associatedFiles) && app.associatedFiles.length > 0
+          ? { associatedFiles: app.associatedFiles }
+          : {}),
       })),
     })),
     minimizedApps: (capture.minimizedApps || []).map((app) => ({
@@ -389,11 +464,14 @@ export function buildMemoryFlowProfileFromCapture(
       sourcePosition: app.sourcePosition || app.position,
       sourceSize: app.sourceSize || app.size,
       instanceId: `${app.name}-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      ...(Array.isArray(app.associatedFiles) && app.associatedFiles.length > 0
+        ? { associatedFiles: app.associatedFiles }
+        : {}),
     })),
     minimizedFiles: [],
     files: [],
     browserTabs: [],
-    contentItems: [],
+    contentItems: explorerContentItems,
     contentFolders: [],
   } as FlowProfile;
 }

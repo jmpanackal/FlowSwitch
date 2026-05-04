@@ -152,3 +152,4 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - Profile library keyboard parity landed (2026-05-04): `ProfileCard` primary selection is a focusable control with proper naming; nested actions remain separate buttons with `stopPropagation`.
 - `MainLayout` renderer hygiene (2026-05-04): stray `console.log` removed from production paths (`chore/mainlayout-remove-debug-logs`).
 - Shell landmarks (2026-05-04): named root/header/nav/region/main/aside wrappers in `MainLayout` to reduce AX “whole sidebar as one name” noise (M2 follow-up).
+- Layout capture / GitHub #51 (partial, `feature/explorer-windows-profile`): Explorer windows with resolvable `file://` folder URLs get `explorer.exe` plus `associatedFiles` on the captured tile; paths dedupe into profile Content rows. Tab coverage depends on what `Shell.Application.Windows()` exposes on the OS build; launch restore uses the existing `profile-launch-gather` Explorer argv path.
