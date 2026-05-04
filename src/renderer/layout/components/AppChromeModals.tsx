@@ -1,8 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
+import { APP_VERSION } from "../../appVersion";
 import { Switch } from "./ui/switch";
-
-const APP_VERSION = "0.1.0";
 
 type AppChromeModalsProps = {
   preferencesOpen: boolean;

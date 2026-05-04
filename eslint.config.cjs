@@ -53,6 +53,7 @@ module.exports = [
       },
       globals: {
         ...globals.browser,
+        __FLOWSWITCH_APP_VERSION__: 'readonly',
       },
     },
     plugins: {
