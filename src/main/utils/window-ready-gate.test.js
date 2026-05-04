@@ -3,6 +3,9 @@ const assert = require('node:assert/strict');
 const {
   sortCandidateRows,
   waitForMainWindowReadyOrBlocker,
+  isLikelyMainPlacementWindow,
+  isLikelyModalBlockerWindow,
+  isLikelyPostModalResumeMainWindowCandidate,
 } = require('../services/window-ready-gate');
 
 const buildRow = (overrides = {}) => ({
@@ -239,6 +242,132 @@ test('waitForMainWindowReadyOrBlocker filters out quarantined handles via exclud
   assert.equal(result.ready, true);
   assert.equal(result.blocked, false);
   assert.equal(result.handle, 'real-steam-main');
+});
+
+test('post-modal resume sizing accepts smaller main vs large snap rect (Audacity-style)', () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const main = buildRow({
+    handle: 'aud-main',
+    width: 800,
+    height: 620,
+    area: 496_000,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 20,
+  });
+  assert.equal(isLikelyMainPlacementWindow(main, bounds), false);
+  assert.equal(isLikelyPostModalResumeMainWindowCandidate(main, bounds), true);
+});
+
+test('waitForMainWindowReadyOrBlocker postModalResumeSizing marks smaller main ready', async () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const main = buildRow({
+    handle: 'm1',
+    width: 800,
+    height: 620,
+    area: 496_000,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 12,
+  });
+  const result = await waitForMainWindowReadyOrBlocker({
+    processHintLc: 'audacity',
+    expectedBounds: bounds,
+    timeoutMs: 2000,
+    pollMs: 10,
+    postModalResumeSizing: true,
+    listWindows: async () => [main],
+    sleep: async () => {},
+    summarizeWindowRows: (items) => items,
+    scoreWindowCandidate: () => 100,
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.handle, 'm1');
+});
+
+test('post-modal resume sizing still accepts owned smaller mains (not treated as modal)', () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const main = buildRow({
+    handle: 'owned-main',
+    width: 800,
+    height: 620,
+    area: 496_000,
+    hasOwner: true,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 18,
+  });
+  assert.equal(isLikelyModalBlockerWindow(main, bounds), true);
+  assert.equal(isLikelyPostModalResumeMainWindowCandidate(main, bounds), true);
+});
+
+test('post-modal resume sizing rejects narrow companion panes', () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const narrowPane = buildRow({
+    handle: 'wx-pane',
+    width: 331,
+    height: 884,
+    area: 292_604,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 14,
+  });
+  assert.equal(isLikelyPostModalResumeMainWindowCandidate(narrowPane, bounds), false);
+});
+
+test('post-modal resume sizing rejects portrait companion panes even when area is large', () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const portraitPane = buildRow({
+    handle: 'wx-pane-large',
+    width: 664,
+    height: 893,
+    area: 664 * 893,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 16,
+  });
+  assert.equal(isLikelyPostModalResumeMainWindowCandidate(portraitPane, bounds), false);
+});
+
+test('waitForMainWindowReadyOrBlocker postModalResumeSizing prefers balanced main over larger companion pane', async () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  const companionPane = buildRow({
+    handle: 'wx-pane-large',
+    width: 664,
+    height: 893,
+    area: 664 * 893,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 16,
+  });
+  const main = buildRow({
+    handle: 'aud-main',
+    width: 800,
+    height: 620,
+    area: 800 * 620,
+    hasOwner: false,
+    topMost: false,
+    className: 'wxwindownr',
+    titleLength: 20,
+  });
+  const result = await waitForMainWindowReadyOrBlocker({
+    processHintLc: 'audacity',
+    expectedBounds: bounds,
+    timeoutMs: 2000,
+    pollMs: 10,
+    postModalResumeSizing: true,
+    listWindows: async () => [companionPane, main],
+    sleep: async () => {},
+    summarizeWindowRows: (items) => items,
+    scoreWindowCandidate: (row) => Number(row?.area || 0),
+  });
+  assert.equal(result.ready, true);
+  assert.equal(result.handle, 'aud-main');
 });
 
 test('sortCandidateRows uses deterministic tie-break when scores are equal', () => {
