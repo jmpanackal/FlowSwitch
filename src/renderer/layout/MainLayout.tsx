@@ -2020,11 +2020,13 @@ export default function App() {
                 transform: `translate3d(calc(-100% / 3 * ${librarySidebarSlideIndex}), 0, 0)`,
               }}
             >
+              {/* Inert removes inactive columns from tab order (pointer-events/aria-hidden alone do not). */}
               <div
                 className={`flex min-h-0 w-1/3 min-w-0 flex-shrink-0 flex-col ${
                   currentView === "profiles" ? "" : "pointer-events-none select-none"
                 }`}
                 aria-hidden={currentView !== "profiles"}
+                {...(currentView !== "profiles" ? { inert: "" as const } : {})}
               >
                 <FlowLibraryToolbar
                   toolbarEnd={
@@ -2135,6 +2137,7 @@ export default function App() {
                   currentView === "apps" ? "" : "pointer-events-none select-none"
                 }`}
                 aria-hidden={currentView !== "apps"}
+                {...(currentView !== "apps" ? { inert: "" as const } : {})}
               >
                 <AppManager
                   profiles={profiles}
@@ -2165,6 +2168,7 @@ export default function App() {
                   currentView === "content" ? "" : "pointer-events-none select-none"
                 }`}
                 aria-hidden={currentView !== "content"}
+                {...(currentView !== "content" ? { inert: "" as const } : {})}
               >
                 <ContentManager
                   profiles={profiles}
