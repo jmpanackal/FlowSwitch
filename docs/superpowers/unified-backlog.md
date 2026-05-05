@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-05-04  
+Last updated: 2026-05-05  
 Owner: active implementation branch owner
 
 **Release note (marketing):** `package.json` / `website/` prepared for **0.1.3** (`chore/release-0-1-3-website`). Live GitHub downloads require pushing annotated tag **`v0.1.3`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.3-win-x64-*.exe` assets matching `website/latest.json`.
@@ -152,4 +152,4 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - Profile library keyboard parity landed (2026-05-04): `ProfileCard` primary selection is a focusable control with proper naming; nested actions remain separate buttons with `stopPropagation`.
 - `MainLayout` renderer hygiene (2026-05-04): stray `console.log` removed from production paths (`chore/mainlayout-remove-debug-logs`).
 - Shell landmarks (2026-05-04): named root/header/nav/region/main/aside wrappers in `MainLayout` to reduce AX “whole sidebar as one name” noise (M2 follow-up).
-- Layout capture / GitHub #51 (partial, `feature/explorer-windows-profile`): Explorer windows with resolvable `file://` folder URLs get `explorer.exe` plus `associatedFiles` on the captured tile; paths dedupe into profile Content rows. Tab coverage depends on what `Shell.Application.Windows()` exposes on the OS build; launch restore uses the existing `profile-launch-gather` Explorer argv path.
+- Layout capture / GitHub #51 (partial, `feature/explorer-windows-profile`): Explorer windows with resolvable `file://` folder URLs get `explorer.exe` plus `associatedFiles` on the captured tile; paths dedupe into profile Content rows. Tab coverage depends on what `Shell.Application.Windows()` exposes on the OS build; launch restore uses the existing `profile-launch-gather` Explorer argv path. **Launch fix (2026-05-05):** sequential Explorer tiles exclude HWNDs already placed earlier in the same run (`placedHandlesInRun` → window-ready-gate `excludeHandles`, reuse candidate filter, `moveWindowToBounds` exclusions, post-modal resume quarantine merge) so the second launch cannot reposition the first window into the second slot when the shell reuses or delays new top-level HWNDs.
