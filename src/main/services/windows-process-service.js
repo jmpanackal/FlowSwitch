@@ -72,6 +72,8 @@ public static class Win32 {
   public static extern bool IsWindowVisible(IntPtr hWnd);
   [DllImport("user32.dll", CharSet = CharSet.Unicode)]
   public static extern int GetWindowText(IntPtr hWnd, System.Text.StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll", CharSet = CharSet.Unicode)]
+  public static extern int GetClassName(IntPtr hWnd, System.Text.StringBuilder lpClassName, int nMaxCount);
   [DllImport("user32.dll")]
   public static extern int GetWindowTextLength(IntPtr hWnd);
   [DllImport("user32.dll")]
@@ -88,7 +90,7 @@ public static class Win32 {
 "@
 $items = @()
 $seen = New-Object 'System.Collections.Generic.HashSet[string]'
-Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -and $_.MainWindowTitle.Trim().Length -gt 0 } | ForEach-Object {
+Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and (($_.MainWindowTitle -and $_.MainWindowTitle.Trim().Length -gt 0) -or $_.ProcessName -ieq 'explorer') } | ForEach-Object {
   $rect = New-Object RECT
   $hWnd = [System.IntPtr]::new([int64]$_.MainWindowHandle)
   if ([Win32]::GetWindowRect($hWnd, [ref]$rect)) {
@@ -120,13 +122,24 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -
       }
     }
     if ($width -gt 0 -and $height -gt 0) {
-      $dedupeKey = "$($_.Id)|$($_.MainWindowTitle)|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
+      $classBuilder = New-Object System.Text.StringBuilder 256
+      [void][Win32]::GetClassName($hWnd, $classBuilder, $classBuilder.Capacity)
+      $windowClass = $classBuilder.ToString()
+      if ($_.ProcessName -ieq 'explorer' -and ($width -lt 80 -or $height -lt 80)) {
+        return
+      }
+      $mainTitle = $_.MainWindowTitle
+      if ([string]::IsNullOrWhiteSpace($mainTitle) -and $_.ProcessName -ieq 'explorer') {
+        $mainTitle = 'File Explorer'
+      }
+      $dedupeKey = "$($_.Id)|$mainTitle|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
       if ($seen.Add($dedupeKey)) {
         $items += [pscustomobject]@{
           ProcessName = $_.ProcessName
           Id = $_.Id
           MainWindowHandle = [int64]$_.MainWindowHandle
-          MainWindowTitle = $_.MainWindowTitle
+          MainWindowTitle = $mainTitle
+          WindowClass = $windowClass
           Path = $_.Path
           IsMinimized = $isMinimized
           Left = $rect.Left
@@ -147,32 +160,61 @@ Get-Process | Where-Object { $_.MainWindowHandle -ne 0 -and $_.MainWindowTitle -
 # Fallback capture for Explorer windows that can be missed by MainWindowHandle scanning.
 try {
   $shellWindow = [Win32]::GetShellWindow()
+  [uint32]$shellPid = 0
+  if ($shellWindow -ne [System.IntPtr]::Zero) {
+    [void][Win32]::GetWindowThreadProcessId($shellWindow, [ref]$shellPid)
+  }
   $enumProc = [Win32+EnumWindowsProc]{
     param([System.IntPtr]$hWnd, [System.IntPtr]$lParam)
     try {
       if ($hWnd -eq [System.IntPtr]::Zero -or $hWnd -eq $shellWindow) { return $true }
       if (-not [Win32]::IsWindowVisible($hWnd)) { return $true }
-      $titleLen = [Win32]::GetWindowTextLength($hWnd)
-      if ($titleLen -le 0) { return $true }
-      $titleBuilder = New-Object System.Text.StringBuilder ($titleLen + 1)
-      [void][Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
-      $title = $titleBuilder.ToString()
-      if ([string]::IsNullOrWhiteSpace($title)) { return $true }
-
       $rect = New-Object RECT
       if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { return $true }
       $width = $rect.Right - $rect.Left
       $height = $rect.Bottom - $rect.Top
       if ($width -le 0 -or $height -le 0) { return $true }
 
-      [uint32]$pid = 0
-      [void][Win32]::GetWindowThreadProcessId($hWnd, [ref]$pid)
-      if ($pid -le 0) { return $true }
+      # NOTE: $pid is a Constant + AllScope automatic variable in PowerShell. Assigning
+      # to it (or passing it to [ref] for an out-parameter) throws and would be silently
+      # swallowed by our catch, dropping every Explorer window. Use $processId instead.
+      [uint32]$processId = 0
+      [void][Win32]::GetWindowThreadProcessId($hWnd, [ref]$processId)
+      if ($processId -le 0) { return $true }
+      $isShellPid = ($shellPid -gt 0 -and $processId -eq $shellPid)
 
-      $proc = [System.Diagnostics.Process]::GetProcessById([int]$pid)
-      if ($proc.ProcessName -ine 'explorer') { return $true }
+      $classBuilder = New-Object System.Text.StringBuilder 256
+      [void][Win32]::GetClassName($hWnd, $classBuilder, $classBuilder.Capacity)
+      $windowClass = $classBuilder.ToString()
+      $isExplorerClass = (
+        $windowClass -ieq 'CabinetWClass' -or $windowClass -ieq 'ExploreWClass'
+      )
+      $processName = $null
       $processPath = $null
-      try { $processPath = $proc.Path } catch { $processPath = $null }
+      if ($isShellPid) {
+        $processName = 'explorer'
+      } else {
+        try {
+          $proc = [System.Diagnostics.Process]::GetProcessById([int]$processId)
+          $processName = $proc.ProcessName
+          try { $processPath = $proc.Path } catch { $processPath = $null }
+        } catch {
+          $processName = $null
+          $processPath = $null
+        }
+      }
+      if (-not $isShellPid -and -not $isExplorerClass -and $processName -ine 'explorer') { return $true }
+      if ($width -lt 80 -or $height -lt 80) { return $true }
+      $title = ''
+      try {
+        $titleLen = [Win32]::GetWindowTextLength($hWnd)
+        if ($titleLen -gt 0) {
+          $titleBuilder = New-Object System.Text.StringBuilder ($titleLen + 1)
+          [void][Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+          $title = $titleBuilder.ToString()
+        }
+      } catch {}
+      if ([string]::IsNullOrWhiteSpace($title)) { $title = 'File Explorer' }
 
       $isMinimized = [Win32]::IsIconic($hWnd)
       $normalLeft = $null
@@ -191,13 +233,14 @@ try {
         }
       }
 
-      $dedupeKey = "$($proc.Id)|$title|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
+      $dedupeKey = "$processId|$([int64]$hWnd)|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
       if ($seen.Add($dedupeKey)) {
         $items += [pscustomobject]@{
-          ProcessName = $proc.ProcessName
-          Id = $proc.Id
+          ProcessName = $(if ($isShellPid -or $processName -ieq 'explorer' -or $isExplorerClass) { 'explorer' } else { $processName })
+          Id = $processId
           MainWindowHandle = [int64]$hWnd
           MainWindowTitle = $title
+          WindowClass = $windowClass
           Path = $processPath
           IsMinimized = $isMinimized
           Left = $rect.Left
@@ -216,6 +259,90 @@ try {
     return $true
   }
   [void][Win32]::EnumWindows($enumProc, [System.IntPtr]::Zero)
+} catch {}
+
+# Shell COM capture for Explorer windows/tabs (reliable even when process/window scans miss).
+try {
+  $shell = New-Object -ComObject Shell.Application
+  foreach ($w in $shell.Windows()) {
+    try {
+      $hwnd64 = 0
+      try { $hwnd64 = [int64]$w.HWND } catch { continue }
+      if ($hwnd64 -le 0) { continue }
+
+      $fullName = ''
+      try { $fullName = [string]$w.FullName } catch { $fullName = '' }
+      if ([string]::IsNullOrWhiteSpace($fullName) -or -not ($fullName.ToLowerInvariant().EndsWith('explorer.exe'))) {
+        continue
+      }
+
+      $hWnd = [System.IntPtr]::new($hwnd64)
+      $rect = New-Object RECT
+      if (-not [Win32]::GetWindowRect($hWnd, [ref]$rect)) { continue }
+      $width = $rect.Right - $rect.Left
+      $height = $rect.Bottom - $rect.Top
+      if ($width -lt 80 -or $height -lt 80) { continue }
+
+      # See $pid note above: PowerShell's $pid is Constant/AllScope; use $processId.
+      [uint32]$processId = 0
+      [void][Win32]::GetWindowThreadProcessId($hWnd, [ref]$processId)
+
+      $title = ''
+      try { $title = [string]$w.LocationName } catch { $title = '' }
+      if ([string]::IsNullOrWhiteSpace($title)) {
+        try {
+          $titleLen = [Win32]::GetWindowTextLength($hWnd)
+          if ($titleLen -gt 0) {
+            $titleBuilder = New-Object System.Text.StringBuilder ($titleLen + 1)
+            [void][Win32]::GetWindowText($hWnd, $titleBuilder, $titleBuilder.Capacity)
+            $title = $titleBuilder.ToString()
+          }
+        } catch {}
+      }
+      if ([string]::IsNullOrWhiteSpace($title)) { $title = 'File Explorer' }
+
+      $isMinimized = [Win32]::IsIconic($hWnd)
+      $normalLeft = $null
+      $normalTop = $null
+      $normalRight = $null
+      $normalBottom = $null
+      if ($isMinimized) {
+        try {
+          $placement = New-Object WINDOWPLACEMENT
+          $placement.length = [System.Runtime.InteropServices.Marshal]::SizeOf([WINDOWPLACEMENT])
+          if ([Win32]::GetWindowPlacement($hWnd, [ref]$placement)) {
+            $normalLeft = $placement.rcNormalPosition.Left
+            $normalTop = $placement.rcNormalPosition.Top
+            $normalRight = $placement.rcNormalPosition.Right
+            $normalBottom = $placement.rcNormalPosition.Bottom
+          }
+        } catch {}
+      }
+
+      $dedupeKey = "shell-com|$hwnd64|$($rect.Left),$($rect.Top),$($rect.Right),$($rect.Bottom)"
+      if ($seen.Add($dedupeKey)) {
+        $items += [pscustomobject]@{
+          ProcessName = 'explorer'
+          Id = [int]$processId
+          MainWindowHandle = $hwnd64
+          MainWindowTitle = $title
+          WindowClass = 'CabinetWClass'
+          Path = $fullName
+          IsMinimized = $isMinimized
+          Left = $rect.Left
+          Top = $rect.Top
+          Right = $rect.Right
+          Bottom = $rect.Bottom
+          NormalLeft = $normalLeft
+          NormalTop = $normalTop
+          NormalRight = $normalRight
+          NormalBottom = $normalBottom
+          Width = $width
+          Height = $height
+        }
+      }
+    } catch {}
+  }
 } catch {}
 $items | ConvertTo-Json -Depth 3`;
 
@@ -243,11 +370,17 @@ $items | ConvertTo-Json -Depth 3`;
             .map((row) => ({
               name: String(row.ProcessName),
               id: Number(row.Id || 0),
+              windowClass: row.WindowClass ? String(row.WindowClass) : '',
               mainWindowHandle: (() => {
                 const h = row.MainWindowHandle;
                 if (h === undefined || h === null || h === '') return null;
-                const n = Number(h);
-                return Number.isFinite(n) && n !== 0 ? String(Math.trunc(n)) : null;
+                let n = Number(h);
+                if (!Number.isFinite(n) || n === 0) return null;
+                if (n < 0 && n >= -0x80000000) {
+                  n += 0x100000000;
+                }
+                if (n <= 0 || n > 0xffffffff) return null;
+                return String(Math.trunc(n));
               })(),
               title: row.MainWindowTitle ? String(row.MainWindowTitle) : '',
               executablePath: typeof row.Path === 'string' ? row.Path : null,
