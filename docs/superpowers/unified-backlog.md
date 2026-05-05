@@ -3,7 +3,7 @@
 Last updated: 2026-05-05  
 Owner: active implementation branch owner
 
-**Release note (marketing):** `package.json` / `website/` prepared for **0.1.3** (`chore/release-0-1-3-website`). Live GitHub downloads require pushing annotated tag **`v0.1.3`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.3-win-x64-*.exe` assets matching `website/latest.json`.
+**Release note (marketing):** `package.json` / `website/` prepared for **0.1.4**. Live GitHub downloads require pushing annotated tag **`v0.1.4`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.4-win-x64-*.exe` assets matching `website/latest.json`.
 
 ## Purpose
 
