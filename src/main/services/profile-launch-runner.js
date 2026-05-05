@@ -362,6 +362,9 @@ const createProfileLaunchRunner = (deps) => {
   skipFrameChanged = false,
   launchDiagnostics,
   diagnosticsContext = {},
+  // HWNDs that earlier launches in this run have already placed. Treated like quarantined
+  // handles: they must not be reselected as the post-modal main window for this launch.
+  runPlacedHandles = null,
 }) => {
   const launchedPidNumber = Number(launchedPid || 0);
   const blockedHandleSet = new Set(
@@ -369,6 +372,12 @@ const createProfileLaunchRunner = (deps) => {
       .map((handle) => String(handle || '').trim())
       .filter(Boolean),
   );
+  if (runPlacedHandles && typeof runPlacedHandles[Symbol.iterator] === 'function') {
+    for (const handle of runPlacedHandles) {
+      const normalized = String(handle || '').trim();
+      if (normalized) blockedHandleSet.add(normalized);
+    }
+  }
   const blockerPresenceHandleSet = new Set(blockedHandleSet);
   const rejectedPostModalHandleSet = new Set();
 
@@ -1056,6 +1065,19 @@ const launchProfileById = async (profileId, options = {}) => {
   }
   const consumedReuseHandlesByProcessHint = new Map();
   const baselineReuseHandlesByProcessHint = new Map();
+  // Run-scoped set of HWNDs already claimed by a successful placement earlier in this
+  // run. Subsequent launches must exclude these from candidate selection so a later
+  // duplicate-process launch (e.g. a second `explorer.exe <path>` invocation) cannot
+  // pick up and reposition a window that an earlier launch already placed. The shell
+  // sometimes reuses an existing top-level HWND for the second invocation (or the new
+  // HWND is slow to appear), so the ready-gate would otherwise latch onto the previous
+  // launch's placed window and move it.
+  const placedHandlesInRun = new Set();
+  const claimRunPlacementHandle = (handle) => {
+    const normalized = String(handle || '').trim();
+    if (!normalized) return;
+    placedHandlesInRun.add(normalized);
+  };
 
   const displayOrdinalLabelForMonitor = (m) => {
     if (!m || typeof m !== 'object') return null;
@@ -2094,7 +2116,14 @@ try {
           ? { ...bounds, state: 'normal' }
           : bounds;
         const readyGateExpectedBounds = shouldDelayChromiumMaximize ? null : placementBounds;
-        const excludedHandles = preLaunchHandles;
+        // Combine this launch's pre-launch HWNDs with all HWNDs already claimed by earlier
+        // launches in this run. The latter is what prevents duplicate-process launches
+        // (e.g. two File Explorer windows) from inheriting a sibling launch's already-placed
+        // window when the shell reuses an existing top-level HWND.
+        const excludedHandles = Array.from(new Set([
+          ...(Array.isArray(preLaunchHandles) ? preLaunchHandles : []),
+          ...placedHandlesInRun,
+        ].map((handle) => String(handle || '').trim()).filter(Boolean)));
         const chromiumNormalSoftPos = isChromiumFamily && placementBounds.state === 'normal';
         launchDiagnostics.decision({
           processHintLc,
@@ -2167,6 +2196,9 @@ try {
                 seen.add(handle);
                 if (!preLaunchHandleSet.has(handle)) continue;
                 if (consumedReuseHandles.has(handle)) continue;
+                // Never reuse a handle that an earlier launch in this run already placed,
+                // even if it predates this launch's pre-launch baseline.
+                if (placedHandlesInRun.has(handle)) continue;
                 // Allow minimized pre-existing handles here: warm-attach placement will restore and
                 // re-anchor them. Rejecting minimized rows prevented reuse_existing for already-running
                 // apps (OBS/Chrome) and forced unnecessary relaunch/confirmation flows.
@@ -2348,6 +2380,11 @@ try {
             scoreWindowCandidate: (row, hint) => (
               scoreWindowCandidate(row, { chromiumProcessHint: hint })
             ),
+            // Quarantine HWNDs that earlier launches in this run already placed so the gate
+            // cannot latch onto a previous launch's window (root cause of duplicate-Explorer
+            // ending up in the same slot when the second `explorer.exe <path>` reuses the
+            // existing top-level window).
+            excludeHandles: placedHandlesInRun,
             diagnosticsContext: {
               processHintLc,
               strategy: 'window-ready-gate',
@@ -2387,6 +2424,7 @@ try {
               scoreWindowCandidate: (row, hint) => (
                 scoreWindowCandidate(row, { chromiumProcessHint: hint })
               ),
+              excludeHandles: placedHandlesInRun,
               diagnosticsContext: {
                 processHintLc,
                 strategy: 'window-ready-gate-retry',
@@ -2471,6 +2509,7 @@ try {
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
             launchDiagnostics,
+            runPlacedHandles: placedHandlesInRun,
             diagnosticsContext: {
               processHintLc,
               strategy: 'post-modal-resume',
@@ -2491,6 +2530,7 @@ try {
             if (resumeResult?.handle) pendingEntry.handle = String(resumeResult.handle);
             if (mappedStatus === 'resolved') {
               pendingEntry.resolvedAt = Date.now();
+              claimRunPlacementHandle(resumeResult?.handle);
             }
             if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
               const nowTs = Date.now();
@@ -2694,7 +2734,9 @@ try {
           });
           const postLaunchHandles = postLaunchWindowInfos.map((row) => row.handle);
           const preHandleSet = new Set(preLaunchHandles);
-          newHandles = postLaunchHandles.filter((h) => !preHandleSet.has(h));
+          newHandles = postLaunchHandles.filter((h) => (
+            !preHandleSet.has(h) && !placedHandlesInRun.has(String(h || '').trim())
+          ));
           const newHandleSet = new Set(newHandles);
           let rankedNewWindows = postLaunchWindowInfos
             .filter((row) => newHandleSet.has(row.handle))
@@ -2848,6 +2890,8 @@ try {
             for (const row of (Array.isArray(rows) ? rows : [])) {
               const handle = String(row?.handle || '').trim();
               if (!handle || seenCandidateHandles.has(handle)) continue;
+              // Never recapture a handle a sibling launch already placed in this run.
+              if (placedHandlesInRun.has(handle)) continue;
               seenCandidateHandles.add(handle);
               lateCandidates.push(row);
             }
@@ -2952,6 +2996,7 @@ try {
         if (!result.applied || !result.handle) {
           throw new Error('Window placement was not applied to a launchable handle.');
         }
+        claimRunPlacementHandle(result.handle);
         const postPlacementRows = await getVisibleWindowInfos(processHintLc, {
           diagnostics: launchDiagnostics,
           diagnosticsContext: {
@@ -3014,6 +3059,7 @@ try {
             if (previousHandle && previousHandle !== result.handle) {
               await minimizeWindowHandle(previousHandle);
             }
+            claimRunPlacementHandle(result.handle);
           }
         }
         const placedRow = (Array.isArray(postPlacementRows) ? postPlacementRows : [])
@@ -3532,6 +3578,62 @@ try {
                 reason: 'sequential-tab-path-open-failed',
                 tabIndex: tabIdx,
                 error: String(err?.message || err),
+              });
+            }
+          }
+          // Opening additional Explorer tabs can trigger shell-driven size/position adjustments.
+          // Re-assert placement after tab injection so final bounds match the profile layout.
+          const placedHandle = String(result.handle || '').trim();
+          if (placedHandle) {
+            await sleep(260);
+            const reasserted = await moveSpecificWindowHandleToBounds({
+              handle: placedHandle,
+              bounds: placementBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: false,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'explorer-content-post-place',
+                reason: 'reassert-placement-after-tabs',
+                tabCount: profileSpawnArgs.length,
+              },
+            });
+            if (reasserted?.applied && reasserted?.handle) {
+              result.handle = String(reasserted.handle).trim();
+              claimRunPlacementHandle(result.handle);
+            }
+            if (
+              launchItem.monitor
+              && (placementBounds.state === 'normal' || placementBounds.state === 'maximized')
+              && result.handle
+            ) {
+              const postContentStabilized = await stabilizeKnownHandlePlacement({
+                handle: result.handle,
+                bounds: placementBounds,
+                monitor: launchItem.monitor,
+                aggressiveMaximize,
+                positionOnlyBeforeMaximize,
+                skipFrameChanged: false,
+                durationMs: placementBounds.state === 'maximized' ? 1800 : 2400,
+                diagnostics: launchDiagnostics,
+                diagnosticsContext: {
+                  processHintLc,
+                  strategy: 'explorer-content-post-place',
+                  reason: 'stabilize-after-tab-open',
+                  tabCount: profileSpawnArgs.length,
+                },
+              });
+              launchDiagnostics.result({
+                processHintLc,
+                strategy: 'explorer-content-post-place',
+                reason: postContentStabilized.verified
+                  ? 'post-content-stabilization-verified'
+                  : 'post-content-stabilization-not-verified',
+                verified: postContentStabilized.verified,
+                corrected: postContentStabilized.corrected,
+                handle: postContentStabilized.handle,
               });
             }
           }

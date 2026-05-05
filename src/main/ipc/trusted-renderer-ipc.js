@@ -12,6 +12,10 @@ const { BrowserWindow, dialog, shell } = require('electron');
 const { MAX_SHORTCUT_PATH_LENGTH } = require('../utils/limits');
 const { readAppPreferences, writeAppPreferences } = require('../services/app-preferences-store');
 const { getSteamAppsCommonRootDirsSync } = require('../services/steam-library-roots');
+const {
+  listExplorerFilesystemFolderPathsForRootHwnd,
+  listExplorerShellWindows,
+} = require('../services/explorer-window-tab-paths');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
@@ -1789,7 +1793,8 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     const captureAllowList = new Set(['steamwebhelper', 'explorer']);
 
     const uniqueWindows = [];
-    const seen = new Set();
+    const seenWindowShapes = new Set();
+    const seenWindowHandles = new Set();
     for (const p of processes) {
       if (!p?.name || !p?.bounds) continue;
       const processNameLc = String(p.name).toLowerCase();
@@ -1798,17 +1803,76 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         && !captureAllowList.has(processNameLc)
       ) continue;
       if (p?.title && hiddenWindowTitlePatterns.some((pattern) => pattern.test(p.title))) continue;
-      const dedupeKey = `${p.id}::${p.title.toLowerCase()}::${p.bounds.x},${p.bounds.y},${p.bounds.width},${p.bounds.height}`;
-      if (seen.has(dedupeKey)) continue;
-      seen.add(dedupeKey);
-      uniqueWindows.push(p);
+      const normalizedHandle = String(p.mainWindowHandle || '').trim();
+      if (normalizedHandle && seenWindowHandles.has(normalizedHandle)) continue;
+      const dedupeKey = `${p.id}::${String(p.title || '').toLowerCase()}::${p.bounds.x},${p.bounds.y},${p.bounds.width},${p.bounds.height}`;
+      if (seenWindowShapes.has(dedupeKey)) continue;
+      seenWindowShapes.add(dedupeKey);
+      if (normalizedHandle) seenWindowHandles.add(normalizedHandle);
+      uniqueWindows.push({
+        ...p,
+        mainWindowHandle: normalizedHandle || null,
+      });
       if (uniqueWindows.length >= 120) break;
+    }
+
+    // Shell COM fallback: enumerate File Explorer windows/tabs directly.
+    try {
+      const shellExplorerWindows = await listExplorerShellWindows();
+      for (const row of shellExplorerWindows) {
+        const bounds = row?.bounds;
+        if (!bounds || Number(bounds.width || 0) <= 0 || Number(bounds.height || 0) <= 0) {
+          continue;
+        }
+        const normalizedHandle = String(row.mainWindowHandle || '').trim();
+        if (normalizedHandle && seenWindowHandles.has(normalizedHandle)) continue;
+        const shapeKey = `${Number(row.pid || 0)}::${String(row.title || 'File Explorer').toLowerCase()}::${bounds.x},${bounds.y},${bounds.width},${bounds.height}`;
+        if (seenWindowShapes.has(shapeKey)) continue;
+        seenWindowShapes.add(shapeKey);
+        if (normalizedHandle) seenWindowHandles.add(normalizedHandle);
+        const synthetic = {
+          name: 'explorer',
+          id: Number(row.pid || 0),
+          mainWindowHandle: normalizedHandle || null,
+          title: String(row.title || 'File Explorer'),
+          executablePath: row.executablePath || null,
+          isMinimized: Boolean(row.isMinimized),
+          bounds: {
+            x: Number(bounds.x || 0),
+            y: Number(bounds.y || 0),
+            width: Number(bounds.width || 0),
+            height: Number(bounds.height || 0),
+          },
+          normalBounds: row?.normalBounds
+            ? {
+              x: Number(row.normalBounds.x || 0),
+              y: Number(row.normalBounds.y || 0),
+              width: Number(row.normalBounds.width || 0),
+              height: Number(row.normalBounds.height || 0),
+            }
+            : null,
+          __explorerCapturedFolders: Array.isArray(row.folderPaths) ? row.folderPaths : [],
+        };
+        uniqueWindows.push(synthetic);
+      }
+    } catch {
+      // best-effort fallback
     }
 
     const debugEnabled = process.env.FLOWSWITCH_CAPTURE_DEBUG === '1';
     let spotifyDebugData = null;
     let nvidiaDebugData = null;
     for (const windowInfo of uniqueWindows) {
+      const processNameEarlyLc = String(windowInfo.name || '').toLowerCase();
+      if (processNameEarlyLc === 'explorer' && windowInfo.mainWindowHandle) {
+        const tabPaths = await listExplorerFilesystemFolderPathsForRootHwnd(
+          windowInfo.mainWindowHandle,
+        );
+        if (tabPaths.length > 0) {
+          windowInfo.__explorerCapturedFolders = tabPaths;
+        }
+      }
+
       const bounds = (
         windowInfo.isMinimized
         && windowInfo.normalBounds
@@ -2059,7 +2123,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
         processName.toLowerCase() === 'steamwebhelper'
         || processName.toLowerCase() === 'steam'
       ) ? 'Steam' : processName;
-      const mappedWindow = {
+      let mappedWindow = {
         name: normalizedAppName,
         iconPath,
         executablePath: windowInfo.executablePath || null,
@@ -2072,6 +2136,33 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
           height: Math.max(1, Math.min(100, round1(relH))),
         },
       };
+
+      if (processNameEarlyLc === 'explorer') {
+        const windir = process.env.SystemRoot || process.env.windir || 'C:\\Windows';
+        const explorerExe = path.join(windir, 'explorer.exe').replace(/\//g, '\\');
+        const exeFinal = fs.existsSync(explorerExe)
+          ? explorerExe
+          : (windowInfo.executablePath || explorerExe);
+        let resolvedIcon = iconPath;
+        if (!resolvedIcon && exeFinal) {
+          resolvedIcon = await getSafeIconDataUrl(exeFinal);
+        }
+        const explorerFolders = windowInfo.__explorerCapturedFolders;
+        mappedWindow = {
+          ...mappedWindow,
+          name: 'File Explorer',
+          executablePath: exeFinal,
+          iconPath: resolvedIcon,
+          ...(Array.isArray(explorerFolders) && explorerFolders.length > 0
+            ? {
+              associatedFiles: explorerFolders.map((folderPath) => ({
+                type: 'folder',
+                path: folderPath,
+              })),
+            }
+            : {}),
+        };
+      }
 
       if (windowInfo.isMinimized) {
         minimizedApps.push({

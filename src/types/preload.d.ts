@@ -181,6 +181,7 @@ declare global {
             executablePath?: string | null;
             position: { x: number; y: number };
             size: { width: number; height: number };
+            associatedFiles?: Array<{ type?: string; path?: string }>;
           }>;
         }>;
         minimizedApps?: Array<{
@@ -192,6 +193,7 @@ declare global {
           targetMonitor?: string;
           sourcePosition?: { x: number; y: number };
           sourceSize?: { width: number; height: number };
+          associatedFiles?: Array<{ type?: string; path?: string }>;
         }>;
         error?: string;
       }>;
