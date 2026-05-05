@@ -17,7 +17,6 @@ import {
   Volume2,
   VolumeX,
   Maximize2,
-  Copy,
   ExternalLink,
   FolderOpen,
   Replace,
@@ -78,13 +77,8 @@ const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
 
 /** Use text/plain so Electron/Chromium reliably carries drag payload. */
 const dragTabPayload = (index: number) => `flowswitch-tab:${index}`;
-const dragAssocPayload = (index: number) => `flowswitch-assoc:${index}`;
 const parseTabDragPayload = (raw: string) => {
   const m = /^flowswitch-tab:(\d+)$/.exec(String(raw || "").trim());
-  return m ? Number(m[1]) : NaN;
-};
-const parseAssocDragPayload = (raw: string) => {
-  const m = /^flowswitch-assoc:(\d+)$/.exec(String(raw || "").trim());
   return m ? Number(m[1]) : NaN;
 };
 
@@ -1205,18 +1199,18 @@ export function SelectedAppDetails({
     }
   };
 
-  const reorderAssociatedFiles = (fromIndex: number, toIndex: number) => {
-    if (!onUpdateAssociatedFiles || !isProfileSlot || fromIndex === toIndex) return;
-    const list = [...(currentData.associatedFiles || [])];
-    if (
-      fromIndex < 0
-      || toIndex < 0
-      || fromIndex >= list.length
-      || toIndex >= list.length
-    ) return;
-    const [row] = list.splice(fromIndex, 1);
-    list.splice(toIndex, 0, row);
-    onUpdateAssociatedFiles(list);
+  const associatedRowDisplayName = (file: any) => {
+    const rawPathOrUrl = String(file?.path || file?.url || "").trim();
+    const isFolder = String(file?.type || "").toLowerCase() === "folder";
+    const explicitName = String(file?.name || "").trim();
+    if (!rawPathOrUrl && explicitName) return explicitName;
+    if (!rawPathOrUrl) return "Untitled content";
+    if (isFolder) {
+      const normalized = rawPathOrUrl.replace(/[\\/]+$/, "");
+      const parts = normalized.split(/[\\/]/).filter(Boolean);
+      return parts[parts.length - 1] || explicitName || rawPathOrUrl;
+    }
+    return explicitName || rawPathOrUrl;
   };
 
   const hasDesktopPicker = Boolean(
@@ -1552,55 +1546,33 @@ export function SelectedAppDetails({
               {(currentData.associatedFiles || []).map((file: any, index: number) => (
                 <div
                   key={file.id || `assoc-${index}-${file.path || file.url || ""}`}
-                  onDragOver={(e) => {
-                    e.preventDefault();
-                    e.dataTransfer.dropEffect = "move";
-                  }}
-                  onDrop={(e) => {
-                    e.preventDefault();
-                    const from = parseAssocDragPayload(e.dataTransfer.getData("text/plain"));
-                    if (Number.isNaN(from)) return;
-                    reorderAssociatedFiles(from, index);
-                  }}
                   className="group flex min-w-0 shrink-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                 >
-                  <FlowTooltip label="Drag to reorder">
-                    <span
-                      draggable
-                      onDragStart={(e) => {
-                        e.stopPropagation();
-                        e.dataTransfer.setData("text/plain", dragAssocPayload(index));
-                        e.dataTransfer.effectAllowed = "move";
-                      }}
-                      className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
-                      aria-hidden
-                    >
-                      <GripVertical className="h-4 w-4" />
-                    </span>
-                  </FlowTooltip>
                   {file.type === "url" || file.url ? (
                     <Link2 className="h-4 w-4 shrink-0 text-flow-accent-blue" />
                   ) : (
                     <FileIcon type={file.type} className="h-4 w-4 shrink-0" />
                   )}
                   <div className="min-w-0 flex-1">
-                    <div className="truncate text-sm font-medium text-flow-text-primary">{file.name}</div>
-                    <div className="truncate text-xs text-flow-text-muted">{file.path || file.url}</div>
+                    <FlowTooltip label={String(file.path || file.url || "").trim() || "No path"}>
+                      <div className="truncate text-sm font-medium text-flow-text-primary">
+                        {associatedRowDisplayName(file)}
+                      </div>
+                    </FlowTooltip>
+                    {String(file?.type || "").toLowerCase() !== "folder" ? (
+                      <FlowTooltip label={String(file.path || file.url || "").trim() || "No path"}>
+                        <div className="truncate text-xs text-flow-text-muted">
+                          {file.path || file.url}
+                        </div>
+                      </FlowTooltip>
+                    ) : null}
                   </div>
                   <div className="flex shrink-0 items-center gap-1">
-                    {(file.url || file.type === "url") && (
-                      <button
-                        type="button"
-                        onClick={() => window.open(file.url || file.path, "_blank", "noopener,noreferrer")}
-                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-blue group-hover:opacity-100"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </button>
-                    )}
                     <button
                       type="button"
                       onClick={() => removeAssociatedFile(index)}
-                      className="shrink-0 rounded-lg p-1.5 text-flow-text-muted opacity-0 transition-colors hover:text-flow-accent-red group-hover:opacity-100"
+                      className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-red"
+                      title="Remove associated content"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>

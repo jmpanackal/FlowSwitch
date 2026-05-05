@@ -3535,6 +3535,61 @@ try {
               });
             }
           }
+          // Opening additional Explorer tabs can trigger shell-driven size/position adjustments.
+          // Re-assert placement after tab injection so final bounds match the profile layout.
+          const placedHandle = String(result.handle || '').trim();
+          if (placedHandle) {
+            await sleep(260);
+            const reasserted = await moveSpecificWindowHandleToBounds({
+              handle: placedHandle,
+              bounds: placementBounds,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: false,
+              diagnostics: launchDiagnostics,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'explorer-content-post-place',
+                reason: 'reassert-placement-after-tabs',
+                tabCount: profileSpawnArgs.length,
+              },
+            });
+            if (reasserted?.applied && reasserted?.handle) {
+              result.handle = String(reasserted.handle).trim();
+            }
+            if (
+              launchItem.monitor
+              && (placementBounds.state === 'normal' || placementBounds.state === 'maximized')
+              && result.handle
+            ) {
+              const postContentStabilized = await stabilizeKnownHandlePlacement({
+                handle: result.handle,
+                bounds: placementBounds,
+                monitor: launchItem.monitor,
+                aggressiveMaximize,
+                positionOnlyBeforeMaximize,
+                skipFrameChanged: false,
+                durationMs: placementBounds.state === 'maximized' ? 1800 : 2400,
+                diagnostics: launchDiagnostics,
+                diagnosticsContext: {
+                  processHintLc,
+                  strategy: 'explorer-content-post-place',
+                  reason: 'stabilize-after-tab-open',
+                  tabCount: profileSpawnArgs.length,
+                },
+              });
+              launchDiagnostics.result({
+                processHintLc,
+                strategy: 'explorer-content-post-place',
+                reason: postContentStabilized.verified
+                  ? 'post-content-stabilization-verified'
+                  : 'post-content-stabilization-not-verified',
+                verified: postContentStabilized.verified,
+                corrected: postContentStabilized.corrected,
+                handle: postContentStabilized.handle,
+              });
+            }
+          }
         }
       }
       if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
