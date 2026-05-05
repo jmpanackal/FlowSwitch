@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { X } from "lucide-react";
 import { APP_VERSION } from "../../appVersion";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { Switch } from "./ui/switch";
 
 type AppChromeModalsProps = {
@@ -35,6 +36,9 @@ export function AppChromeModals({
     if (!preferencesOpen) return;
     void loadPrefs();
   }, [preferencesOpen, loadPrefs]);
+
+  useEscapeToClose(preferencesOpen, onClosePreferences);
+  useEscapeToClose(aboutOpen, onCloseAbout);
 
   const persistPinDuringLaunch = async (next: boolean) => {
     setPinDuringLaunch(next);

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react';
+import { useEscapeToClose } from '../hooks/useEscapeToClose';
 import { Clock, ChevronDown } from 'lucide-react';
 
 interface TimePickerControlProps {
@@ -102,6 +103,8 @@ export function TimePickerControl({ value, onChange, placeholder = "Select time"
     onChange('');
     setIsOpen(false);
   };
+
+  useEscapeToClose(isOpen && !disabled, () => setIsOpen(false));
 
   return (
     <div className="relative">

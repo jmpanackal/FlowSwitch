@@ -4,6 +4,7 @@ import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { AddContentModal } from "./AddContentModal";
 import { useFlowSnackbar } from "./FlowSnackbar";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import {
   restoreDocumentTextSelection,
   suspendDocumentTextSelection,
@@ -297,6 +298,8 @@ export function ContentManager({
     setContentRowAddToSubmenu(null);
     setContentRowOverflowMenu(null);
   }, []);
+
+  useEscapeToClose(showAddMenu, () => setShowAddMenu(false));
 
   const monitorsSortedForMenu = useMemo(() => {
     const list = [...(currentProfile?.monitors ?? [])] as {

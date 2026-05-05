@@ -1,4 +1,5 @@
 import { Trash2 } from "lucide-react";
+import { useEscapeToClose } from "../../hooks/useEscapeToClose";
 
 interface DeleteConfirmationProps {
   isOpen: boolean;
@@ -8,6 +9,8 @@ interface DeleteConfirmationProps {
 }
 
 export function DeleteConfirmation({ isOpen, profileName, onCancel, onConfirm }: DeleteConfirmationProps) {
+  useEscapeToClose(isOpen, onCancel);
+
   if (!isOpen) return null;
 
   return (

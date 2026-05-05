@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { X, Search, Plus, Monitor, Settings, LayoutGrid, MoreVertical } from "lucide-react";
 import { useInstalledApps } from "../../hooks/useInstalledApps";
@@ -78,6 +79,9 @@ export function AddAppModal({
   useEffect(() => {
     if (!isOpen) setCatalogOverflow(null);
   }, [isOpen]);
+
+  useEscapeToClose(isOpen, onClose);
+
   const { apps: installedApps, isLoading: installedAppsLoading } = useInstalledApps({
     installedListVersion,
   });

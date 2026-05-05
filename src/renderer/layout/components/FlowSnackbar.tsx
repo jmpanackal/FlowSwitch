@@ -1,5 +1,6 @@
 import {
   createContext,
+  Fragment,
   useCallback,
   useContext,
   useMemo,
@@ -10,6 +11,28 @@ import { createPortal } from "react-dom";
 import { AlertCircle, CircleCheck } from "lucide-react";
 
 export type FlowSnackbarVariant = "success" | "error";
+
+/** Renders `**phrase**` as bold for scan-friendly snackbars; other text unchanged. */
+function renderFlowSnackbarMessage(text: string): ReactNode {
+  const parts = text.split(/\*\*/);
+  if (parts.length < 3) return text;
+  return (
+    <>
+      {parts.map((segment, i) =>
+        i % 2 === 1 ? (
+          <strong
+            key={i}
+            className="font-semibold text-flow-text-primary"
+          >
+            {segment}
+          </strong>
+        ) : (
+          <Fragment key={i}>{segment}</Fragment>
+        ),
+      )}
+    </>
+  );
+}
 
 type Snack = {
   id: string;
@@ -95,7 +118,9 @@ export function FlowSnackbarProvider({
                       aria-hidden
                     />
                   )}
-                  <span className="min-w-0 flex-1 leading-snug">{s.message}</span>
+                  <span className="min-w-0 flex-1 leading-snug">
+                    {renderFlowSnackbarMessage(s.message)}
+                  </span>
                 </div>
               );
             })}
