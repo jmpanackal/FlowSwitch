@@ -1,0 +1,11 @@
+{
+  "version": 1,
+  "skills": {
+    "ux-heuristics": {
+      "source": "wondelai/skills",
+      "sourceType": "github",
+      "skillPath": "ux-heuristics/SKILL.md",
+      "computedHash": "ad7fe92cf0e0758e5274b6b17affbb56d17ce1c9c550b8b0b93c09e37da70960"
+    }
+  }
+}

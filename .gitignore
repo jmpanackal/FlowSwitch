@@ -34,3 +34,4 @@ logs/
 # Cursor AI local workspace (do not commit)
 .cursorrules
 .cursor/
+.agents/
