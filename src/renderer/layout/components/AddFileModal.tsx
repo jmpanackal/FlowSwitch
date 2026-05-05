@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { FileIcon, getFileTypeColor } from "./FileIcon";
 import { 
   Plus, 
@@ -132,6 +133,8 @@ export function AddFileModal({ isOpen, onClose, onAddFile, commonApps }: AddFile
     setGroupFiles(false);
     onClose();
   };
+
+  useEscapeToClose(isOpen, handleClose);
 
   const availableApps = useDefaultApp 
     ? [{ name: 'System Default', types: [], icon: Settings, color: '#64748B' }]

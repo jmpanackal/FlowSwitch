@@ -1,4 +1,5 @@
 import { useState, useRef, useLayoutEffect } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { createPortal } from "react-dom";
 import { Grid3X3, ChevronDown } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
@@ -382,7 +383,9 @@ export function MonitorLayoutConfig({ monitor, onLayoutChange, isDropdown = fals
       window.removeEventListener("scroll", run, true);
     };
   }, [isOpen]);
-  
+
+  useEscapeToClose(isOpen, () => setIsOpen(false));
+
   return (
     <div className="relative">
       <FlowTooltip label="Choose layout pattern">

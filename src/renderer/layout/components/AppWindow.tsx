@@ -554,29 +554,16 @@ export function AppWindow({
         {isCurrentlyDragging && (
           <div className="absolute -inset-1 border-2 rounded-lg animate-pulse">
             <div className="absolute inset-0 flex items-center justify-center">
-              <div className={`text-xs font-bold px-3 py-1 rounded-full shadow-lg border backdrop-blur-sm ${
-                visualState === 'snapping'
-                  ? 'text-green-200 bg-green-900/90 border-green-300/50'
-                  : 'text-blue-200 bg-blue-900/90 border-blue-300/50'
-              }`}>
-                {visualState === 'snapping' && '🪟 SNAP ZONE!'}
-                {visualState === 'dragging' && '🎯 DRAGGING'}
+              <div
+                className={`text-xs font-semibold px-3 py-1 rounded-full shadow-lg border backdrop-blur-sm ${
+                  visualState === "snapping"
+                    ? "text-green-100 bg-green-950/85 border-green-400/40"
+                    : "text-sky-100 bg-sky-950/85 border-sky-400/40"
+                }`}
+              >
+                {visualState === "snapping" ? "Snap zone" : "Dragging"}
               </div>
             </div>
-            
-            {/* Corner indicators */}
-            <div className={`absolute -top-2 -left-2 w-4 h-4 rounded-full animate-ping ${
-              visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-            }`} />
-            <div className={`absolute -top-2 -right-2 w-4 h-4 rounded-full animate-ping ${
-              visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-            }`} />
-            <div className={`absolute -bottom-2 -left-2 w-4 h-4 rounded-full animate-ping ${
-              visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-            }`} />
-            <div className={`absolute -bottom-2 -right-2 w-4 h-4 rounded-full animate-ping ${
-              visualState === 'snapping' ? 'bg-green-400' : 'bg-blue-400'
-            }`} />
           </div>
         )}
         

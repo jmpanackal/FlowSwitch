@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { X, Volume2, VolumeX, Shield, Power, Save, Monitor, Minimize2, FileText, Folder, Plus, Trash2 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
@@ -50,6 +51,8 @@ export function AppSettings({
   const [showAddFileForm, setShowAddFileForm] = useState(false);
   const [newFilePath, setNewFilePath] = useState("");
   const [newFileType, setNewFileType] = useState("document");
+
+  useEscapeToClose(isOpen, onClose);
 
   if (!isOpen) return null;
 

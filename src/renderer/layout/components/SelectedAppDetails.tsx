@@ -778,7 +778,8 @@ export function SelectedAppDetails({
                   onClick={() => void handlePickCatalogLaunchExeOverride()}
                   className={inspectorPanelCompactButtonClass}
                 >
-                  Set launch .exe from file…
+                  <Edit className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+                  Edit launch file
                 </button>
                 {catalogExeOverrideActive ? (
                   <button
@@ -820,7 +821,7 @@ export function SelectedAppDetails({
                 </FlowTooltip>
               </div>
               <p className={`${inspectorHelperTextClass} mt-1.5`}>
-                Opens a file dialog; the .exe you select becomes what FlowSwitch launches for this catalog app (confirm to apply).
+                Opens a file dialog; the file you pick becomes what FlowSwitch launches for this catalog entry (confirm to apply).
               </p>
             </div>
           ) : (

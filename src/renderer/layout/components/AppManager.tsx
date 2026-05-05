@@ -23,6 +23,7 @@ import {
 } from "../utils/sidebarExplicitPlacement";
 import { buildMonitorDisplayLabelMap } from "../utils/monitorChromeLabels";
 import { SidebarOverlayMenu } from "./SidebarOverlayMenu";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { InstalledAppsSidebarSkeleton } from "./InstalledAppsSidebarSkeleton";
 import { useFlowSnackbar } from "./FlowSnackbar";
 import { FlowTooltip } from "./ui/tooltip";
@@ -251,6 +252,8 @@ export function AppManager({
     document.addEventListener("mousedown", onDocDown);
     return () => document.removeEventListener("mousedown", onDocDown);
   }, [showExeAddMenu]);
+
+  useEscapeToClose(showExeAddMenu, () => setShowExeAddMenu(false));
 
   const handlePickExeForAppsCatalog = useCallback(async () => {
     setShowExeAddMenu(false);

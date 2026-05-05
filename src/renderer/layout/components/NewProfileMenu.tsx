@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { ChevronDown, LayoutGrid, Plus, Scan } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
 
@@ -46,6 +47,8 @@ export function NewProfileMenu({
   };
 
   const blocked = disabled || busy;
+
+  useEscapeToClose(open && !blocked, () => setOpen(false));
 
   const triggerHint =
     blocked && !disabled

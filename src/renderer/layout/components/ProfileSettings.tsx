@@ -21,6 +21,7 @@ import {
   normalizeStoredProfileIcon,
 } from "../../../types/flow-profile";
 import { ProfileIconFrame } from "../utils/profileHeaderPresentation";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { flowDropdownNativeSelectClass } from "./inspectorStyles";
 
 const PROFILE_CUSTOM_ICON_MAX_FILE_BYTES = Math.floor(1.5 * 1024 * 1024);
@@ -541,6 +542,8 @@ function ProfileSettingsInner({
     flushPendingSettings();
     onClose();
   }, [flushPendingSettings, onClose]);
+
+  useEscapeToClose(!showDeleteConfirm, handleRequestClose);
 
   const settingsTabNavRef = useRef<HTMLElement | null>(null);
   const settingsTabBtnRefs = useRef<Partial<Record<SettingsSection, HTMLButtonElement | null>>>({});

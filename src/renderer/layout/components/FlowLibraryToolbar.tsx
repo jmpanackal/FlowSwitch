@@ -61,6 +61,8 @@ type FlowLibraryToolbarProps = {
   onViewModeChange?: (mode: FlowLibraryViewMode) => void;
   showViewModes?: boolean;
   className?: string;
+  /** Fired when the selected filter is no longer valid and is reset to the first visible chip. */
+  onFilterCoerced?: (detail: { previousId: string; nextId: string }) => void;
 };
 
 /**
@@ -85,12 +87,15 @@ export function FlowLibraryToolbar({
   onViewModeChange,
   showViewModes = true,
   className,
+  onFilterCoerced,
 }: FlowLibraryToolbarProps) {
   const [filterOpen, setFilterOpen] = useState(false);
   const [sortOpen, setSortOpen] = useState(false);
   const filterBtnRef = useRef<HTMLButtonElement>(null);
   const sortBtnRef = useRef<HTMLButtonElement>(null);
   const searchInputRef = useRef<HTMLInputElement>(null);
+  const onFilterCoercedRef = useRef(onFilterCoerced);
+  onFilterCoercedRef.current = onFilterCoerced;
 
   const visibleFilterChips = useMemo(
     () =>
@@ -106,7 +111,10 @@ export function FlowLibraryToolbar({
   useEffect(() => {
     if (visibleFilterChips.length === 0) return;
     if (!visibleFilterChips.some((c) => c.id === selectedFilterId)) {
-      onSelectFilterRef.current(visibleFilterChips[0]!.id);
+      const previousId = selectedFilterId;
+      const nextId = visibleFilterChips[0]!.id;
+      onSelectFilterRef.current(nextId);
+      onFilterCoercedRef.current?.({ previousId, nextId });
     }
   }, [visibleFilterChips, selectedFilterId]);
 

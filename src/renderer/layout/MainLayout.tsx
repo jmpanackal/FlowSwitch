@@ -64,6 +64,7 @@ import {
   X,
   Check,
   AlertTriangle,
+  Loader2,
 } from "lucide-react";
 import { DragState } from "./types/dragTypes";
 import { safeIconSrc } from "../utils/safeIconSrc";
@@ -419,6 +420,22 @@ export default function App() {
       })),
     ],
     [profiles.length, profileKindCounts],
+  );
+
+  const onProfileFilterCoerced = useCallback(
+    ({ previousId, nextId }: { previousId: string; nextId: string }) => {
+      const label = (id: string) => {
+        if (id === "all") return "All";
+        if (id in FLOW_PROFILE_KIND_LABELS) {
+          return FLOW_PROFILE_KIND_LABELS[id as FlowProfileKind];
+        }
+        return id;
+      };
+      pushSnackbar(
+        `Showing ${label(nextId)} — ${label(previousId)} had nothing to list.`,
+      );
+    },
+    [pushSnackbar],
   );
 
   const sortedFilteredProfiles = useMemo(() => {
@@ -1806,11 +1823,11 @@ export default function App() {
           className="shrink-0 px-4 py-2 bg-amber-950/80 border-b border-amber-700/60 text-amber-100 text-xs"
           role="alert"
         >
-          <strong className="font-semibold">Profiles could not be loaded.</strong>
+          <strong className="font-semibold">Profiles did not load.</strong>
           {" "}
           {profileStoreError.message}
           {" "}
-          Autosave is disabled until you restart the app after the issue is resolved, to avoid overwriting your data.
+          Autosave is off until you restart—avoids overwriting your files.
         </div>
       ) : null}
       <header
@@ -1882,6 +1899,7 @@ export default function App() {
         id="flowswitch-import-profile"
         aria-hidden
       />
+      {profilesLoaded ? (
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* Left sidebar: no width transition — animating width reflows the monitor preview and ResizeObserver would fire every frame (jank). */}
         <div
@@ -2005,6 +2023,7 @@ export default function App() {
                   viewMode={profilesLibraryView}
                   onViewModeChange={setProfilesLibraryView}
                   showViewModes
+                  onFilterCoerced={onProfileFilterCoerced}
                 />
 
                 {isEditMode ? (
@@ -2033,12 +2052,12 @@ export default function App() {
                     {sortedFilteredProfiles.length === 0 ? (
                       <p className="py-6 text-center text-xs text-flow-text-muted">
                         {profiles.length === 0
-                          ? "No profiles yet. Use + to add one."
+                          ? "No profiles yet. Create one with the + button above."
                           : sidebarSearchQuery.trim()
                             ? "No profiles match this search."
                             : profileKindListFilter !== "all"
-                              ? "No profiles match this type."
-                              : "No profiles match this search."}
+                              ? "No profiles match this filter."
+                              : "Nothing to show here."}
                       </p>
                     ) : (
                       sortedFilteredProfiles.map((profile) => (
@@ -2409,18 +2428,23 @@ export default function App() {
                     <h2 className="text-sm font-semibold text-flow-text-primary tracking-tight">
                       No profile selected
                     </h2>
-                    <p className="text-xs text-flow-text-muted leading-relaxed">
-                      Create a profile from the sidebar to capture layouts and launch your workspace.
+                    <p
+                      id="flow-no-profile-hint"
+                      className="text-xs text-flow-text-muted leading-relaxed"
+                    >
+                      Choose or create a profile in the library sidebar. Then you can edit layout,
+                      open preferences, or launch.
                     </p>
                   </div>
                 </div>
 
                 <div className="flex items-center gap-3">
-                  <FlowTooltip label="Select a profile to edit its monitor layout">
+                  <FlowTooltip label="Select a profile in the library to edit its monitor layout">
                     <span className="inline-flex">
                       <button
                         type="button"
                         disabled
+                        aria-describedby="flow-no-profile-hint"
                         className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
                       >
                         <PenLine className="h-4 w-4 shrink-0" strokeWidth={1.75} />
@@ -2428,11 +2452,12 @@ export default function App() {
                       </button>
                     </span>
                   </FlowTooltip>
-                  <FlowTooltip label="Select a profile for preferences and import/export">
+                  <FlowTooltip label="Select a profile in the library for preferences and import/export">
                     <span className="inline-flex">
                       <button
                         type="button"
                         disabled
+                        aria-describedby="flow-no-profile-hint"
                         className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-surface border border-flow-border text-flow-text-muted opacity-60 cursor-not-allowed"
                       >
                         <Settings className="w-4 h-4" />
@@ -2440,13 +2465,20 @@ export default function App() {
                       </button>
                     </span>
                   </FlowTooltip>
-                  <button
-                    disabled
-                    className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-accent-blue text-flow-text-primary opacity-50 cursor-not-allowed"
-                  >
-                    <Play className="w-4 h-4" />
-                    Launch Profile
-                  </button>
+                  <FlowTooltip label="Select a profile in the library to launch it">
+                    <span className="inline-flex">
+                      <button
+                        type="button"
+                        disabled
+                        aria-label="Launch profile (select a profile first)"
+                        aria-describedby="flow-no-profile-hint"
+                        className="inline-flex items-center justify-center gap-2 rounded-lg px-4 py-2.5 text-sm font-medium bg-flow-accent-blue text-flow-text-primary opacity-50 cursor-not-allowed"
+                      >
+                        <Play className="w-4 h-4" />
+                        Launch profile
+                      </button>
+                    </span>
+                  </FlowTooltip>
                 </div>
               </div>
             </header>
@@ -2619,7 +2651,7 @@ export default function App() {
             <div className="flex items-center justify-between gap-2 border-b border-flow-border px-3 py-2">
               <div
                 role="tablist"
-                aria-label="Inspector mode"
+                aria-label="Sidebar: selection details or launch progress"
                 className="inline-flex max-w-full shrink-0 flex-nowrap items-stretch rounded-full border border-white/[0.12] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm"
               >
                 <button
@@ -2627,6 +2659,7 @@ export default function App() {
                   role="tab"
                   aria-selected={inspectorMode === "inspect"}
                   onClick={() => setInspectorMode("inspect")}
+                  aria-label="Inspect: app or content details"
                   className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
                     inspectorMode === "inspect"
                       ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
@@ -2640,6 +2673,7 @@ export default function App() {
                   role="tab"
                   aria-selected={inspectorMode === "launch"}
                   onClick={() => setInspectorMode("launch")}
+                  aria-label="Launch: progress and log for the current run"
                   className={`relative inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
                     inspectorMode === "launch"
                       ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
@@ -2857,13 +2891,29 @@ export default function App() {
           />
         ) : null}
 
-        <AppChromeModals
-          preferencesOpen={appChromeModal === "preferences"}
-          aboutOpen={appChromeModal === "about"}
-          onClosePreferences={() => setAppChromeModal(null)}
-          onCloseAbout={() => setAppChromeModal(null)}
-        />
       </div>
+      ) : (
+        <div
+          className="flex min-h-0 flex-1 flex-col items-center justify-center gap-3 bg-flow-bg-primary px-4"
+          role="status"
+          aria-live="polite"
+          aria-busy="true"
+        >
+          <Loader2
+            className="h-9 w-9 shrink-0 animate-spin text-flow-accent-blue"
+            strokeWidth={1.75}
+            aria-hidden
+          />
+          <p className="text-sm text-flow-text-secondary">Loading profiles…</p>
+        </div>
+      )}
+
+      <AppChromeModals
+        preferencesOpen={appChromeModal === "preferences"}
+        aboutOpen={appChromeModal === "about"}
+        onClosePreferences={() => setAppChromeModal(null)}
+        onCloseAbout={() => setAppChromeModal(null)}
+      />
     </div>
   );
 }

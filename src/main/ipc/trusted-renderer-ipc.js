@@ -24,6 +24,34 @@ const catalogLaunchIdentityKey = (e) => (
   `${String(e?.name || '').trim()}\0${e?.shortcutPath ?? ''}\0${e?.launchUrl ?? ''}`
 );
 
+/**
+ * User-facing copy for catalog "Test launch" failures. Avoid `shell.openPath` on the .exe
+ * here: it triggers ShellExecute and Windows can show a blocking "This app can't run on your PC"
+ * dialog for wrong-architecture or stub binaries—keep feedback in-app only.
+ */
+const humanizeCatalogTestLaunchError = (err) => {
+  const msg = String(err?.message || err || '');
+  const code = String(err?.code || '');
+  const errno = err?.errno;
+  const hay = `${code} ${msg}`.toLowerCase();
+  if (
+    code === 'UNKNOWN'
+    || errno === -4094
+    || /spawn\s+unknown/i.test(msg)
+  ) {
+    return (
+      "UNKNOWN: Unable to run. Open the Inspector > Overview tab and click **Edit launch file**."
+    );
+  }
+  if (code === 'ENOENT' || hay.includes('enoent')) {
+    return "File not found. Update the path using **Edit launch file** in the Inspector > Overview tab.";
+  }
+  if (code === 'EACCES' || code === 'EPERM') {
+    return "Launch blocked. Check permissions or use **Edit launch file** in the Inspector to pick a new one.";
+  }
+  return "Startup failed. Please check your settings via **Edit launch file** in the Inspector > Overview.";
+};
+
 const launchDetachedExecutableForCatalogTest = (executablePath, spawnArgs = []) => (
   new Promise((resolve, reject) => {
     const safeExecutablePath = String(executablePath || '').trim();
@@ -1543,8 +1571,13 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
             return { ok: false, error: 'Launch path not accessible' };
           }
         }
-        await launchDetachedExecutableForCatalogTest(norm, cleaned);
-        return { ok: true };
+        try {
+          await launchDetachedExecutableForCatalogTest(norm, cleaned);
+          return { ok: true };
+        } catch (spawnErr) {
+          console.error('[catalog-app:test-launch] spawn failed:', norm, spawnErr);
+          return { ok: false, error: humanizeCatalogTestLaunchError(spawnErr) };
+        }
       };
 
       if (exePick) {

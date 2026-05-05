@@ -1,5 +1,6 @@
 import { useState, useRef } from "react";
 import { createPortal } from "react-dom";
+import { useEscapeToClose } from "../hooks/useEscapeToClose";
 import { X, ExternalLink, Upload, Folder, File, Globe } from "lucide-react";
 
 interface AddContentModalProps {
@@ -306,6 +307,8 @@ export function AddContentModal({
     }
     onClose();
   };
+
+  useEscapeToClose(isOpen, handleCancel);
 
   const fileHasSelection = Boolean(
     (nativeEntries && nativeEntries.length > 0)
