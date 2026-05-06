@@ -28,7 +28,7 @@ import {
   Upload,
   Folder,
   GripVertical,
-  LayoutDashboard,
+  AppWindow,
   HelpCircle,
 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
@@ -308,7 +308,7 @@ export function SelectedAppDetails({
   }, [monitors]);
 
   const tabs: { id: TabType; label: string; icon: LucideIcon }[] = [
-    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "overview", label: "Overview", icon: AppWindow },
     { id: "launch", label: "Launch", icon: Sliders },
     { id: "content", label: "Content", icon: Package },
   ];
