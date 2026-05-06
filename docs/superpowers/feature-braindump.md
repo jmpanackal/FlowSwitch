@@ -245,7 +245,7 @@ Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
   - group primary launch status feedback directly under the Launch control for clearer cause-and-effect reading order
   - center Launch button label when no hotkey hint is shown, if layout spec calls for symmetry
 - Merged inbox items: Batch C launch status below launch button, launch label centering for non-hotkey profiles.
-- **Progress (2026-05-05, `feature/inspector-sidebar-design`):** Inspector path card (`InspectorPathDisplay`: exe row + Open in Explorer + copy + truncated path); app/content inspectors use library-style icon tab rails for narrow width; library rail matches (icon-only tabs); tightened vertical rhythm between uppercase section labels and fields (`inspectorStyles`, Overview section stacks).
+- **Progress (2026-05-05, `feature/inspector-sidebar-design`):** Inspector path card (`InspectorPathDisplay`: exe row + Open in Explorer + copy + truncated path); app/content inspectors use library-style icon tab rails for narrow width; library rail matches (icon-only tabs); tightened vertical rhythm between uppercase section labels and fields (`inspectorStyles`, Overview section stacks); fixed inspector **Inspect / Progress** chrome (`Activity`, tooltips); Overview inspector tab **`AppWindow`** (library Apps stays **`LayoutGrid`**).
 - Done when: app remains readable, usable, and visually consistent at reduced sizes.
 
 1. Profile list at-a-glance composition
