@@ -493,6 +493,32 @@
     box-shadow: 0 0 0 2px color-mix(in oklch, var(--flow-accent-blue) 45%, transparent);
   }
 
+  /** Icon-only tabs (library + inspectors): no label column, centered glyph. */
+  .flow-library-tab.flow-library-tab--icon-only {
+    flex-direction: row;
+    align-items: center;
+    justify-content: center;
+    gap: 0;
+    padding-inline: 0.3125rem;
+  }
+
+  @media (min-width: 640px) {
+    .flow-library-tab.flow-library-tab--icon-only {
+      padding-inline: 0.4375rem;
+    }
+  }
+
+  /**
+   * Right-hand inspectors use the same rail as the library but in a narrow panel.
+   */
+  .flow-library-tablist.flow-library-tablist--inspector-narrow .flow-library-tablist-rail {
+    min-width: 0;
+  }
+
+  .flow-library-tablist.flow-library-tablist--inspector-narrow .flow-library-tab {
+    min-width: 0;
+  }
+
   /** Installed-apps sidebar: loading hero + row placeholders (Apps tab) */
   @keyframes flow-installed-apps-breathe {
     0%,

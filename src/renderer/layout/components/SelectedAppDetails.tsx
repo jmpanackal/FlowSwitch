@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { FlowTooltip } from "./ui/tooltip";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import {
-  Settings,
   Trash2,
   Monitor,
   Clock,
@@ -11,9 +10,7 @@ import {
   Globe,
   FileText,
   Plus,
-  Edit,
   Save,
-  X,
   Volume2,
   VolumeX,
   Maximize2,
@@ -31,11 +28,12 @@ import {
   Upload,
   Folder,
   GripVertical,
-  LayoutDashboard,
+  AppWindow,
+  HelpCircle,
 } from "lucide-react";
 import { LucideIcon } from "lucide-react";
 import { FileIcon } from "./FileIcon";
-import { ClickCopyPathBlock } from "./ClickCopyPathBlock";
+import { InspectorPathDisplay } from "./InspectorPathDisplay";
 import type { InstalledAppCatalogKeySource } from "../../utils/installedAppCatalogKey";
 import {
   APP_LIBRARY_CATEGORIES,
@@ -53,7 +51,6 @@ import {
   inspectorFieldLabelClass,
   inspectorHelperTextClass,
   inspectorPanelCompactButtonClass,
-  inspectorPanelCompactButtonDisabledClass,
   inspectorPanelDangerButtonClass,
   inspectorPanelGridButtonDisabledClass,
   inspectorPanelListButtonClass,
@@ -65,7 +62,12 @@ import {
   inspectorPanelSwitchRowClass,
   inspectorPanelSwitchTitleClass,
   inspectorPanelSwitchTrackClass,
-  inspectorSectionPrimaryTitleClass,
+  inspectorMenuItemClass,
+  inspectorMenuPanelClass,
+  inspectorMenuTriggerClass,
+  inspectorSectionLabelClass,
+  inspectorSectionLabelTextClass,
+  inspectorTextLinkClass,
 } from "./inspectorStyles";
 
 const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
@@ -185,6 +187,12 @@ export function SelectedAppDetails({
   const { push: pushSnackbar } = useFlowSnackbar();
   const [addAssocMenuOpen, setAddAssocMenuOpen] = useState(false);
   const addAssocMenuRef = useRef<HTMLDivElement>(null);
+  const [movePlacementMenuOpen, setMovePlacementMenuOpen] = useState(false);
+  const [addToLayoutMenuOpen, setAddToLayoutMenuOpen] = useState(false);
+  const movePlacementMenuRef = useRef<HTMLDivElement>(null);
+  const addToLayoutMenuRef = useRef<HTMLDivElement>(null);
+  const [appLibraryTypeMenuOpen, setAppLibraryTypeMenuOpen] = useState(false);
+  const appLibraryTypeMenuRef = useRef<HTMLDivElement>(null);
   const [activeTab, setActiveTab] = useState<TabType>("overview");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [revealPathError, setRevealPathError] = useState<string | null>(null);
@@ -216,12 +224,48 @@ export function SelectedAppDetails({
 
   useEffect(() => {
     setAddAssocMenuOpen(false);
+    setMovePlacementMenuOpen(false);
+    setAddToLayoutMenuOpen(false);
+    setAppLibraryTypeMenuOpen(false);
   }, [
     selectedApp?.data?.instanceId,
     selectedApp?.monitorId,
     selectedApp?.appIndex,
     selectedApp?.source,
   ]);
+
+  useEffect(() => {
+    if (!movePlacementMenuOpen && !addToLayoutMenuOpen && !appLibraryTypeMenuOpen) return;
+    const onDocMouseDown = (e: MouseEvent) => {
+      const t = e.target as Node;
+      const moveEl = movePlacementMenuRef.current;
+      const addEl = addToLayoutMenuRef.current;
+      const typeEl = appLibraryTypeMenuRef.current;
+      if (movePlacementMenuOpen && moveEl && !moveEl.contains(t)) {
+        setMovePlacementMenuOpen(false);
+      }
+      if (addToLayoutMenuOpen && addEl && !addEl.contains(t)) {
+        setAddToLayoutMenuOpen(false);
+      }
+      if (appLibraryTypeMenuOpen && typeEl && !typeEl.contains(t)) {
+        setAppLibraryTypeMenuOpen(false);
+      }
+    };
+    document.addEventListener("mousedown", onDocMouseDown);
+    return () => document.removeEventListener("mousedown", onDocMouseDown);
+  }, [movePlacementMenuOpen, addToLayoutMenuOpen, appLibraryTypeMenuOpen]);
+
+  useEffect(() => {
+    if (!movePlacementMenuOpen && !addToLayoutMenuOpen && !appLibraryTypeMenuOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== "Escape") return;
+      setMovePlacementMenuOpen(false);
+      setAddToLayoutMenuOpen(false);
+      setAppLibraryTypeMenuOpen(false);
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [movePlacementMenuOpen, addToLayoutMenuOpen, appLibraryTypeMenuOpen]);
 
   const showAddToLayout =
     selectedApp?.source === "sidebar"
@@ -264,7 +308,7 @@ export function SelectedAppDetails({
   }, [monitors]);
 
   const tabs: { id: TabType; label: string; icon: LucideIcon }[] = [
-    { id: "overview", label: "Overview", icon: LayoutDashboard },
+    { id: "overview", label: "Overview", icon: AppWindow },
     { id: "launch", label: "Launch", icon: Sliders },
     { id: "content", label: "Content", icon: Package },
   ];
@@ -307,7 +351,7 @@ export function SelectedAppDetails({
   }, [selectedApp, pushSnackbar]);
 
   const handlePickCatalogLaunchExeOverride = useCallback(async () => {
-    if (!selectedApp || selectedApp.source !== "sidebar") return;
+    if (!selectedApp || selectedApp.type !== "app") return;
     if (!window.electron?.pickCatalogLaunchExeOverride) {
       pushSnackbar("File picker is not available.", { variant: "error" });
       return;
@@ -334,7 +378,7 @@ export function SelectedAppDetails({
   }, [selectedApp, onCatalogLaunchExeChanged, pushSnackbar]);
 
   const handleClearCatalogLaunchExeOverride = useCallback(async () => {
-    if (!selectedApp || selectedApp.source !== "sidebar") return;
+    if (!selectedApp || selectedApp.type !== "app") return;
     if (!window.electron?.clearCatalogLaunchExeOverride) {
       pushSnackbar("Clear override is not available.", { variant: "error" });
       return;
@@ -449,13 +493,15 @@ export function SelectedAppDetails({
     }
   };
 
-  // Render app icon with proper fallback
-  const renderAppIcon = (app: any, size: string = "w-12 h-12") => {
+  // Render app icon with proper fallback (header = 32px / 6px radius per inspector sidebar spec)
+  const renderAppIcon = (app: any, variant: "default" | "header" = "default") => {
+    const size = variant === "header" ? "w-8 h-8" : "w-12 h-12";
+    const radius = variant === "header" ? "rounded-md" : "rounded-xl";
     const iconSrc = safeIconSrc(app.iconPath);
     if (iconSrc) {
       return (
         <div
-          className={`${size} rounded-xl flex items-center justify-center border border-white/20 shadow-sm overflow-hidden`}
+          className={`${size} ${radius} flex items-center justify-center border border-white/20 shadow-sm overflow-hidden`}
           style={{ backgroundColor: `${app.color || '#666666'}40` }}
         >
           <img
@@ -470,17 +516,17 @@ export function SelectedAppDetails({
 
     if (!app.icon) {
       return (
-        <div className={`${size} bg-flow-surface rounded-xl flex items-center justify-center border border-flow-border`}>
+        <div className={`${size} ${radius} flex items-center justify-center border border-flow-border bg-flow-surface`}>
           <span className="text-flow-text-muted text-lg">📱</span>
         </div>
       );
     }
-    
+
     if (isRenderableIconComponent(app.icon)) {
       const IconComponent = app.icon;
       return (
         <div
-          className={`${size} rounded-xl flex items-center justify-center border border-white/20 shadow-sm`}
+          className={`${size} ${radius} flex items-center justify-center border border-white/20 shadow-sm`}
           style={{ backgroundColor: `${app.color}80` }}
         >
           <IconComponent className="w-1/2 h-1/2 text-white" />
@@ -488,7 +534,7 @@ export function SelectedAppDetails({
       );
     }
     return (
-      <div className={`${size} bg-flow-surface rounded-xl flex items-center justify-center border border-flow-border`}>
+      <div className={`${size} ${radius} flex items-center justify-center border border-flow-border bg-flow-surface`}>
         <span className="text-flow-text-muted text-lg">❓</span>
       </div>
     );
@@ -526,129 +572,190 @@ export function SelectedAppDetails({
     const showInspectorTestLaunch =
       source === "sidebar" || (isProfileSlot && (type === "app" || type === "browser"));
 
+    const currentLibraryCategory = isAppLibraryCategory(currentData.category)
+      ? currentData.category
+      : inferInstalledAppLibraryCategory(String(currentData.name ?? ""));
+
+    const layoutHelpLong =
+      source === "sidebar"
+        ? "Place on the active profile from here, or use + or drag in the Apps list."
+        : `Move this tile on the active profile.${showAddToLayout ? " From the Apps list you can also use + or drag the icon." : ""}${showMoveToSection && !showAddToLayout ? (source === "monitor" ? " Choose another monitor or the minimized row from Move to…." : " Choose a monitor from Move to….") : ""}`;
+
+    const movePlacementDestinations: { key: string; label: string; run: () => void }[] = [];
+    for (const m of moveToMonitorTargets) {
+      movePlacementDestinations.push({
+        key: m.id,
+        label: `${m.name || m.id}${m.primary ? " (primary)" : ""}`,
+        run: () => {
+          onMoveToMonitor?.(m.id);
+          setMovePlacementMenuOpen(false);
+        },
+      });
+    }
+    if (source === "monitor") {
+      movePlacementDestinations.push({
+        key: "__minimized__",
+        label: "Minimized row",
+        run: () => {
+          onMoveToMinimized?.();
+          setMovePlacementMenuOpen(false);
+        },
+      });
+    }
+    const movePlacementMenuEnabled = showMoveToSection && movePlacementDestinations.length > 0;
+
     return (
-    <div className="min-w-0 space-y-6">
-      <div className="min-w-0 space-y-3">
-        <div className="min-w-0">
-          <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
-            Layout
-          </label>
-          {source === "sidebar" ? (
-            <p className={inspectorHelperTextClass}>
-              Place on the active profile from here, or use{" "}
-              <span className="font-medium text-flow-text-primary">+</span> / drag in the Apps list.
-            </p>
-          ) : (
-            <p className={inspectorHelperTextClass}>
-              Move, add, or remove this app on the active profile.
-              {showAddToLayout ? (
-                <>
-                  {" "}
-                  From the Apps list you can also use{" "}
-                  <span className="font-medium text-flow-text-primary">+</span> or drag the icon.
-                </>
-              ) : null}
-              {showMoveToSection && !showAddToLayout ? (
-                <>
-                  {" "}
-                  {source === "monitor"
-                    ? "Use the buttons below to move to another monitor or the minimized row."
-                    : "Use the buttons below to move onto a monitor."}
-                </>
-              ) : null}
-            </p>
-          )}
+    <div className="min-w-0 space-y-5">
+      <div className="min-w-0 space-y-2">
+        <div className="flex min-w-0 items-center gap-2">
+          <span className={inspectorSectionLabelTextClass}>Layout</span>
+          <FlowTooltip label={layoutHelpLong}>
+            <button
+              type="button"
+              className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-text-muted transition-colors hover:bg-flow-surface-elevated hover:text-flow-text-secondary"
+              aria-label="Placement tips"
+            >
+              <HelpCircle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
+            </button>
+          </FlowTooltip>
         </div>
+        <p className={inspectorHelperTextClass}>
+          {source === "sidebar"
+            ? "Place on this profile from the menu, or use + in the Apps list."
+            : "Move this tile with Move to… when it is on the layout."}
+        </p>
+
+        {!isProfileSlot ? (
+          <p className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-2 text-[11px] leading-snug text-flow-text-muted">
+            This app is not on the current profile layout. Use the + button on its row in the Apps sidebar to place it on a monitor or the minimized row.
+          </p>
+        ) : null}
 
         <div className="min-w-0 space-y-2">
-          <div className="flex min-w-0 flex-col gap-2">
-            <FlowTooltip label="Coming soon: swap this slot for another app from search.">
-              <span className="inline-flex w-full">
-                <button
-                  type="button"
-                  disabled
-                  aria-disabled="true"
-                  className={`${inspectorPanelGridButtonDisabledClass} w-full`}
-                >
-                  <Replace className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Replace
-                </button>
-              </span>
-            </FlowTooltip>
+          <FlowTooltip label="Coming soon: swap this slot for another app from search.">
+            <span className="inline-flex w-full">
+              <button
+                type="button"
+                disabled
+                aria-disabled="true"
+                className={`${inspectorPanelGridButtonDisabledClass} w-full`}
+              >
+                <Replace className="h-3.5 w-3.5 shrink-0" aria-hidden />
+                Replace
+              </button>
+            </span>
+          </FlowTooltip>
+
+          {isProfileSlot ? (
             <FlowTooltip
               label={
-                !isProfileSlot
-                  ? "Only apps on the layout can be removed here"
-                  : !onDeleteApp
-                    ? "Remove is unavailable"
-                    : undefined
+                !onDeleteApp
+                  ? "Remove is unavailable"
+                  : "Remove this app from the current profile layout"
               }
             >
               <span className="inline-flex w-full">
                 <button
                   type="button"
                   onClick={() => onDeleteApp?.()}
-                  disabled={!onDeleteApp || !isProfileSlot}
-                  aria-disabled={!onDeleteApp || !isProfileSlot}
+                  disabled={!onDeleteApp}
+                  aria-disabled={!onDeleteApp}
                   className={`${inspectorPanelDangerButtonClass} w-full`}
                 >
                   <Trash2 className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                  Remove
+                  Remove from profile
                 </button>
               </span>
             </FlowTooltip>
-          </div>
+          ) : null}
 
           {showAddToLayout ? (
-            <div className="flex flex-col gap-1">
-              {monitorsSortedForAdd.length ? (
-                monitorsSortedForAdd.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => onAddSidebarAppToMonitor?.(m.id)}
-                    className={inspectorPanelListButtonClass}
-                  >
-                    Add to {(m.name || m.id) + (m.primary ? " (primary)" : "")}
-                  </button>
-                ))
-              ) : (
-                <p className="text-xs text-flow-text-muted">No monitors in profile.</p>
-              )}
+            <div ref={addToLayoutMenuRef} className="relative min-w-0">
               <button
                 type="button"
-                onClick={() => onAddSidebarAppToMinimized?.()}
-                className={inspectorPanelListButtonClass}
+                className={inspectorMenuTriggerClass}
+                aria-haspopup="menu"
+                aria-expanded={addToLayoutMenuOpen}
+                onClick={() => {
+                  setAddToLayoutMenuOpen((o) => !o);
+                  setMovePlacementMenuOpen(false);
+                  setAppLibraryTypeMenuOpen(false);
+                }}
               >
-                Add to minimized row
+                <span>Add to layout…</span>
+                <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
               </button>
+              {addToLayoutMenuOpen ? (
+                <div className={inspectorMenuPanelClass} role="menu">
+                  {monitorsSortedForAdd.length ? (
+                    monitorsSortedForAdd.map((m) => (
+                      <button
+                        key={m.id}
+                        type="button"
+                        role="menuitem"
+                        className={inspectorMenuItemClass}
+                        onClick={() => {
+                          onAddSidebarAppToMonitor?.(m.id);
+                          setAddToLayoutMenuOpen(false);
+                        }}
+                      >
+                        {(m.name || m.id) + (m.primary ? " (primary)" : "")}
+                      </button>
+                    ))
+                  ) : (
+                    <div className="px-3 py-2 text-[13px] text-flow-text-muted">No monitors in profile.</div>
+                  )}
+                  <button
+                    type="button"
+                    role="menuitem"
+                    className={inspectorMenuItemClass}
+                    onClick={() => {
+                      onAddSidebarAppToMinimized?.();
+                      setAddToLayoutMenuOpen(false);
+                    }}
+                  >
+                    Minimized row
+                  </button>
+                </div>
+              ) : null}
             </div>
           ) : null}
 
           {showMoveToSection ? (
-            <div className="flex flex-col gap-1">
-              {moveToMonitorTargets.length ? (
-                moveToMonitorTargets.map((m) => (
-                  <button
-                    key={m.id}
-                    type="button"
-                    onClick={() => onMoveToMonitor?.(m.id)}
-                    className={inspectorPanelListButtonClass}
-                  >
-                    Move to {(m.name || m.id) + (m.primary ? " (primary)" : "")}
-                  </button>
-                ))
-              ) : source === "minimized" ? (
-                <p className="text-xs text-flow-text-muted">No monitors in profile.</p>
+            <div ref={movePlacementMenuRef} className="relative min-w-0">
+              <button
+                type="button"
+                className={inspectorMenuTriggerClass}
+                disabled={!movePlacementMenuEnabled}
+                aria-haspopup="menu"
+                aria-expanded={movePlacementMenuOpen}
+                onClick={() => {
+                  if (!movePlacementMenuEnabled) return;
+                  setMovePlacementMenuOpen((o) => !o);
+                  setAddToLayoutMenuOpen(false);
+                  setAppLibraryTypeMenuOpen(false);
+                }}
+              >
+                <span>Move to…</span>
+                <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+              </button>
+              {movePlacementMenuOpen && movePlacementMenuEnabled ? (
+                <div className={inspectorMenuPanelClass} role="menu">
+                  {movePlacementDestinations.map((d) => (
+                    <button
+                      key={d.key}
+                      type="button"
+                      role="menuitem"
+                      className={inspectorMenuItemClass}
+                      onClick={d.run}
+                    >
+                      {d.label}
+                    </button>
+                  ))}
+                </div>
               ) : null}
-              {source === "monitor" ? (
-                <button
-                  type="button"
-                  onClick={() => onMoveToMinimized?.()}
-                  className={inspectorPanelListButtonClass}
-                >
-                  Move to minimized row
-                </button>
+              {showMoveToSection && !movePlacementMenuEnabled && source === "minimized" ? (
+                <p className="text-[13px] text-flow-text-muted">No monitors in profile.</p>
               ) : null}
             </div>
           ) : null}
@@ -661,197 +768,169 @@ export function SelectedAppDetails({
         ) : null}
       </div>
 
-      {/* Basic Info */}
-      <div className="min-w-0 space-y-4">
-        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
-          Basic Information
-        </label>
-
-        {!isProfileSlot ? (
-          <p className="rounded-lg border border-flow-border/50 bg-flow-bg-tertiary/30 px-3 py-2 text-[11px] leading-snug text-flow-text-muted">
-            This app is not on the current profile layout. Use the + button on its row in the Apps sidebar to place it on a monitor or the minimized row.
-          </p>
-        ) : null}
-
-        {type === "app" &&
-        typeof onSetInstalledAppLibraryCategory === "function" ? (
-          <div className="min-w-0">
-            <label
-              className={inspectorFieldLabelClass}
-              htmlFor={installedAppTypeFieldId}
-            >
-              App type
-            </label>
-            <select
-              id={installedAppTypeFieldId}
-              className={inspectorPanelNativeSelectClass}
-              value={
-                isAppLibraryCategory(currentData.category)
-                  ? currentData.category
-                  : inferInstalledAppLibraryCategory(
-                      String(currentData.name ?? ""),
-                    )
-              }
-              onChange={(e) => {
-                const v = e.target.value;
-                if (isAppLibraryCategory(v)) {
-                  onSetInstalledAppLibraryCategory(
-                    {
-                      name: String(currentData.name ?? ""),
-                      executablePath: currentData.executablePath ?? null,
-                      shortcutPath: currentData.shortcutPath ?? null,
-                      launchUrl: currentData.launchUrl ?? null,
-                    },
-                    v,
-                  );
-                }
-              }}
-            >
-              {APP_LIBRARY_CATEGORIES.map((c) => (
-                <option key={c} value={c}>
-                  {c}
-                </option>
-              ))}
-            </select>
-            <p className={`${inspectorHelperTextClass} mt-1.5`}>
-              Used for the type chip in the Apps library. Your choice is saved on this device.
-            </p>
-          </div>
-        ) : null}
-
-        {showInspectorTestLaunch ? (
-          <div className="min-w-0 space-y-2 rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-3">
-            <label className={inspectorFieldLabelClass}>Test launch</label>
-            <p className={inspectorHelperTextClass}>
-              {source === "sidebar"
-                ? "Runs this catalog entry once on Windows (.exe, shortcut, or supported URL)."
-                : "Runs once using the paths saved for this slot on Windows (.exe, shortcut, or supported URL)."}
-            </p>
-            <button
-              type="button"
-              onClick={() => void handleCatalogTestLaunchFromInspector()}
-              disabled={catalogTestLaunchDisabled}
-              aria-disabled={catalogTestLaunchDisabled}
-              className={`${inspectorPanelListButtonClass}${
-                catalogTestLaunchDisabled ? " cursor-not-allowed opacity-40" : ""
-              }`}
-            >
-              Test launch
-            </button>
-          </div>
-        ) : null}
-
-        <div>
-          <label className={inspectorFieldLabelClass}>Executable Path</label>
-          {rawExe ? (
-            <ClickCopyPathBlock
-              value={rawExe}
-              notice={identityPathCopyNotice}
-              onCopy={() => void copyIdentityExecutablePath()}
-            />
-          ) : isProfileSlot ? (
-            <input
-              type="text"
-              value={typeof currentData.executablePath === "string" ? currentData.executablePath : ""}
-              onChange={(e) => handleFieldUpdate("executablePath", e.target.value)}
-              className={inspectorPanelNativeMonoInputClass}
-              placeholder="C:\\Program Files\\App\\app.exe"
-            />
-          ) : (
-            <p className="rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-2 text-xs text-flow-text-muted">
-              No executable path set for this app.
-            </p>
-          )}
-          {source === "sidebar" ? (
-            <div
-              className="mt-2 rounded-md border border-flow-border/40 bg-flow-bg-primary/15 px-2 py-2"
-              aria-label="Launch path and Explorer"
-            >
-              <div className="flex flex-wrap items-center gap-2">
+      {type === "app" && typeof onSetInstalledAppLibraryCategory === "function" ? (
+        <div className="min-w-0 space-y-2">
+          <span className={inspectorSectionLabelTextClass}>Library</span>
+          <div ref={appLibraryTypeMenuRef} className="relative min-w-0 space-y-2">
+            <div className="flex min-w-0 items-center gap-2">
+              <span className={`${inspectorFieldLabelClass} mb-0 flex-1`}>App type</span>
+              <FlowTooltip label="Used for the type chip in the Apps library. Your choice is saved on this device.">
                 <button
                   type="button"
-                  disabled={
-                    catalogExeOverrideBusy
-                    || typeof window === "undefined"
-                    || typeof window.electron?.pickCatalogLaunchExeOverride !== "function"
-                  }
-                  onClick={() => void handlePickCatalogLaunchExeOverride()}
-                  className={inspectorPanelCompactButtonClass}
+                  className="inline-flex h-7 w-7 shrink-0 items-center justify-center rounded-md text-flow-text-muted transition-colors hover:bg-flow-surface-elevated hover:text-flow-text-secondary"
+                  aria-label="About app type"
                 >
-                  <Edit className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Edit launch file
+                  <HelpCircle className="h-3.5 w-3.5" strokeWidth={1.75} aria-hidden />
                 </button>
-                {catalogExeOverrideActive ? (
-                  <button
-                    type="button"
-                    disabled={
-                      catalogExeOverrideBusy
-                      || typeof window === "undefined"
-                      || typeof window.electron?.clearCatalogLaunchExeOverride !== "function"
-                    }
-                    onClick={() => void handleClearCatalogLaunchExeOverride()}
-                    className={inspectorPanelCompactButtonClass}
-                  >
-                    Clear override
-                  </button>
-                ) : null}
-                <FlowTooltip
-                  label={
-                    canRevealInExplorer
-                      ? "Show executable or saved shortcut in File Explorer"
-                      : "Set an executable path above to open its location on disk."
-                  }
-                >
-                  <span className="inline-flex">
-                    <button
-                      type="button"
-                      onClick={() => void handleRevealInExplorer()}
-                      disabled={!canRevealInExplorer}
-                      aria-disabled={!canRevealInExplorer}
-                      className={
-                        canRevealInExplorer
-                          ? inspectorPanelCompactButtonClass
-                          : inspectorPanelCompactButtonDisabledClass
-                      }
-                    >
-                      <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
-                      Open in Explorer
-                    </button>
-                  </span>
-                </FlowTooltip>
-              </div>
-              <p className={`${inspectorHelperTextClass} mt-1.5`}>
-                Opens a file dialog; the file you pick becomes what FlowSwitch launches for this catalog entry (confirm to apply).
-              </p>
-            </div>
-          ) : (
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              <FlowTooltip
-                label={
-                  canRevealInExplorer
-                    ? "Show executable or saved shortcut in File Explorer"
-                    : "Set an executable path above to open its location on disk."
-                }
-              >
-                <span className="inline-flex">
-                  <button
-                    type="button"
-                    onClick={() => void handleRevealInExplorer()}
-                    disabled={!canRevealInExplorer}
-                    aria-disabled={!canRevealInExplorer}
-                    className={
-                      canRevealInExplorer
-                        ? inspectorPanelCompactButtonClass
-                        : inspectorPanelCompactButtonDisabledClass
-                    }
-                  >
-                    <FolderOpen className="h-3 w-3 shrink-0" aria-hidden />
-                    Open in Explorer
-                  </button>
-                </span>
               </FlowTooltip>
             </div>
-          )}
+            <button
+              type="button"
+              id={installedAppTypeFieldId}
+              className={inspectorMenuTriggerClass}
+              aria-haspopup="menu"
+              aria-expanded={appLibraryTypeMenuOpen}
+              aria-label={`App type, currently ${currentLibraryCategory}`}
+              onClick={() => {
+                setAppLibraryTypeMenuOpen((o) => !o);
+                setMovePlacementMenuOpen(false);
+                setAddToLayoutMenuOpen(false);
+              }}
+            >
+              <span className="min-w-0 flex-1 truncate text-left">{currentLibraryCategory}</span>
+              <ChevronDown className="h-4 w-4 shrink-0 opacity-70" aria-hidden />
+            </button>
+            {appLibraryTypeMenuOpen ? (
+              <div className={inspectorMenuPanelClass} role="menu">
+                {APP_LIBRARY_CATEGORIES.map((c) => (
+                  <button
+                    key={c}
+                    type="button"
+                    role="menuitem"
+                    className={`${inspectorMenuItemClass}${
+                      c === currentLibraryCategory ? " bg-flow-bg-primary/20 text-flow-text-primary" : ""
+                    }`}
+                    onClick={() => {
+                      onSetInstalledAppLibraryCategory(
+                        {
+                          name: String(currentData.name ?? ""),
+                          executablePath: currentData.executablePath ?? null,
+                          shortcutPath: currentData.shortcutPath ?? null,
+                          launchUrl: currentData.launchUrl ?? null,
+                        },
+                        c,
+                      );
+                      setAppLibraryTypeMenuOpen(false);
+                    }}
+                  >
+                    {c}
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      <div className="min-w-0 space-y-2">
+        <span className={inspectorSectionLabelTextClass}>Paths</span>
+        <div className="min-w-0 space-y-3">
+          <div className="min-w-0 space-y-2">
+            <span className={`${inspectorFieldLabelClass} !mb-0 block min-w-0`}>Executable path</span>
+            <div className="min-w-0">
+              {rawExe ? (
+                <InspectorPathDisplay
+                  path={rawExe}
+                  copyNotice={identityPathCopyNotice}
+                  onCopy={() => void copyIdentityExecutablePath()}
+                  canRevealInExplorer={canRevealInExplorer}
+                  onRevealInExplorer={() => void handleRevealInExplorer()}
+                />
+              ) : isProfileSlot ? (
+                <input
+                  type="text"
+                  value={typeof currentData.executablePath === "string" ? currentData.executablePath : ""}
+                  onChange={(e) => handleFieldUpdate("executablePath", e.target.value)}
+                  className={inspectorPanelNativeMonoInputClass}
+                  placeholder="C:\\Program Files\\App\\app.exe"
+                />
+              ) : (
+                <p className="rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-2 text-xs text-flow-text-muted">
+                  No executable path set for this app.
+                </p>
+              )}
+            </div>
+
+            {!rawExe && canRevealInExplorer ? (
+              <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-flow-border/40 bg-flow-bg-tertiary/20 px-3 py-2">
+                <button
+                  type="button"
+                  onClick={() => void handleRevealInExplorer()}
+                  className={inspectorTextLinkClass}
+                  title="Show shortcut or path in File Explorer"
+                >
+                  <FolderOpen className="h-3.5 w-3.5 shrink-0" strokeWidth={1.75} aria-hidden />
+                  Open in Explorer
+                </button>
+              </div>
+            ) : null}
+          </div>
+
+          {showInspectorTestLaunch || type === "app" ? (
+            <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-flow-border/45 bg-flow-bg-primary/[0.07] px-2.5 py-2">
+              {showInspectorTestLaunch ? (
+                <button
+                  type="button"
+                  onClick={() => void handleCatalogTestLaunchFromInspector()}
+                  disabled={catalogTestLaunchDisabled}
+                  aria-disabled={catalogTestLaunchDisabled}
+                  title="Run once with current paths (Windows)"
+                  className="inline-flex shrink-0 items-center gap-1.5 rounded-lg border border-flow-border/50 bg-flow-surface px-2.5 py-1.5 text-[11px] font-medium text-flow-text-secondary transition-colors hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary disabled:cursor-not-allowed disabled:opacity-40 motion-reduce:transition-none"
+                >
+                  <Zap className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={2} aria-hidden />
+                  Test launch
+                </button>
+              ) : null}
+              {type === "app" ? (
+                <>
+                  <FlowTooltip label="Opens the Windows file picker to choose a different .exe. Confirm to save it for this catalog entry.">
+                    <button
+                      type="button"
+                      disabled={
+                        catalogExeOverrideBusy
+                        || typeof window === "undefined"
+                        || typeof window.electron?.pickCatalogLaunchExeOverride !== "function"
+                      }
+                      onClick={() => void handlePickCatalogLaunchExeOverride()}
+                      className={`${inspectorPanelCompactButtonClass} gap-2`}
+                      aria-busy={catalogExeOverrideBusy}
+                      title="Pick a different executable (Windows file picker)"
+                    >
+                      <FolderOpen className="h-3.5 w-3.5 shrink-0 text-flow-accent-blue" strokeWidth={1.75} aria-hidden />
+                      Edit launch file
+                    </button>
+                  </FlowTooltip>
+                  {catalogExeOverrideActive ? (
+                    <button
+                      type="button"
+                      disabled={
+                        catalogExeOverrideBusy
+                        || typeof window === "undefined"
+                        || typeof window.electron?.clearCatalogLaunchExeOverride !== "function"
+                      }
+                      onClick={() => void handleClearCatalogLaunchExeOverride()}
+                      className={`${inspectorTextLinkClass}${
+                        catalogExeOverrideBusy ? " pointer-events-none opacity-50" : ""
+                      }`}
+                    >
+                      Clear override
+                    </button>
+                  ) : null}
+                </>
+              ) : null}
+            </div>
+          ) : null}
+
           {revealPathError ? (
             <p className="mt-1.5 text-[11px] leading-snug text-flow-accent-red" role="status">
               {revealPathError}
@@ -876,7 +955,7 @@ export function SelectedAppDetails({
     <div className="min-w-0 space-y-6">
       {/* Monitor Assignment */}
       <div>
-        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Monitor Assignment</label>
+        <span className={inspectorSectionLabelClass}>Monitor assignment</span>
         <div>
           <label className={inspectorFieldLabelClass}>Target Monitor</label>
             <select 
@@ -895,7 +974,7 @@ export function SelectedAppDetails({
 
       {/* Window Settings */}
       <div>
-        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Window Settings</label>
+        <span className={inspectorSectionLabelClass}>Window settings</span>
         
         <div className="space-y-4">
           <div>
@@ -929,7 +1008,7 @@ export function SelectedAppDetails({
 
       {/* Launch Options */}
       <div>
-        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>Launch Options</label>
+        <span className={inspectorSectionLabelClass}>Launch options</span>
         <div className="space-y-2">
           <div className={inspectorPanelSwitchRowClass}>
             <div className="min-w-0 flex-1">
@@ -989,9 +1068,7 @@ export function SelectedAppDetails({
 
       {/* Custom Launch Arguments */}
       <div>
-        <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
-          Custom Launch Arguments
-        </label>
+        <span className={inspectorSectionLabelClass}>Custom launch arguments</span>
         <input
           type="text"
           value={currentData.customArgs || ""}
@@ -1368,9 +1445,7 @@ export function SelectedAppDetails({
       <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-6">
         {/* Quick Add Section */}
         <div className="min-w-0 shrink-0">
-          <label className={`${inspectorSectionPrimaryTitleClass} mb-3`}>
-            Quick Add Content
-          </label>
+          <span className={inspectorSectionLabelClass}>Quick add content</span>
           <div className="min-w-0 space-y-2 rounded-lg border border-flow-border bg-flow-surface p-3 sm:p-4">
             <div className="min-w-0">
               <label className={inspectorFieldLabelClass}>
@@ -1402,9 +1477,9 @@ export function SelectedAppDetails({
         {isBrowser && (
           <div className="max-h-48 shrink-0 overflow-hidden">
             <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
-              <label className={`${inspectorSectionPrimaryTitleClass} mb-0`}>
-                Browser Tabs
-              </label>
+              <span className={`${inspectorSectionLabelTextClass} min-w-0`}>
+                Browser tabs
+              </span>
               <span className="shrink-0 text-xs text-flow-text-muted">
                 {appBrowserTabs.length} tab{appBrowserTabs.length !== 1 ? "s" : ""}
               </span>
@@ -1479,9 +1554,9 @@ export function SelectedAppDetails({
         {/* Associated Content (fills remaining tab height) */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
           <div className="grid min-w-0 shrink-0 grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
-            <label className={`${inspectorSectionPrimaryTitleClass} mb-0 min-w-0`}>
-              Associated Content
-            </label>
+            <span className={`${inspectorSectionLabelTextClass} min-w-0`}>
+              Associated content
+            </span>
             {onUpdateAssociatedFiles && hasDesktopPicker ? (
               <div
                 className="relative z-[60] flex w-full min-w-0 shrink-0 justify-end overflow-visible sm:w-auto sm:justify-self-end"
@@ -1599,17 +1674,17 @@ export function SelectedAppDetails({
     activeTab === "overview" ? 0 : activeTab === "launch" ? 1 : 2;
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col bg-flow-bg-secondary/95">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-transparent">
       {/* App Header - Always visible */}
-      <div className="border-b border-flow-border/50 bg-flow-surface/30 px-3 py-3 backdrop-blur-sm sm:px-4">
+      <div className="border-b border-white/[0.06] bg-flow-bg-primary/[0.04] px-3 py-3 backdrop-blur-sm sm:px-4">
         <div className="flex min-w-0 items-start gap-3 sm:gap-4">
-          {renderAppIcon(currentData)}
-          <div className="flex-1 min-w-0">
-            <h2 className="text-base font-semibold tracking-tight text-flow-text-primary break-words">
+          {renderAppIcon(currentData, "header")}
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate text-[15px] font-semibold leading-snug tracking-tight text-flow-text-primary">
               {currentData.name}
             </h2>
             <p
-              className={`mt-1 text-xs font-medium ${
+              className={`mt-0.5 text-[12px] font-normal leading-snug ${
                 source === "sidebar"
                   ? "text-flow-text-muted"
                   : "text-flow-text-secondary"
@@ -1621,34 +1696,42 @@ export function SelectedAppDetails({
         </div>
       </div>
 
-      {/* Tab Navigation */}
-      <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
-        <div className="relative flex min-w-0">
-          <div
-            className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 bg-flow-accent-blue flow-tab-slide-track"
-            style={{
-              transform: `translate3d(calc(${appInspectorTabSlideIndex} * 100%), 0, 0)`,
-            }}
-            aria-hidden
-          />
-          {tabs.map((tab) => {
-            const IconComponent = tab.icon;
-            return (
-              <button
-                type="button"
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`relative z-0 flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-b-2 border-transparent px-1 py-2 text-[10px] font-medium leading-tight transition-colors duration-150 ease-out ${
-                  activeTab === tab.id
-                    ? "bg-flow-bg-primary/40 text-flow-accent-blue"
-                    : "text-flow-text-muted hover:bg-flow-surface/50 hover:text-flow-text-primary"
-                }`}
-              >
-                <IconComponent className="h-3 w-3 shrink-0" />
-                <span className="max-w-full truncate text-center">{tab.label}</span>
-              </button>
-            );
-          })}
+      {/* Tab navigation — same rail + slide indicator as library sidebar (Profiles / Apps / Content) */}
+      <div className="shrink-0 border-b border-white/[0.06] px-2 py-2 sm:px-3 sm:py-2.5 md:px-4">
+        <div
+          className="flow-library-tablist flow-library-tablist--inspector-narrow"
+          role="tablist"
+          aria-label="App inspector"
+        >
+          <div className="flow-library-tablist-rail gap-1">
+            <div
+              className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 rounded-full bg-flow-accent-blue flow-tab-slide-track"
+              style={{
+                transform: `translate3d(calc(${appInspectorTabSlideIndex} * 100%), 0, 0)`,
+              }}
+              aria-hidden
+            />
+            {tabs.map((tab) => {
+              const IconComponent = tab.icon;
+              return (
+                <FlowTooltip key={tab.id} label={tab.label} side="bottom">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
+                    aria-label={tab.label}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flow-library-tab flow-library-tab--icon-only min-w-0 ${
+                      activeTab === tab.id ? "flow-library-tab-active" : "flow-library-tab-idle"
+                    }`}
+                  >
+                    <IconComponent className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">{tab.label}</span>
+                  </button>
+                </FlowTooltip>
+              );
+            })}
+          </div>
         </div>
       </div>
 

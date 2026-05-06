@@ -51,12 +51,14 @@ import {
 } from "./components/SelectedContentDetails";
 import { SelectedAppDetails } from "./components/SelectedAppDetails";
 import {
+  Activity,
   Play,
   Settings,
   Edit,
   PenLine,
   LayoutGrid,
-  Link,
+  Package,
+  PanelRight,
   Users,
   ArrowRight,
   ChevronRight,
@@ -129,6 +131,16 @@ import {
   uniqueProfileDisplayName,
   validateMemoryCapture,
 } from "./utils/buildNewProfile";
+
+/** Top segmented control in the fixed inspector (selection vs live launch run). */
+const FLOW_INSPECTOR_MODE_TAB_BASE =
+  "inline-flex min-h-[30px] shrink-0 items-center justify-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-[color,background-color,box-shadow] duration-200 ease-out focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary motion-reduce:transition-none";
+
+const FLOW_INSPECTOR_MODE_TAB_SELECTED =
+  "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]";
+
+const FLOW_INSPECTOR_MODE_TAB_IDLE =
+  "text-flow-text-muted hover:bg-white/[0.06] hover:text-flow-text-secondary";
 
 /**
  * Application shell: profile grid, monitor layout editor, app/content managers, and the custom
@@ -1917,7 +1929,7 @@ export default function App() {
         >
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
-              <div className="flow-library-tablist-rail">
+              <div className="flow-library-tablist-rail gap-1">
                 <div
                   className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 rounded-full bg-flow-accent-blue flow-tab-slide-track"
                   aria-hidden
@@ -1925,51 +1937,66 @@ export default function App() {
                     transform: `translate3d(calc(${librarySidebarSlideIndex} * 100%), 0, 0)`,
                   }}
                 />
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "profiles"}
-                  onClick={() => setCurrentView("profiles")}
-                  className={`flow-library-tab ${
-                    currentView === "profiles"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Profiles, ${profiles.length} total`}
+                <FlowTooltip
+                  label={`Profiles · ${profiles.length}`}
+                  side="bottom"
                 >
-                  <Users className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Profiles
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "apps"}
-                  onClick={() => setCurrentView("apps")}
-                  className={`flow-library-tab ${
-                    currentView === "apps"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Installed apps, ${installedCatalogApps.length} in catalog`}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "profiles"}
+                    onClick={() => setCurrentView("profiles")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "profiles"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Profiles, ${profiles.length} total`}
+                  >
+                    <Users className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Profiles</span>
+                  </button>
+                </FlowTooltip>
+                <FlowTooltip
+                  label={`Apps · ${installedCatalogApps.length}`}
+                  side="bottom"
                 >
-                  <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Apps
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "content"}
-                  onClick={() => setCurrentView("content")}
-                  className={`flow-library-tab ${
-                    currentView === "content"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Content library, ${contentLibraryEntryCount} entries`}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "apps"}
+                    onClick={() => setCurrentView("apps")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "apps"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Installed apps, ${installedCatalogApps.length} in catalog`}
+                  >
+                    <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Apps</span>
+                  </button>
+                </FlowTooltip>
+                <FlowTooltip
+                  label={`Content · ${contentLibraryEntryCount}`}
+                  side="bottom"
                 >
-                  <Link className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Content
-                </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "content"}
+                    onClick={() => setCurrentView("content")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "content"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Content library, ${contentLibraryEntryCount} entries`}
+                  >
+                    <Package className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Content</span>
+                  </button>
+                </FlowTooltip>
               </div>
             </div>
           </div>
@@ -2651,43 +2678,71 @@ export default function App() {
             <div className="flex items-center justify-between gap-2 border-b border-flow-border px-3 py-2">
               <div
                 role="tablist"
-                aria-label="Sidebar: selection details or launch progress"
-                className="inline-flex max-w-full shrink-0 flex-nowrap items-stretch rounded-full border border-white/[0.12] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm"
+                aria-label="Inspector: selection details or launch progress"
+                className="inline-flex max-w-full shrink-0 flex-nowrap items-stretch gap-px rounded-[10px] border border-white/[0.12] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm"
               >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={inspectorMode === "inspect"}
-                  onClick={() => setInspectorMode("inspect")}
-                  aria-label="Inspect: app or content details"
-                  className={`inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
-                    inspectorMode === "inspect"
-                      ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
-                      : "text-flow-text-muted hover:bg-white/[0.06] hover:text-flow-text-secondary"
-                  }`}
+                <FlowTooltip
+                  side="bottom"
+                  delayDuration={380}
+                  label={
+                    "Placement, paths, and per-app Launch settings for your selection.\n"
+                    + "Live profile launch timeline is on Progress—not this tab."
+                  }
                 >
-                  Inspect
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={inspectorMode === "launch"}
-                  onClick={() => setInspectorMode("launch")}
-                  aria-label="Launch: progress and log for the current run"
-                  className={`relative inline-flex shrink-0 items-center justify-center gap-1.5 rounded-full px-3 py-1.5 text-[11px] font-semibold tracking-tight whitespace-nowrap transition-colors focus:outline-none focus-visible:ring-2 focus-visible:ring-flow-accent-blue/50 focus-visible:ring-offset-2 focus-visible:ring-offset-flow-bg-secondary ${
-                    inspectorMode === "launch"
-                      ? "bg-flow-accent-blue/[0.14] text-flow-accent-blue shadow-[0_0_0_1px_rgba(56,189,248,0.75),0_0_14px_rgba(56,189,248,0.18)]"
-                      : "text-flow-text-muted hover:bg-white/[0.06] hover:text-flow-text-secondary"
-                  }`}
-                >
-                  Launch
-                  {isLaunching || launchFeedback.status !== "idle" || lastLaunchProgress ? (
-                    <span
-                      className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-flow-accent-blue"
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={inspectorMode === "inspect"}
+                    onClick={() => setInspectorMode("inspect")}
+                    aria-label="Inspect: details for the selected app or content"
+                    className={`${FLOW_INSPECTOR_MODE_TAB_BASE} ${
+                      inspectorMode === "inspect"
+                        ? FLOW_INSPECTOR_MODE_TAB_SELECTED
+                        : FLOW_INSPECTOR_MODE_TAB_IDLE
+                    }`}
+                  >
+                    <PanelRight
+                      className="h-3.5 w-3.5 shrink-0 opacity-[0.92]"
+                      strokeWidth={2}
                       aria-hidden
                     />
-                  ) : null}
-                </button>
+                    Inspect
+                  </button>
+                </FlowTooltip>
+                <FlowTooltip
+                  side="bottom"
+                  delayDuration={380}
+                  label={
+                    "Live profile launch: timeline, confirmations, and cancel.\n"
+                    + "This panel opens automatically while a launch is running."
+                  }
+                >
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={inspectorMode === "launch"}
+                    onClick={() => setInspectorMode("launch")}
+                    aria-label="Progress: live launch status for the active or last profile run"
+                    className={`relative ${FLOW_INSPECTOR_MODE_TAB_BASE} ${
+                      inspectorMode === "launch"
+                        ? FLOW_INSPECTOR_MODE_TAB_SELECTED
+                        : FLOW_INSPECTOR_MODE_TAB_IDLE
+                    }`}
+                  >
+                    <Activity
+                      className="h-3.5 w-3.5 shrink-0 opacity-[0.92]"
+                      strokeWidth={2}
+                      aria-hidden
+                    />
+                    Progress
+                    {isLaunching || launchFeedback.status !== "idle" || lastLaunchProgress ? (
+                      <span
+                        className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-flow-accent-blue ring-2 ring-flow-bg-secondary"
+                        aria-hidden
+                      />
+                    ) : null}
+                  </button>
+                </FlowTooltip>
               </div>
 
               <button

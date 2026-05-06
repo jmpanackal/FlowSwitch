@@ -74,6 +74,7 @@ Status legend:
 4. Layout editor ergonomics and history (`not_started`)
 5. Responsive behavior for smaller window sizes (`mostly_done` for inspector chrome)
    - **Done on branch `fix/content-launch-followups` (2026-05-01):** associated-content **+ Add** menu stays within the narrow inspector (full-width grid row + width cap); removed dead **`pt-12`** top padding on app/content inspect roots (Launch tab unchanged).
+   - **Latest (2026-05-05, `feature/inspector-sidebar-design`):** `InspectorPathDisplay` path card; app/content inspector tab rails aligned with library narrow variant; icon-only library tabs (Profiles / Apps / Content, `Package` for Content); section label spacing tightened (`inspectorStyles` + Overview stacks); fixed inspector header segmented control renamed **Launch → Progress** with icons/tooltips (distinct from per-app Launch settings); Overview tab uses **`AppWindow`** vs **`LayoutGrid`** on library Apps tab.
 6. Catalog curation quick commands (`not_started`)
 7. Edit/view affordance + first-run guidance (`not_started`)
 
