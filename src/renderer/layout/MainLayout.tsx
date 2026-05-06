@@ -56,7 +56,7 @@ import {
   Edit,
   PenLine,
   LayoutGrid,
-  Link,
+  Package,
   Users,
   ArrowRight,
   ChevronRight,
@@ -1917,7 +1917,7 @@ export default function App() {
         >
           <div className="flex shrink-0 flex-col gap-2 border-b border-white/[0.06] px-3 py-2.5 md:px-4">
             <div className="flow-library-tablist" role="tablist" aria-label="Sidebar view">
-              <div className="flow-library-tablist-rail">
+              <div className="flow-library-tablist-rail gap-1">
                 <div
                   className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 rounded-full bg-flow-accent-blue flow-tab-slide-track"
                   aria-hidden
@@ -1925,51 +1925,66 @@ export default function App() {
                     transform: `translate3d(calc(${librarySidebarSlideIndex} * 100%), 0, 0)`,
                   }}
                 />
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "profiles"}
-                  onClick={() => setCurrentView("profiles")}
-                  className={`flow-library-tab ${
-                    currentView === "profiles"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Profiles, ${profiles.length} total`}
+                <FlowTooltip
+                  label={`Profiles · ${profiles.length}`}
+                  side="bottom"
                 >
-                  <Users className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Profiles
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "apps"}
-                  onClick={() => setCurrentView("apps")}
-                  className={`flow-library-tab ${
-                    currentView === "apps"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Installed apps, ${installedCatalogApps.length} in catalog`}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "profiles"}
+                    onClick={() => setCurrentView("profiles")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "profiles"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Profiles, ${profiles.length} total`}
+                  >
+                    <Users className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Profiles</span>
+                  </button>
+                </FlowTooltip>
+                <FlowTooltip
+                  label={`Apps · ${installedCatalogApps.length}`}
+                  side="bottom"
                 >
-                  <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Apps
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={currentView === "content"}
-                  onClick={() => setCurrentView("content")}
-                  className={`flow-library-tab ${
-                    currentView === "content"
-                      ? "flow-library-tab-active"
-                      : "flow-library-tab-idle"
-                  }`}
-                  aria-label={`Content library, ${contentLibraryEntryCount} entries`}
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "apps"}
+                    onClick={() => setCurrentView("apps")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "apps"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Installed apps, ${installedCatalogApps.length} in catalog`}
+                  >
+                    <LayoutGrid className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Apps</span>
+                  </button>
+                </FlowTooltip>
+                <FlowTooltip
+                  label={`Content · ${contentLibraryEntryCount}`}
+                  side="bottom"
                 >
-                  <Link className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
-                  Content
-                </button>
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={currentView === "content"}
+                    onClick={() => setCurrentView("content")}
+                    className={`flow-library-tab flow-library-tab--icon-only ${
+                      currentView === "content"
+                        ? "flow-library-tab-active"
+                        : "flow-library-tab-idle"
+                    }`}
+                    aria-label={`Content library, ${contentLibraryEntryCount} entries`}
+                  >
+                    <Package className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">Content</span>
+                  </button>
+                </FlowTooltip>
               </div>
             </div>
           </div>

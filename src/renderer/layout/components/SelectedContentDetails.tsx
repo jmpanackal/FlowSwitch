@@ -599,8 +599,8 @@ export function SelectedContentDetails({
   );
 
   return (
-    <div className="flex h-full min-h-0 min-w-0 flex-col">
-      <div className="border-b border-flow-border/50 px-3 pt-3 pb-3 sm:px-4">
+    <div className="flex h-full min-h-0 min-w-0 flex-col bg-transparent">
+      <div className="border-b border-white/[0.06] bg-flow-bg-primary/[0.04] px-3 pb-3 pt-3 backdrop-blur-sm sm:px-4">
         <div className="flex min-w-0 items-start gap-3">
           <div className="mt-0.5 shrink-0 text-flow-text-muted">
             {isFolder ? (
@@ -619,33 +619,41 @@ export function SelectedContentDetails({
         </div>
       </div>
 
-      <div className="border-b border-flow-border/50 bg-flow-bg-secondary/80">
-        <div className="relative flex min-w-0">
-          <div
-            className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 bg-flow-accent-blue flow-tab-slide-track"
-            style={{
-              transform: `translate3d(calc(${contentInspectorTabSlideIndex} * 100%), 0, 0)`,
-            }}
-            aria-hidden
-          />
-          {tabs.map((tab) => {
-            const IconComponent = tab.icon;
-            return (
-              <button
-                type="button"
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`relative z-0 flex min-w-0 flex-1 flex-col items-center justify-center gap-0.5 border-b-2 border-transparent px-1 py-2 text-[10px] font-medium leading-tight transition-colors duration-150 ease-out ${
-                  activeTab === tab.id
-                    ? "bg-flow-bg-primary/40 text-flow-accent-blue"
-                    : "text-flow-text-muted hover:bg-flow-surface/50 hover:text-flow-text-primary"
-                }`}
-              >
-                <IconComponent className="h-3 w-3 shrink-0" aria-hidden />
-                <span className="max-w-full truncate text-center">{tab.label}</span>
-              </button>
-            );
-          })}
+      <div className="shrink-0 border-b border-white/[0.06] px-2 py-2 sm:px-3 sm:py-2.5 md:px-4">
+        <div
+          className="flow-library-tablist flow-library-tablist--inspector-narrow"
+          role="tablist"
+          aria-label="Content library entry"
+        >
+          <div className="flow-library-tablist-rail gap-1">
+            <div
+              className="pointer-events-none absolute bottom-0 left-0 z-10 h-0.5 w-1/3 rounded-full bg-flow-accent-blue flow-tab-slide-track"
+              style={{
+                transform: `translate3d(calc(${contentInspectorTabSlideIndex} * 100%), 0, 0)`,
+              }}
+              aria-hidden
+            />
+            {tabs.map((tab) => {
+              const IconComponent = tab.icon;
+              return (
+                <FlowTooltip key={tab.id} label={tab.label} side="bottom">
+                  <button
+                    type="button"
+                    role="tab"
+                    aria-selected={activeTab === tab.id}
+                    aria-label={tab.label}
+                    onClick={() => setActiveTab(tab.id)}
+                    className={`flow-library-tab flow-library-tab--icon-only min-w-0 ${
+                      activeTab === tab.id ? "flow-library-tab-active" : "flow-library-tab-idle"
+                    }`}
+                  >
+                    <IconComponent className="h-4 w-4 shrink-0" strokeWidth={1.75} aria-hidden />
+                    <span className="sr-only">{tab.label}</span>
+                  </button>
+                </FlowTooltip>
+              );
+            })}
+          </div>
         </div>
       </div>
 

@@ -7,6 +7,35 @@
 export const inspectorSectionPrimaryTitleClass =
   "block text-sm font-medium text-flow-text-secondary";
 
+/**
+ * Inspector sidebar section label (11px uppercase, muted) — use instead of h2/h3
+ * inside narrow inspectors. See SKILL-inspector-sidebar.
+ */
+export const inspectorSectionLabelTextClass =
+  "block text-[11px] font-medium uppercase tracking-[0.06em] text-flow-text-primary/45";
+
+/** Bottom margin for labels not wrapped in a `space-y-*` stack (e.g. Launch tab). */
+export const inspectorSectionLabelClass = `${inspectorSectionLabelTextClass} mb-2`;
+
+/** Top rule + spacing before destructive-only block. */
+export const inspectorDangerZoneClass =
+  "mt-4 border-t border-flow-border/50 pt-4";
+
+/** Text link for tertiary actions (e.g. Open in Explorer) in inspectors. */
+export const inspectorTextLinkClass =
+  "inline-flex min-h-[28px] items-center gap-1.5 text-[12px] font-medium text-flow-accent-blue transition-colors hover:text-flow-accent-blue-hover hover:underline motion-reduce:transition-none";
+
+/** Anchored dropdown panel under inspector triggers. */
+export const inspectorMenuPanelClass =
+  "absolute left-0 right-0 z-50 mt-1 max-h-[min(320px,50vh)] overflow-y-auto rounded-lg border border-flow-border/60 bg-flow-surface py-1 shadow-lg motion-reduce:transition-none";
+
+export const inspectorMenuItemClass =
+  "flex w-full items-center px-3 py-2 text-left text-[13px] font-medium text-flow-text-secondary transition-colors hover:bg-flow-surface-elevated hover:text-flow-text-primary motion-reduce:transition-none";
+
+/** Trigger row for “Move to…” / “Add to layout…” menus (matches list row weight). */
+export const inspectorMenuTriggerClass =
+  "flex min-h-[36px] min-w-0 w-full items-center justify-between gap-2 rounded-lg border border-flow-border/50 bg-flow-surface px-3 py-2 text-left text-[13px] font-medium text-flow-text-secondary transition-[color,background-color,border-color] duration-200 ease-out hover:border-flow-border-accent hover:bg-flow-surface-elevated hover:text-flow-text-primary active:brightness-95 motion-reduce:transition-none motion-reduce:active:brightness-100";
+
 /** Same weight as primary title, without `block` (toolbar / flex row labels). */
 export const inspectorSectionPrimaryEmphasisClass =
   "text-sm font-medium text-flow-text-secondary";
