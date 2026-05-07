@@ -29,6 +29,11 @@ import {
   deriveBuckets,
 } from "../utils/launchTimeline";
 import { orderLaunchActionsForProgressDisplay } from "../utils/launchTimelineDisplayOrder";
+import {
+  inspectorBrowserLinkGlobeStrokeWidth,
+  inspectorBrowserTabGlobeIconClass,
+  inspectorBrowserTabGlobeIconMdClass,
+} from "./inspectorStyles";
 
 type LaunchCenterInspectorProps = {
   profile: FlowProfile;
@@ -77,8 +82,14 @@ function LaunchInspectorCancelButton({
 const LAUNCH_LEAD_SURFACE_CLASS =
   "flex min-w-0 w-full cursor-default items-stretch rounded-lg border border-white/[0.09] bg-black/28 py-1.5 pl-2 pr-2 shadow-[inset_0_1px_0_rgba(255,255,255,0.04)]";
 
+/** Lead row inside the “current action” card only — outer card already frames; avoid nested borders. */
+const LAUNCH_LEAD_INSIDE_CURRENT_CARD_CLASS =
+  "flex min-w-0 w-full cursor-default items-stretch rounded-lg bg-black/22 py-1.5 pl-2 pr-2";
+
 /** Same chrome on every `layoutId` node so Framer doesn’t morph borders/rings between zones. */
 const LAUNCH_LEAD_LAYOUT_SHELL_CLASS = `${LAUNCH_LEAD_SURFACE_CLASS} transform-gpu`;
+
+const LAUNCH_LEAD_INSIDE_CURRENT_CARD_SHELL_CLASS = `${LAUNCH_LEAD_INSIDE_CURRENT_CARD_CLASS} transform-gpu`;
 
 const LAUNCH_LEAD_LAYOUT_SHELL_STYLE = { borderRadius: 10 } as const;
 
@@ -316,22 +327,22 @@ function summaryOutcomeHeaderChip(outcome: SummaryOutcome): {
     case "error":
       return {
         label: "Issues",
-        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-inset ring-rose-400/35",
       };
     case "cancelled":
       return {
         label: "Cancelled",
-        className: "bg-rose-500/15 text-rose-200 ring-1 ring-rose-400/35",
+        className: "bg-rose-500/15 text-rose-200 ring-1 ring-inset ring-rose-400/35",
       };
     case "warning":
       return {
         label: "Warnings",
-        className: "bg-amber-500/15 text-amber-100 ring-1 ring-amber-400/35",
+        className: "bg-amber-500/15 text-amber-100 ring-1 ring-inset ring-amber-400/35",
       };
     default:
       return {
         label: "OK",
-        className: "bg-emerald-500/15 text-emerald-100 ring-1 ring-emerald-400/35",
+        className: "bg-emerald-500/15 text-emerald-100 ring-1 ring-inset ring-emerald-400/35",
       };
   }
 }
@@ -776,8 +787,8 @@ function ActionIcon({
   const src = safeIconSrc(action.iconDataUrl ?? undefined);
   const sm = size === "sm";
   const globeClass = sm
-    ? "h-4 w-4 shrink-0 text-sky-300"
-    : "h-5 w-5 shrink-0 text-sky-300";
+    ? inspectorBrowserTabGlobeIconClass
+    : inspectorBrowserTabGlobeIconMdClass;
   const globeMuted = sm
     ? "h-4 w-4 shrink-0 text-flow-text-muted"
     : "h-9 w-9 shrink-0 text-flow-text-muted";
@@ -785,14 +796,26 @@ function ActionIcon({
     ? "h-7 w-7 shrink-0 rounded-md object-cover ring-1 ring-white/15"
     : "h-10 w-10 shrink-0 rounded-lg object-cover ring-1 ring-white/15";
   if (action.kind === "tab" || action.kind === "system") {
-    return <Globe className={globeClass} strokeWidth={1.5} aria-hidden />;
+    return (
+      <Globe
+        className={globeClass}
+        strokeWidth={inspectorBrowserLinkGlobeStrokeWidth}
+        aria-hidden
+      />
+    );
   }
   if (src) {
     return (
       <img src={src} alt="" className={imgClass} draggable={false} />
     );
   }
-  return <Globe className={globeMuted} strokeWidth={1.5} aria-hidden />;
+  return (
+    <Globe
+      className={globeMuted}
+      strokeWidth={inspectorBrowserLinkGlobeStrokeWidth}
+      aria-hidden
+    />
+  );
 }
 
 function LaunchActionLeadSurface({
@@ -931,7 +954,7 @@ function SubstepList({
   warnSubstepIds?: Set<string> | null;
 }) {
   return (
-    <ul className="mt-2 space-y-1 border-t border-white/[0.08] pt-2">
+    <ul className="mt-1.5 space-y-1 border-t border-white/[0.08] pt-1.5">
       {subs.map((s) => (
         <li key={s.id} className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
           {(warnSubstepIds?.has(s.id) && s.state === "completed") ? (
@@ -972,32 +995,29 @@ function CurrentActionExpandedBody({
   const warnSubstepIds = shouldMarkVerifySubstepAsWarning(action)
     ? new Set(["sub-verify"])
     : null;
+  const pills = visibleLaunchPills(action.pills);
+  const smartTop = pills.length > 0 ? "mt-1" : "mt-0";
   return (
     <div className="border-t border-white/[0.08] pt-2">
-      <div className="min-h-[2.5rem]">
-        {(() => {
-          const pills = visibleLaunchPills(action.pills);
-          return pills.length > 0 ? (
-            <div className="flex flex-wrap gap-1">
-              {pills.map((p) => (
-                <span
-                  key={p}
-                  className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-100 ring-1 ring-amber-400/25"
-                >
-                  {p}
-                </span>
-              ))}
-            </div>
-          ) : null;
-        })()}
+      <div className="min-w-0">
+        {pills.length > 0 ? (
+          <div className="flex flex-wrap gap-1">
+            {pills.map((p) => (
+              <span
+                key={p}
+                className="rounded-md bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-100 ring-1 ring-amber-400/25"
+              >
+                {p}
+              </span>
+            ))}
+          </div>
+        ) : null}
         {action.smartDecisions?.[0] ? (
-          <p className="mt-1 flex items-start gap-1.5 text-[11px] leading-snug text-sky-100/90">
+          <p className={`${smartTop} flex items-start gap-1.5 text-[11px] leading-snug text-sky-100/90`}>
             <Sparkles className="mt-0.5 h-3.5 w-3.5 shrink-0 text-sky-300/90" aria-hidden />
             <span className="min-w-0">{action.smartDecisions[0]}</span>
           </p>
-        ) : (
-          <p className="mt-1 text-[11px] text-flow-text-muted">&nbsp;</p>
-        )}
+        ) : null}
         {extra > 0 ? (
           <p className="mt-0.5 text-[10px] text-flow-text-muted">
             +
@@ -1295,6 +1315,15 @@ export function LaunchCenterInspector({
     [timelineActions],
   );
 
+  /** Per-action outcomes — not `launchedAppCount`, which increments when a spawn/reuse starts (before placement). */
+  const summaryAppsWithoutFailureCount = useMemo(() => {
+    if (!summaryAppActions.length) return null;
+    return summaryAppActions.filter((a) => {
+      const st = resolveAppSummaryStatus(a, runState);
+      return st === "ok" || st === "warn";
+    }).length;
+  }, [summaryAppActions, runState]);
+
   const completedAllList = useMemo(() => {
     if (!timelineActions.length) return [];
     return timelineActions.filter((a) => isTerminalActionState(a.state));
@@ -1306,7 +1335,7 @@ export function LaunchCenterInspector({
 
   if (!hasTimeline) {
     return (
-      <div className="min-h-0 min-w-0">
+      <div className="min-h-0 min-w-0 pr-2 sm:pr-3">
         {summaryMessage?.trim() ? (
           <div
             className={`mb-2 rounded-lg px-2.5 py-2 text-[11px] ring-1 ${
@@ -1320,8 +1349,8 @@ export function LaunchCenterInspector({
             {summaryMessage.trim()}
           </div>
         ) : null}
-        <div className="flex items-start justify-between gap-2">
-          <div className="min-w-0">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0 flex-1">
             <p className="text-[11px] font-semibold uppercase tracking-wide text-flow-text-muted">
               Launch
             </p>
@@ -1334,11 +1363,13 @@ export function LaunchCenterInspector({
               </p>
             ) : null}
           </div>
-          <LaunchInspectorCancelButton
-            disabled={cancelDisabled}
-            pending={cancelPending}
-            onCancel={onCancel}
-          />
+          <div className="shrink-0">
+            <LaunchInspectorCancelButton
+              disabled={cancelDisabled}
+              pending={cancelPending}
+              onCancel={onCancel}
+            />
+          </div>
         </div>
 
         <div className="mt-3">
@@ -1454,7 +1485,7 @@ export function LaunchCenterInspector({
 
       {showSummaryChrome ? (
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-          <div className="min-w-0 overflow-visible pr-2 sm:pr-3">
+          <div className="min-w-0 shrink-0 pr-2 sm:pr-3">
             <div className="border-b border-white/10 pb-2">
               <div className="flex min-w-0 items-start justify-between gap-3">
                 <div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
@@ -1477,11 +1508,29 @@ export function LaunchCenterInspector({
                   </span>
                 </div>
                 <div className="min-w-0 shrink-0 text-right">
-                  <p className="tabular-nums text-xl font-semibold leading-none text-flow-text-primary">
-                    {progress?.launchedAppCount ?? summaryAppActions.filter((a) => actionLooksLaunched(a, progress, runState)).length}
-                    <span className="text-flow-text-secondary">/{progress?.requestedAppCount ?? summaryAppActions.length}</span>
+                  <p
+                    className="tabular-nums text-xl font-semibold leading-none text-flow-text-primary"
+                    title={
+                      summaryAppsWithoutFailureCount != null
+                        ? "Apps that finished without errors (warnings count as completed)."
+                        : "Apps launched vs requested for this profile."
+                    }
+                  >
+                    {summaryAppsWithoutFailureCount != null
+                      ? summaryAppsWithoutFailureCount
+                      : (progress?.launchedAppCount
+                        ?? summaryAppActions.filter((a) => actionLooksLaunched(a, progress, runState)).length)}
+                    <span className="text-flow-text-secondary">
+                      /
+                      {progress?.requestedAppCount ?? summaryAppActions.length}
+                    </span>
                   </p>
-                  <p className="text-[11px] font-semibold text-flow-text-muted">apps</p>
+                  <p className="text-[11px] font-semibold text-flow-text-muted">
+                    {summaryAppsWithoutFailureCount != null
+                    && summaryAppsWithoutFailureCount < summaryAppActions.length
+                      ? "apps without errors"
+                      : "apps"}
+                  </p>
                 </div>
               </div>
               <p className="mt-1.5 min-w-0 text-sm font-semibold leading-snug text-flow-text-primary">
@@ -1500,8 +1549,10 @@ export function LaunchCenterInspector({
                 {postRunContextLine}
               </p>
             ) : null}
+          </div>
+          <div className="scrollbar-elegant min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain pr-2 sm:pr-3 pt-1">
             {summaryAppActions.length > 0 ? (
-              <ul className="min-w-0 divide-y divide-white/10">
+              <ul className="min-w-0 divide-y divide-white/10 pb-2">
                 {summaryAppActions.map((a) => (
                   <LaunchSummaryAppRow
                     key={a.id}
@@ -1681,28 +1732,26 @@ export function LaunchCenterInspector({
           <>
               {renderBuckets?.current ? (
                 <div
-                  className={`relative isolate mt-3 rounded-xl border border-flow-accent-blue/35 bg-gradient-to-b from-flow-text-primary/[0.07] to-flow-bg-secondary/80 p-3 ring-1 ring-flow-accent-blue/20 ${
+                  className={`relative isolate mt-3 rounded-xl border border-flow-accent-blue/35 bg-gradient-to-b from-flow-text-primary/[0.07] to-flow-bg-secondary/80 p-3 ${
                     renderBuckets.current.state === "running"
-                      ? "shadow-[0_0_24px_rgba(56,189,248,0.12)]"
+                      ? "shadow-[inset_0_0_28px_rgba(56,189,248,0.14)]"
                       : ""
                   }`}
                 >
                   <p className="relative mb-1.5 text-[10px] font-semibold uppercase tracking-wide text-flow-accent-blue/80">
                     Current action
                   </p>
-                  <div className="rounded-[10px] p-px ring-1 ring-inset ring-flow-accent-blue/30 bg-flow-accent-blue/[0.07]">
-                    <div
-                      className={LAUNCH_LEAD_LAYOUT_SHELL_CLASS}
-                      style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
-                    >
-                      <LaunchActionLeadSurface
-                        action={renderBuckets.current}
-                        progress={progress}
-                        tabHost={resolveTabHostForAction(renderBuckets.current, tabHostLookup)}
-                      />
-                    </div>
+                  <div
+                    className={LAUNCH_LEAD_INSIDE_CURRENT_CARD_SHELL_CLASS}
+                    style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
+                  >
+                    <LaunchActionLeadSurface
+                      action={renderBuckets.current}
+                      progress={progress}
+                      tabHost={resolveTabHostForAction(renderBuckets.current, tabHostLookup)}
+                    />
                   </div>
-                  <div className="relative min-w-0 overflow-hidden">
+                  <div className="relative min-w-0">
                     <CurrentActionExpandedBody
                       action={renderBuckets.current}
                       reducedMotion={reducedMotion}
