@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-05-05  
+Last updated: 2026-05-05 (launch guardrails Phase 3 slice)  
 Owner: active implementation branch owner
 
 **Release note (marketing):** `package.json` / `website/` prepared for **0.1.4**. Live GitHub downloads require pushing annotated tag **`v0.1.4`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.4-win-x64-*.exe` assets matching `website/latest.json`.
@@ -51,10 +51,10 @@ Status legend:
    - Harden icon/path handling for non-system drives.
    - **Latest (branch):** Apps sidebar add pill → pick `.exe` → persists `userCatalogExePaths` and merges into catalog (`installed-apps:add-user-exe`); Steam library `common` roots merged into optional deep exe scan; stricter catalog filters (VC++ redistributable titles, Java/AMD/Intel installer noise, Package Cache VC paths), inbox shortcut allow-list extended (Codex, Cursor, Windsurf), WindowsApps shim **display-name** fallbacks when WinRT/manifest names are missing, optional exe scan uses `%ProgramFiles%` / `%ProgramFiles(x86)%` and `FLOWSWITCH_EXE_SCAN_EXTRA_ROOTS`; shell icon script tweaks; matrix doc updated. **Content / layout:** “Add to monitor” from the content ⋯ menu resolves catalog icons at placement time (`getInstalledAppsCatalog` + ref) so tiles match drag-drop; content library gains `FlowSnackbar` provider usage and `AVAILABLE_APPS` moved to `availableAppsForOpensWith` for Fast Refresh hygiene.
 
-4. Safe launch guardrails for large profiles (`not_started`)
-   - Soft threshold warnings and hard constraints.
-   - Launch-time risk/duration messaging.
-   - Optional sequencing for dependency-sensitive launches.
+4. Safe launch guardrails for large profiles (`in_progress` — spec `docs/superpowers/specs/large-profile-launch-guardrails.md`)
+   - **Done (Phase 1–2):** Shared limits in `src/shared/launch-weight-limits.js`; `computeLaunchWeight` + deduped tabs/apps; main `LAUNCH_TOO_LARGE` structured error before run; renderer `getProfileLaunchWeight` + soft **Large profile launch** modal; hard cap surfaced in renderer if estimate passes IPC drift.
+   - **Done (Phase 3 slice, 2026-05-05):** Launch-weight payload includes **skipped non-launchable app tiles** (gather `skippedApps`) for the soft modal; hard-reject `details` includes the same summary.
+   - **Remaining:** Phase 3 full vertical (missing-path policy, URL/schema/import single pass per spec); monitor geometry re-weight UX (Phase 4); stall timeout (Phase 5); optional sequencing for dependency-sensitive launches.
 
 5. Shell accessibility — profile library keyboard parity (`done` — `feature/profile-library-keyboard-parity`)
    - **Evidence:** `docs/superpowers/specs/2026-05-03-ui-ux-evaluation-report.md` (C1); `ProfileCard` uses `div` + `onClick` without `tabIndex` — cards not in tab order; no Enter/Space semantics.
