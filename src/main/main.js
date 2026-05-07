@@ -42,6 +42,7 @@ const { buildCompanionProcessHints } = require('./services/process-hints');
 const { captureAllMonitorsScreenshot } = require('./utils/windows-desktop-screenshot');
 const {
   isWithinAcceptableStateTolerance,
+  isWithinSalvagePlacementTolerance,
   planLaunchSlots,
   scoreReuseCandidate,
   shouldTriggerAmbiguityFallback,
@@ -844,9 +845,10 @@ const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
   shouldTriggerAmbiguityFallback,
   isLikelyAuxiliaryWindowClass,
   isChromiumNonPrimaryWindowRow,
-  isChromiumTopLevelWindowRow,
-  isWithinAcceptableStateTolerance,
-  centerWindowHandleOnMonitor,
+    isChromiumTopLevelWindowRow,
+    isWithinAcceptableStateTolerance,
+    isWithinSalvagePlacementTolerance,
+    centerWindowHandleOnMonitor,
   maximizeWindowHandle,
   buildMonitorMappingDiagnostics,
   normalizeSafeUrl,
@@ -1281,6 +1283,10 @@ if (shouldBootstrapElectronMain) {
     getRunningWindowProcesses,
     hiddenProcessNamePatterns,
     hiddenWindowTitlePatterns,
+    createProfileMonitorMap,
+    gatherProfileAppLaunches,
+    gatherLegacyActionLaunches,
+    normalizeSafeUrl,
   });
 
   if (process.platform === 'win32') {

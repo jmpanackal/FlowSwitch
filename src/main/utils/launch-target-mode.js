@@ -60,6 +60,37 @@ const isWithinAcceptableStateTolerance = ({
   return false;
 };
 
+/**
+ * Last-resort geometry check when move helpers report failure but a window is already on the
+ * target monitor. Stricter {@link isWithinAcceptableStateTolerance} rejects common DPI / theme /
+ * profile-snapshot drift (e.g. Qt apps like Anki) even though placement is effectively correct.
+ */
+const isWithinSalvagePlacementTolerance = ({
+  actual,
+  target,
+  onTargetMonitor,
+} = {}) => {
+  if (!actual || !target || onTargetMonitor !== true) return false;
+  const state = String(target.state || 'normal').trim().toLowerCase();
+
+  if (state === 'normal') {
+    const aw = Number(actual.width || 0);
+    const ah = Number(actual.height || 0);
+    if (aw < 120 || ah < 80) return false;
+    const dx = Math.abs(Number(actual.left || 0) - Number(target.left || 0));
+    const dy = Math.abs(Number(actual.top || 0) - Number(target.top || 0));
+    const dw = Math.abs(aw - Number(target.width || 0));
+    const dh = Math.abs(ah - Number(target.height || 0));
+    return dx <= 96 && dy <= 96 && dw <= 220 && dh <= 220;
+  }
+
+  if (state === 'maximized') {
+    return isMeaningfulBoundsForTarget(actual, target);
+  }
+
+  return isWithinAcceptableStateTolerance({ actual, target, onTargetMonitor });
+};
+
 const planLaunchSlots = ({ requestedSlots, existingHandles } = {}) => {
   const safeRequestedSlots = normalizeCount(requestedSlots);
   const safeExistingHandles = Array.isArray(existingHandles)
@@ -133,6 +164,7 @@ module.exports = {
   REUSE_SCORE_WEIGHTS,
   normalizeUnitScore,
   isWithinAcceptableStateTolerance,
+  isWithinSalvagePlacementTolerance,
   planLaunchSlots,
   scoreReuseCandidate,
   shouldTriggerAmbiguityFallback,

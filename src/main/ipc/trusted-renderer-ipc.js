@@ -3,6 +3,7 @@
 const path = require('path');
 const fs = require('fs');
 const { spawn } = require('child_process');
+const { computeLaunchWeight } = require('../utils/compute-launch-weight');
 const ws = require('windows-shortcuts');
 const {
   getAppxUserPackageLookup,
@@ -149,6 +150,10 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     getRunningWindowProcesses,
     hiddenProcessNamePatterns,
     hiddenWindowTitlePatterns,
+    createProfileMonitorMap,
+    gatherProfileAppLaunches,
+    gatherLegacyActionLaunches,
+    normalizeSafeUrl,
   } = deps;
 
   let installedAppsCatalogCache = null;
@@ -458,6 +463,39 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
     return { ok: false, error: 'Failed to load profile' };
   }
 });
+
+  handleTrustedIpc('profile-launch-weight', async (_event, profileId, request = {}) => {
+    try {
+      const safeProfileId = safeLimitedString(profileId, MAX_PROFILE_ID_LENGTH);
+      if (!safeProfileId) return { ok: false, error: 'Invalid profile id' };
+      const { profiles, storeError } = unpackProfilesReadResult(readProfilesFromDisk());
+      if (storeError) {
+        return {
+          ok: false,
+          error: String(storeError?.message || 'Could not load saved profiles.'),
+          code: String(storeError?.code || 'READ_FAILED'),
+        };
+      }
+      const profile = profiles.find(
+        (candidate) => String(candidate?.id || '').trim() === safeProfileId,
+      );
+      if (!profile) {
+        return { ok: false, error: 'Profile not found.' };
+      }
+      const launchWeightOptions = request && typeof request === 'object' ? request : {};
+      const weight = computeLaunchWeight(profile, {
+        buildSystemMonitorSnapshot,
+        createProfileMonitorMap,
+        gatherProfileAppLaunches,
+        gatherLegacyActionLaunches,
+        normalizeSafeUrl,
+      }, launchWeightOptions);
+      return { ok: true, ...weight };
+    } catch (err) {
+      console.error('[profile-launch-weight]', err);
+      return { ok: false, error: 'Could not compute launch weight.' };
+    }
+  });
 
   handleTrustedIpc('cancel-profile-launch', async (_event, payload) => {
   const profileId = safeLimitedString(payload?.profileId, MAX_PROFILE_ID_LENGTH);

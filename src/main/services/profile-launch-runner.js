@@ -6,6 +6,13 @@
  */
 const path = require('path');
 const { execFile } = require('child_process');
+const launchLimits = require('../../shared/launch-weight-limits');
+const {
+  dedupeAppLaunchesFromGather,
+  sliceProfileForExcludedMonitors,
+  buildSkippedLaunchTargetsSummary,
+} = require('../utils/compute-launch-weight');
+const { buildBrowserTabLaunchList } = require('../utils/browser-tab-launch-list');
 const { PROCESS_HINTS_VERSION } = require('./process-hints');
 const { hiddenProcessNamePatterns } = require('./windows-process-service');
 const { launchIconDataUrlFromProfileApp } = require('../utils/launch-ui-icons');
@@ -56,6 +63,7 @@ const createProfileLaunchRunner = (deps) => {
     isChromiumNonPrimaryWindowRow,
     isChromiumTopLevelWindowRow,
     isWithinAcceptableStateTolerance,
+    isWithinSalvagePlacementTolerance,
     centerWindowHandleOnMonitor,
     maximizeWindowHandle,
     buildMonitorMappingDiagnostics,
@@ -989,6 +997,80 @@ const launchProfileById = async (profileId, options = {}) => {
         .filter(Boolean),
     };
   }
+
+  const launchWeightOptions = options.launchWeight && typeof options.launchWeight === 'object'
+    ? options.launchWeight
+    : {};
+  const profileForLaunch = sliceProfileForExcludedMonitors(
+    profile,
+    launchWeightOptions.excludedProfileMonitorIds,
+  );
+  const systemMonitors = buildSystemMonitorSnapshot();
+  const monitorMap = createProfileMonitorMap(profileForLaunch?.monitors, systemMonitors);
+  const modernLaunchData = gatherProfileAppLaunches(profileForLaunch, monitorMap);
+  const legacyLaunchData = gatherLegacyActionLaunches(profileForLaunch, monitorMap);
+  const appLaunches = dedupeAppLaunchesFromGather(modernLaunchData, legacyLaunchData);
+  const tabEntriesForWeight = buildBrowserTabLaunchList(
+    profileForLaunch,
+    legacyLaunchData,
+    normalizeSafeUrl,
+  );
+  const totalLaunchUnits = (
+    appLaunches.length * launchLimits.LAUNCH_WEIGHT_PER_APP_LAUNCH
+    + tabEntriesForWeight.length * launchLimits.LAUNCH_WEIGHT_PER_BROWSER_TAB
+  );
+  if (totalLaunchUnits > launchLimits.LAUNCH_WEIGHT_HARD_MAX_UNITS) {
+    return {
+      ok: false,
+      code: 'LAUNCH_TOO_LARGE',
+      error: `This profile is too large to launch (${totalLaunchUnits} work units; maximum is ${launchLimits.LAUNCH_WEIGHT_HARD_MAX_UNITS}). Remove some apps or browser tabs, or split the profile.`,
+      requestedProfileId: normalizedProfileId,
+      profile,
+      details: {
+        totalUnits: totalLaunchUnits,
+        breakdown: {
+          dedupedAppLaunches: appLaunches.length,
+          dedupedBrowserTabs: tabEntriesForWeight.length,
+        },
+        limits: {
+          softWarn: launchLimits.LAUNCH_WEIGHT_SOFT_WARN_UNITS,
+          hardMax: launchLimits.LAUNCH_WEIGHT_HARD_MAX_UNITS,
+        },
+        skippedLaunchTargets: buildSkippedLaunchTargetsSummary(
+          modernLaunchData,
+          legacyLaunchData,
+          12,
+        ),
+      },
+    };
+  }
+
+  if (appLaunches.length === 0 && tabEntriesForWeight.length === 0) {
+    return {
+      ok: false,
+      code: 'LAUNCH_NOTHING_TO_RUN',
+      error: 'Nothing to launch: no app has a valid executable, shortcut, or URL, and there are no browser tabs to open. Add launch targets or fix paths in the inspector.',
+      requestedProfileId: normalizedProfileId,
+      profile,
+      details: {
+        totalUnits: totalLaunchUnits,
+        breakdown: {
+          dedupedAppLaunches: 0,
+          dedupedBrowserTabs: 0,
+        },
+        limits: {
+          softWarn: launchLimits.LAUNCH_WEIGHT_SOFT_WARN_UNITS,
+          hardMax: launchLimits.LAUNCH_WEIGHT_HARD_MAX_UNITS,
+        },
+        skippedLaunchTargets: buildSkippedLaunchTargetsSummary(
+          modernLaunchData,
+          legacyLaunchData,
+          12,
+        ),
+      },
+    };
+  }
+
   const runSession = launchStatusStore.startRun(normalizedProfileId);
   const activeRunId = String(runSession?.runId || '').trim();
   if (!activeRunId) {
@@ -1014,39 +1096,12 @@ const launchProfileById = async (profileId, options = {}) => {
     runId: activeRunId,
   });
 
-  const launchState = profile?.launchMaximized
+  const launchState = profileForLaunch?.launchMaximized
     ? 'maximized'
-    : profile?.launchMinimized
+    : profileForLaunch?.launchMinimized
       ? 'minimized'
       : 'normal';
 
-  const systemMonitors = buildSystemMonitorSnapshot();
-  const monitorMap = createProfileMonitorMap(profile?.monitors, systemMonitors);
-  const modernLaunchData = gatherProfileAppLaunches(profile, monitorMap);
-  const legacyLaunchData = gatherLegacyActionLaunches(profile, monitorMap);
-  const hasModernLaunches = modernLaunchData.launches.length > 0;
-  const launchKey = (launch) => {
-    const instanceId = String(launch.app?.instanceId || '').trim();
-    if (instanceId) {
-      return `${instanceId}::${launch.monitor?.id || 'monitor'}`;
-    }
-    // Without an explicit instanceId, treat same launch target on same monitor as one logical app launch.
-    // This prevents accidental duplicates from mixed/legacy profile data from opening multiple windows.
-    return `${launch.monitor?.id || 'monitor'}::${String(launch.executablePath || '').toLowerCase()}::${String(launch.shortcutPath || '').toLowerCase()}::${String(launch.launchUrl || '').toLowerCase()}`;
-  };
-  const seenLaunchKeys = new Set();
-  // Prefer modern monitor-layout launches. Legacy action-app launches are fallback only
-  // when a profile has no modern app definitions.
-  const preferredLaunches = hasModernLaunches
-    ? modernLaunchData.launches
-    : [...modernLaunchData.launches, ...legacyLaunchData.launches];
-  const appLaunches = preferredLaunches
-    .filter((launch) => {
-      const key = launchKey(launch);
-      if (seenLaunchKeys.has(key)) return false;
-      seenLaunchKeys.add(key);
-      return true;
-    });
   const skippedApps = [...modernLaunchData.skippedApps, ...legacyLaunchData.skippedApps];
   const failedApps = [];
   const pendingConfirmations = [];
@@ -1148,34 +1203,7 @@ const launchProfileById = async (profileId, options = {}) => {
     if (nl && !launchExeByAppName.has(nl)) launchExeByAppName.set(nl, ex);
   }
 
-  /** Ordered browser tabs (profile + legacy), deduped by URL + preferred host hints. */
-  const tabUrlList = [];
-  const tabUrlSeen = new Set();
-  const pushTabEntry = (raw, meta = {}) => {
-    const u = normalizeSafeUrl(raw);
-    if (!u) return;
-    const browser = String(meta.browser || '').trim();
-    const appInstanceId = String(meta.appInstanceId || '').trim();
-    const key = `${u}\0${browser.toLowerCase()}\0${appInstanceId}`;
-    if (tabUrlSeen.has(key)) return;
-    tabUrlSeen.add(key);
-    let label = u;
-    try {
-      label = new URL(u).hostname || u;
-    } catch {
-      label = u;
-    }
-    tabUrlList.push({ key, url: u, label, browser, appInstanceId });
-  };
-  for (const tab of (Array.isArray(profile?.browserTabs) ? profile.browserTabs : [])) {
-    pushTabEntry(tab?.url, {
-      browser: tab?.browser,
-      appInstanceId: tab?.appInstanceId,
-    });
-  }
-  for (const raw of legacyLaunchData.browserUrls || []) {
-    pushTabEntry(raw);
-  }
+  const tabUrlList = buildBrowserTabLaunchList(profileForLaunch, legacyLaunchData, normalizeSafeUrl);
   const requestedBrowserTabCount = tabUrlList.length;
   const tabEntriesByAppInstanceId = new Map();
   for (const entry of tabUrlList) {
@@ -2993,10 +3021,111 @@ try {
           applied: result.applied,
           handle: result.handle || null,
         });
-        if (!result.applied || !result.handle) {
+        // Move helpers sometimes report `applied: false` while the ready-gate handle is already
+        // on the correct monitor after layout settles (resize animation, DPI, or late reparent).
+        const readyHandleForLateVerify = String(readyGate?.handle || '').trim();
+        if (
+          (!result.applied || !String(result.handle || '').trim())
+          && readyGate?.ready
+          && readyHandleForLateVerify
+        ) {
+          await sleep(220);
+          const placementRectsLate = await getWindowPlacementRectsByHandle(readyHandleForLateVerify);
+          const measuredLate = placementRectsLate?.visibleRect || placementRectsLate?.outerRect || null;
+          const onTargetLate = isWindowOnTargetMonitor({
+            rect: measuredLate,
+            monitor: launchItem.monitor,
+            bounds: placementBounds,
+          });
+          const withinLate = isWithinAcceptableStateTolerance({
+            actual: measuredLate,
+            target: placementBounds,
+            onTargetMonitor: onTargetLate,
+          });
+          const salvageLate = isWithinSalvagePlacementTolerance({
+            actual: measuredLate,
+            target: placementBounds,
+            onTargetMonitor: onTargetLate,
+          });
+          if (onTargetLate && (withinLate || salvageLate)) {
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'placement-final',
+              reason: salvageLate && !withinLate
+                ? 'late-verify-accept-ready-handle-salvage-geometry'
+                : 'late-verify-accept-ready-handle-after-move-miss',
+              handle: readyHandleForLateVerify,
+            });
+            result = { applied: true, handle: readyHandleForLateVerify };
+          }
+        }
+        if (!result.applied || !String(result.handle || '').trim()) {
+          const salvageDiagnosticsContext = {
+            processHintLc,
+            strategy: 'placement-on-target-salvage',
+            placementState: placementBounds.state,
+          };
+          const salvageRows = await getVisibleWindowInfos(processHintLc, {
+            diagnostics: launchDiagnostics,
+            diagnosticsContext: salvageDiagnosticsContext,
+            includeNonVisible: true,
+          });
+          let salvageCandidates = (Array.isArray(salvageRows) ? salvageRows : [])
+            .filter((row) => row?.enabled && !row?.hung && !row?.cloaked && !row?.tool)
+            .filter((row) => String(row?.handle || '').trim())
+            .filter((row) => !placedHandlesInRun.has(String(row.handle).trim()));
+          if (isChromiumFamily && salvageCandidates.some(isChromiumTopLevelWindowRow)) {
+            salvageCandidates = salvageCandidates.filter(isChromiumTopLevelWindowRow);
+          }
+          salvageCandidates = salvageCandidates
+            .filter((row) => !isLikelyAuxiliaryWindowClass(row?.className))
+            .sort((a, b) => (
+              scoreWindowCandidate(b, { chromiumProcessHint: processHintLc })
+              - scoreWindowCandidate(a, { chromiumProcessHint: processHintLc })
+            ));
+          launchDiagnostics.attempt({
+            ...salvageDiagnosticsContext,
+            reason: 'scan-visible-rows-for-on-target-handle',
+            candidateCount: salvageCandidates.length,
+          });
+          for (const row of salvageCandidates.slice(0, 22)) {
+            const h = String(row?.handle || '').trim();
+            if (!h) continue;
+            const rectsSalvage = await getWindowPlacementRectsByHandle(h);
+            const measuredSalvage = rectsSalvage?.visibleRect || rectsSalvage?.outerRect || null;
+            const onSalvage = isWindowOnTargetMonitor({
+              rect: measuredSalvage,
+              monitor: launchItem.monitor,
+              bounds: placementBounds,
+            });
+            if (!onSalvage) continue;
+            const strictSalvage = isWithinAcceptableStateTolerance({
+              actual: measuredSalvage,
+              target: placementBounds,
+              onTargetMonitor: onSalvage,
+            });
+            const looseSalvage = isWithinSalvagePlacementTolerance({
+              actual: measuredSalvage,
+              target: placementBounds,
+              onTargetMonitor: onSalvage,
+            });
+            if (!strictSalvage && !looseSalvage) continue;
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'placement-final',
+              reason: looseSalvage && !strictSalvage
+                ? 'on-target-salvage-from-visible-scan-loose-geometry'
+                : 'on-target-salvage-from-visible-scan',
+              handle: h,
+            });
+            result = { applied: true, handle: h };
+            break;
+          }
+        }
+        if (!result.applied || !String(result.handle || '').trim()) {
           throw new Error('Window placement was not applied to a launchable handle.');
         }
-        claimRunPlacementHandle(result.handle);
+        claimRunPlacementHandle(String(result.handle).trim());
         const postPlacementRows = await getVisibleWindowInfos(processHintLc, {
           diagnostics: launchDiagnostics,
           diagnosticsContext: {
