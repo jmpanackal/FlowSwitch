@@ -934,6 +934,28 @@ const createWindowPlacementRuntime = (deps) => {
       );
     };
 
+    /**
+     * Qt / some maximized HWNDs report outer-rect or DWM visibleRect smaller than work-area
+     * while still filling the monitor; strict `isMeaningfulRectForBounds` drops them from the
+     * stabilization candidate list and verification never runs on the placed handle.
+     */
+    const isLooselyMeaningfulMaximizedRect = (rect, targetBounds) => {
+      if (!rect || !targetBounds) return false;
+      const rectWidth = Number(rect.width || 0);
+      const rectHeight = Number(rect.height || 0);
+      const targetWidth = Math.max(1, Number(targetBounds.width || 0));
+      const targetHeight = Math.max(1, Number(targetBounds.height || 0));
+      const areaRatio = (rectWidth * rectHeight) / (targetWidth * targetHeight);
+      const widthRatio = rectWidth / targetWidth;
+      const heightRatio = rectHeight / targetHeight;
+      return (
+        areaRatio >= 0.26
+        && widthRatio >= 0.42
+        && heightRatio >= 0.36
+        && (widthRatio >= 0.56 || heightRatio >= 0.56)
+      );
+    };
+
     const safeProcess = String(processHintLc || '').trim().toLowerCase();
     if (!safeProcess || !bounds) {
       return { verified: false, handle: initialHandle ? String(initialHandle) : null };
@@ -956,13 +978,15 @@ const createWindowPlacementRuntime = (deps) => {
         diagnostics,
         diagnosticsContext,
       });
-      const candidates = rows
+      let candidates = rows
         .filter((row) => row?.handle)
         .filter((row) => !row?.isMinimized)
         .filter((row) => (bounds.state !== 'maximized' ? true : (!row?.hasOwner && !row?.topMost)))
         .filter((row) => row.handle === forcedHandle || !excluded.has(row.handle))
         .filter((row) => {
           if (bounds.state !== 'maximized') return true;
+          // Keep the HWND we already placed even when EnumWindow sizes look "too small" for maximized.
+          if (forcedHandle && String(row.handle) === String(forcedHandle)) return true;
           return isMeaningfulRectForBounds(
             {
               width: Number(row?.width || 0),
@@ -975,6 +999,26 @@ const createWindowPlacementRuntime = (deps) => {
           scoreWindowCandidate(b, { chromiumProcessHint: safeProcess })
           - scoreWindowCandidate(a, { chromiumProcessHint: safeProcess })
         ));
+      if (bounds.state === 'maximized' && forcedHandle) {
+        const fh = String(forcedHandle);
+        const inList = candidates.some((r) => String(r.handle) === fh);
+        if (!inList) {
+          const direct = rows.find((r) => String(r?.handle) === fh);
+          if (direct) {
+            candidates = [direct, ...candidates.filter((r) => String(r.handle) !== fh)];
+          } else {
+            candidates = [{
+              handle: fh,
+              width: 0,
+              height: 0,
+              enabled: true,
+              isMinimized: false,
+              hasOwner: false,
+              topMost: false,
+            }, ...candidates];
+          }
+        }
+      }
       lastCandidates = candidates;
 
       if (bounds.state === 'minimized') {
@@ -1052,7 +1096,30 @@ const createWindowPlacementRuntime = (deps) => {
           const placementRects = await getWindowPlacementRectsByHandle(row.handle);
           const rect = placementRects?.visibleRect || placementRects?.outerRect || await getWindowRectByHandle(row.handle);
           const onTarget = isWindowOnTargetMonitor({ rect, monitor, bounds });
-          const meaningful = isMeaningfulRectForBounds(rect, bounds);
+          const strictMeaningful = isMeaningfulRectForBounds(rect, bounds);
+          const looseMeaningful = Boolean(
+            forcedHandle
+            && String(row.handle) === String(forcedHandle)
+            && isLooselyMeaningfulMaximizedRect(rect, bounds),
+          );
+          const meaningful = strictMeaningful || looseMeaningful;
+          if (
+            forcedHandle
+            && String(row.handle) === String(forcedHandle)
+            && onTarget
+            && meaningful
+          ) {
+            if (looseMeaningful && !strictMeaningful && diagnostics) {
+              diagnostics.decision({
+                ...diagnosticsContext,
+                strategy: 'stabilize-maximized',
+                reason: 'forced-handle-loose-meaningful-accept',
+                candidateHandle: row.handle,
+                measuredRect: rect,
+              });
+            }
+            return { verified: true, handle: row.handle };
+          }
           if (onTarget && meaningful) {
             if (verifiedHandle === row.handle) {
               verifiedHandleStableCount += 1;
