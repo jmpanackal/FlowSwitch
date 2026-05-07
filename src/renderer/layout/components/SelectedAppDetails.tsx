@@ -27,7 +27,6 @@ import {
   ChevronDown,
   Upload,
   Folder,
-  GripVertical,
   AppWindow,
   HelpCircle,
 } from "lucide-react";
@@ -46,6 +45,7 @@ import {
   countAssociatedNonFolderEntries,
   getAssociatedContentLimitsForHost,
 } from "../utils/associatedContentHostLimits";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 import { useFlowSnackbar } from "./FlowSnackbar";
 import {
   inspectorFieldLabelClass,
@@ -65,6 +65,9 @@ import {
   inspectorMenuItemClass,
   inspectorMenuPanelClass,
   inspectorMenuTriggerClass,
+  inspectorBrowserLinkGlobeStrokeWidth,
+  inspectorBrowserTabGlobeEmptyIconClass,
+  inspectorBrowserTabGlobeIconClass,
   inspectorSectionLabelClass,
   inspectorSectionLabelTextClass,
   inspectorTextLinkClass,
@@ -75,13 +78,6 @@ const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
   if (!value || typeof value !== "object") return false;
   return ("$$typeof" in (value as Record<string, unknown>))
     || ("render" in (value as Record<string, unknown>));
-};
-
-/** Use text/plain so Electron/Chromium reliably carries drag payload. */
-const dragTabPayload = (index: number) => `flowswitch-tab:${index}`;
-const parseTabDragPayload = (raw: string) => {
-  const m = /^flowswitch-tab:(\d+)$/.exec(String(raw || "").trim());
-  return m ? Number(m[1]) : NaN;
 };
 
 const associationBaseName = (p: string) => {
@@ -351,7 +347,10 @@ export function SelectedAppDetails({
   }, [selectedApp, pushSnackbar]);
 
   const handlePickCatalogLaunchExeOverride = useCallback(async () => {
-    if (!selectedApp || selectedApp.type !== "app") return;
+    if (
+      !selectedApp
+      || (selectedApp.type !== "app" && selectedApp.type !== "browser")
+    ) return;
     if (!window.electron?.pickCatalogLaunchExeOverride) {
       pushSnackbar("File picker is not available.", { variant: "error" });
       return;
@@ -378,7 +377,10 @@ export function SelectedAppDetails({
   }, [selectedApp, onCatalogLaunchExeChanged, pushSnackbar]);
 
   const handleClearCatalogLaunchExeOverride = useCallback(async () => {
-    if (!selectedApp || selectedApp.type !== "app") return;
+    if (
+      !selectedApp
+      || (selectedApp.type !== "app" && selectedApp.type !== "browser")
+    ) return;
     if (!window.electron?.clearCatalogLaunchExeOverride) {
       pushSnackbar("Clear override is not available.", { variant: "error" });
       return;
@@ -442,6 +444,14 @@ export function SelectedAppDetails({
 
   // Get current data
   const currentData = data;
+
+  const profileAppSuggestsWebBrowser =
+    type === "browser"
+    || inferIsWebBrowserFromInstalledApp({
+      name: data.name,
+      executablePath:
+        typeof data.executablePath === "string" ? data.executablePath : null,
+    });
 
   const installedAppTypeFieldId = `installed-app-library-type-${source}-${String(
     monitorId ?? "",
@@ -876,7 +886,7 @@ export function SelectedAppDetails({
             ) : null}
           </div>
 
-          {showInspectorTestLaunch || type === "app" ? (
+          {showInspectorTestLaunch || type === "app" || type === "browser" ? (
             <div className="flex min-w-0 flex-wrap items-center gap-2 rounded-lg border border-flow-border/45 bg-flow-bg-primary/[0.07] px-2.5 py-2">
               {showInspectorTestLaunch ? (
                 <button
@@ -891,7 +901,7 @@ export function SelectedAppDetails({
                   Test launch
                 </button>
               ) : null}
-              {type === "app" ? (
+              {(type === "app" || type === "browser") ? (
                 <>
                   <FlowTooltip label="Opens the Windows file picker to choose a different .exe. Confirm to save it for this catalog entry.">
                     <button
@@ -1083,13 +1093,7 @@ export function SelectedAppDetails({
 
   // Get browser tabs for this specific app/browser
   const getAppBrowserTabs = () => {
-    if (type !== 'browser' && !data.name?.toLowerCase().includes('chrome') && !data.name?.toLowerCase().includes('browser') && !data.name?.toLowerCase().includes('firefox') && !data.name?.toLowerCase().includes('safari') && !data.name?.toLowerCase().includes('edge')) {
-      return [];
-    }
-
-    const isBrowser = type === 'browser' || data.name?.toLowerCase().includes('chrome') || data.name?.toLowerCase().includes('browser') || data.name?.toLowerCase().includes('firefox') || data.name?.toLowerCase().includes('safari') || data.name?.toLowerCase().includes('edge');
-    
-    if (!isBrowser) return [];
+    if (!profileAppSuggestsWebBrowser) return [];
 
     // Get tabs for this specific browser app
     if (source === 'monitor' && monitorId) {
@@ -1128,9 +1132,7 @@ export function SelectedAppDetails({
 
     if (contentType === 'link') {
       // Add as browser tab if this is a browser app
-      const isBrowser = type === 'browser' || data.name?.toLowerCase().includes('chrome') || data.name?.toLowerCase().includes('browser') || data.name?.toLowerCase().includes('firefox') || data.name?.toLowerCase().includes('safari') || data.name?.toLowerCase().includes('edge');
-      
-      if (isBrowser) {
+      if (profileAppSuggestsWebBrowser) {
         if (source === 'monitor' && onAddBrowserTab) {
           // For monitor apps, add to global browserTabs array
           const newTab = {
@@ -1233,48 +1235,6 @@ export function SelectedAppDetails({
     const currentFiles = currentData.associatedFiles || [];
     const updatedFiles = currentFiles.filter((_: any, index: number) => index !== fileIndex);
     onUpdateAssociatedFiles(updatedFiles);
-  };
-
-  const tabMatchesThisApp = (t: {
-    monitorId?: string;
-    browser?: string;
-    appInstanceId?: string;
-  }) => (
-    source === "monitor"
-    && Boolean(monitorId)
-    && t.monitorId === monitorId
-    && t.browser === data.name
-    && t.appInstanceId === data.instanceId
-  );
-
-  const reorderBrowserTabs = (fromIndex: number, toIndex: number) => {
-    if (fromIndex === toIndex) return;
-    if (source === "monitor" && onUpdateBrowserTabs) {
-      const mineInOrder = browserTabs.filter(tabMatchesThisApp);
-      if (
-        fromIndex < 0
-        || toIndex < 0
-        || fromIndex >= mineInOrder.length
-        || toIndex >= mineInOrder.length
-      ) return;
-      const reordered = [...mineInOrder];
-      const [item] = reordered.splice(fromIndex, 1);
-      reordered.splice(toIndex, 0, item);
-      let i = 0;
-      const newGlobal = browserTabs.map((t) => (tabMatchesThisApp(t) ? reordered[i++] : t));
-      onUpdateBrowserTabs(newGlobal);
-    } else if (source === "minimized" && onUpdateApp) {
-      const tabs = [...(data.browserTabs || [])];
-      if (
-        fromIndex < 0
-        || toIndex < 0
-        || fromIndex >= tabs.length
-        || toIndex >= tabs.length
-      ) return;
-      const [item] = tabs.splice(fromIndex, 1);
-      tabs.splice(toIndex, 0, item);
-      onUpdateApp({ browserTabs: tabs });
-    }
   };
 
   const associatedRowDisplayName = (file: any) => {
@@ -1421,7 +1381,6 @@ export function SelectedAppDetails({
         </div>
       );
     }
-    const isBrowser = type === 'browser' || data.name?.toLowerCase().includes('chrome') || data.name?.toLowerCase().includes('browser') || data.name?.toLowerCase().includes('firefox') || data.name?.toLowerCase().includes('safari') || data.name?.toLowerCase().includes('edge');
     const appBrowserTabs = getAppBrowserTabs();
 
     const assocLimits = getAssociatedContentLimitsForHost(data.name);
@@ -1474,7 +1433,7 @@ export function SelectedAppDetails({
         </div>
 
         {/* Browser Tabs (for browser apps) */}
-        {isBrowser && (
+        {profileAppSuggestsWebBrowser && (
           <div className="max-h-48 shrink-0 overflow-hidden">
             <div className="mb-3 flex min-w-0 items-center justify-between gap-2">
               <span className={`${inspectorSectionLabelTextClass} min-w-0`}>
@@ -1490,50 +1449,31 @@ export function SelectedAppDetails({
                 {appBrowserTabs.map((tab: any, index: number) => (
                   <div
                     key={tab.id || `tab-${index}-${tab.url}`}
-                    onDragOver={(e) => {
-                      e.preventDefault();
-                      e.dataTransfer.dropEffect = "move";
-                    }}
-                    onDrop={(e) => {
-                      e.preventDefault();
-                      const from = parseTabDragPayload(e.dataTransfer.getData("text/plain"));
-                      if (Number.isNaN(from)) return;
-                      reorderBrowserTabs(from, index);
-                    }}
                     className="group flex min-w-0 items-center gap-2 rounded-lg border border-flow-border bg-flow-surface p-3"
                   >
-                    <FlowTooltip label="Drag to reorder">
-                      <span
-                        draggable
-                        onDragStart={(e) => {
-                          e.stopPropagation();
-                          e.dataTransfer.setData("text/plain", dragTabPayload(index));
-                          e.dataTransfer.effectAllowed = "move";
-                        }}
-                        className="shrink-0 cursor-grab touch-none text-flow-text-muted active:cursor-grabbing"
-                        aria-hidden
-                      >
-                        <GripVertical className="h-4 w-4" />
-                      </span>
-                    </FlowTooltip>
-                    <Globe className="h-4 w-4 shrink-0 text-flow-text-muted" />
+                    <Globe
+                      className={inspectorBrowserTabGlobeIconClass}
+                      strokeWidth={inspectorBrowserLinkGlobeStrokeWidth}
+                      aria-hidden
+                    />
                     <div className="min-w-0 flex-1">
                       <div className="text-sm font-medium text-flow-text-primary truncate">{tab.name}</div>
                       <div className="text-xs text-flow-text-muted truncate">{tab.url}</div>
                     </div>
                     <div className="flex shrink-0 items-center gap-1">
-                      {tab.isActive && <div className="h-2 w-2 shrink-0 rounded-full bg-flow-accent-blue" />}
                       <button
                         type="button"
                         onClick={() => window.open(tab.url, "_blank", "noopener,noreferrer")}
                         className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-blue opacity-0 group-hover:opacity-100"
+                        title="Open in new tab"
                       >
                         <ExternalLink className="h-3 w-3" />
                       </button>
                       <button
                         type="button"
                         onClick={() => removeBrowserTab(index)}
-                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-red opacity-0 group-hover:opacity-100"
+                        className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-red"
+                        title="Remove tab"
                       >
                         <Trash2 className="h-3 w-3" />
                       </button>
@@ -1543,7 +1483,11 @@ export function SelectedAppDetails({
               </div>
             ) : (
               <div className="p-6 text-center bg-flow-surface rounded-lg border border-flow-border">
-                <Globe className="w-8 h-8 text-flow-text-muted mx-auto mb-2" />
+                <Globe
+                  className={inspectorBrowserTabGlobeEmptyIconClass}
+                  strokeWidth={inspectorBrowserLinkGlobeStrokeWidth}
+                  aria-hidden
+                />
                 <p className="text-sm text-flow-text-muted">No tabs configured</p>
                 <p className="text-xs text-flow-text-muted mt-1">Paste URLs above to add browser tabs</p>
               </div>
@@ -1551,11 +1495,11 @@ export function SelectedAppDetails({
           </div>
         )}
 
-        {/* Associated Content (fills remaining tab height) */}
+        {/* Files section (fills remaining tab height) */}
         <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
           <div className="grid min-w-0 shrink-0 grid-cols-1 gap-x-2 gap-y-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
             <span className={`${inspectorSectionLabelTextClass} min-w-0`}>
-              Associated content
+              Files
             </span>
             {onUpdateAssociatedFiles && hasDesktopPicker ? (
               <div
@@ -1648,7 +1592,7 @@ export function SelectedAppDetails({
                       type="button"
                       onClick={() => removeAssociatedFile(index)}
                       className="shrink-0 rounded-lg p-1.5 text-flow-text-muted transition-colors hover:text-flow-accent-red"
-                      title="Remove associated content"
+                      title="Remove file"
                     >
                       <Trash2 className="h-3 w-3" />
                     </button>
@@ -1659,7 +1603,7 @@ export function SelectedAppDetails({
           ) : (
             <div className="flex min-h-0 flex-1 flex-col items-center justify-center rounded-lg border border-flow-border bg-flow-surface p-6 text-center">
               <FileText className="mx-auto mb-2 h-8 w-8 text-flow-text-muted" />
-              <p className="text-sm text-flow-text-muted">No associated content for this app</p>
+              <p className="text-sm text-flow-text-muted">No files attached to this app</p>
               <p className="mt-1 text-xs text-flow-text-muted">
                 Use Add → files or folder (same as Content sidebar), or paste a path or URL above.
               </p>

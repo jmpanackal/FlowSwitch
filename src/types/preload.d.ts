@@ -17,6 +17,20 @@ declare global {
         ok: boolean;
         started?: boolean;
         error?: string;
+        /** Stable machine code when `ok` is false (e.g. `LAUNCH_TOO_LARGE`, `LAUNCH_NOTHING_TO_RUN`). */
+        code?: string;
+        details?: {
+          totalUnits?: number;
+          breakdown?: {
+            dedupedAppLaunches?: number;
+            dedupedBrowserTabs?: number;
+          };
+          limits?: { softWarn?: number; hardMax?: number };
+          skippedLaunchTargets?: {
+            count: number;
+            sample: Array<{ name: string; reason: string }>;
+          };
+        };
         runId?: string;
         replacedRunId?: string | null;
         storeErrorCode?: string;
@@ -65,6 +79,31 @@ declare global {
         profileId: string,
         runId: string,
       ) => Promise<{ ok: boolean; error?: string; reason?: string }>;
+      getProfileLaunchWeight?: (
+        profileId: string,
+        request?: { excludedProfileMonitorIds?: string[] },
+      ) => Promise<{
+        ok: boolean;
+        error?: string;
+        code?: string;
+        totalUnits?: number;
+        breakdown?: {
+          dedupedAppLaunches?: number;
+          dedupedBrowserTabs?: number;
+        };
+        limits?: { softWarn?: number; hardMax?: number };
+        skippedLaunchTargets?: {
+          count: number;
+          sample: Array<{ name: string; reason: string }>;
+        };
+        preflight?: {
+          layoutAppSlots: number;
+          launchableAppLaunches: number;
+          missingLaunchTargetSkips: number;
+          dedupedBrowserTabs: number;
+        };
+      }>;
+
       getLaunchProfileStatus: (profileId: string) => Promise<{
         ok: boolean;
         error?: string;

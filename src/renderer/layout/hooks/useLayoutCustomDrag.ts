@@ -31,6 +31,7 @@ import { resolveDropTargetFromEventStack } from "../utils/layoutHitTesting";
 import type { ContentFolder } from "../components/ContentManager";
 import type { InstalledApp } from "../../hooks/useInstalledApps";
 import { resolveHostExecutableForCatalogLabel } from "../utils/catalogHostResolve";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 /** Sidebar drag-drop for library folders (wired from MainLayout; uses global `contentLibrary`). */
 export type LibraryFolderPlacementActions = {
@@ -205,13 +206,13 @@ export function useLayoutCustomDrag({
           const targetApp = monitor?.apps[appIndex];
 
           const isLink = dragData.contentType === "link" || (dragData.type === "content" && dragData.url);
-          const isBrowserApp = targetApp && (
-            targetApp.name?.toLowerCase().includes("chrome")
-            || targetApp.name?.toLowerCase().includes("browser")
-            || targetApp.name?.toLowerCase().includes("firefox")
-            || targetApp.name?.toLowerCase().includes("safari")
-            || targetApp.name?.toLowerCase().includes("edge")
-          );
+          const isBrowserApp = Boolean(targetApp) && inferIsWebBrowserFromInstalledApp({
+            name: targetApp.name,
+            executablePath:
+              typeof targetApp.executablePath === "string"
+                ? targetApp.executablePath
+                : null,
+          });
 
           if (isLink && isBrowserApp) {
             console.log("🌐 ADDING LINK AS BROWSER TAB TO EXISTING BROWSER:", {

@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Globe, X, Copy, Bookmark, Plus, MoreVertical, ExternalLink, Monitor, Minimize2, Maximize2 } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 interface BrowserTab {
   name: string;
@@ -20,6 +21,7 @@ interface MinimizedApp {
   launchBehavior?: 'new' | 'focus' | 'minimize';
   targetMonitor?: string;
   browserTabs?: { name: string; url: string; isActive: boolean }[];
+  executablePath?: string | null;
 }
 
 interface BrowserTabsProps {
@@ -38,6 +40,7 @@ interface BrowserTabsProps {
       icon: any;
       color: string;
       monitorId?: string;
+      executablePath?: string | null;
     }>;
   }>;
 }
@@ -75,11 +78,11 @@ export function BrowserTabs({
     // Add browser apps from monitors
     monitors.forEach((monitor, monitorIndex) => {
       monitor.apps?.forEach((app, appIndex) => {
-        const isBrowser = app.name.toLowerCase().includes('chrome') || 
-                         app.name.toLowerCase().includes('browser') ||
-                         app.name.toLowerCase().includes('firefox') ||
-                         app.name.toLowerCase().includes('safari') ||
-                         app.name.toLowerCase().includes('edge');
+        const isBrowser = inferIsWebBrowserFromInstalledApp({
+          name: app.name,
+          executablePath:
+            typeof app.executablePath === "string" ? app.executablePath : null,
+        });
         
         if (isBrowser) {
           const browserKey = `${monitor.id}-${app.name}`;
@@ -114,11 +117,11 @@ export function BrowserTabs({
 
     // Add browser apps from minimized apps
     minimizedApps.forEach((app, index) => {
-      const isBrowser = app.name.toLowerCase().includes('chrome') || 
-                       app.name.toLowerCase().includes('browser') ||
-                       app.name.toLowerCase().includes('firefox') ||
-                       app.name.toLowerCase().includes('safari') ||
-                       app.name.toLowerCase().includes('edge');
+      const isBrowser = inferIsWebBrowserFromInstalledApp({
+        name: app.name,
+        executablePath:
+          typeof app.executablePath === "string" ? app.executablePath : null,
+      });
       
       if (isBrowser) {
         const monitor = monitors.find(m => m.id === app.targetMonitor);
@@ -359,9 +362,6 @@ export function BrowserTabs({
                             <div className="text-xs text-flow-text-muted truncate">{tab.url}</div>
                           )}
                         </div>
-                        {isActive && (
-                          <div className="w-2 h-2 bg-flow-accent-blue rounded-full flex-shrink-0" />
-                        )}
                         {tab.newWindow && (
                           <ExternalLink className="w-3 h-3 text-flow-text-muted flex-shrink-0" />
                         )}

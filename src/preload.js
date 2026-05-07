@@ -6,6 +6,11 @@ contextBridge.exposeInMainWorld('electron', {
   // Launch profile actions in main process (apps + tabs)
   launchProfile: (profileId, options) => ipcRenderer.invoke('launch-profile', profileId, options || {}),
 
+  /** Same launch weight as main uses for guardrails; read-only, does not start a run. */
+  getProfileLaunchWeight: (profileId, request) => (
+    ipcRenderer.invoke('profile-launch-weight', profileId, request || {})
+  ),
+
   /** Main → renderer when a profile launch run starts (any origin). */
   subscribeProfileLaunchStarted: (callback) => {
     const channel = 'profile-launch-started';

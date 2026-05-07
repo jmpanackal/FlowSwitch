@@ -14,6 +14,16 @@ export const FLOW_PROFILE_KINDS = [
 
 export type FlowProfileKind = (typeof FLOW_PROFILE_KINDS)[number];
 
+/** How saved browser tab rows map to launch actions (see Profile → Behavior). */
+export const BROWSER_TAB_LAUNCH_DEDUPE_MODES = ["by_url_and_app", "each_saved_row"] as const;
+export type BrowserTabLaunchDedupeMode = (typeof BROWSER_TAB_LAUNCH_DEDUPE_MODES)[number];
+
+export function normalizeBrowserTabLaunchDedupeMode(value: unknown): BrowserTabLaunchDedupeMode {
+  const s = String(value || "").trim();
+  if (s === "each_saved_row") return "each_saved_row";
+  return "by_url_and_app";
+}
+
 export const FLOW_PROFILE_KIND_LABELS: Record<FlowProfileKind, string> = {
   general: "General",
   work: "Work",
@@ -142,6 +152,11 @@ export type FlowProfile = {
   /** Ordered list of app ids (instanceId/name) for sequential launch. */
   appLaunchOrder: string[];
   appLaunchDelays: Record<string, number>;
+  /**
+   * `by_url_and_app` (default): one launch per normalized URL + browser + app tile.
+   * `each_saved_row`: every saved tab row opens separately (duplicate URLs allowed).
+   */
+  browserTabLaunchDedupe: BrowserTabLaunchDedupeMode;
   monitors: any[];
   minimizedApps: any[];
   minimizedFiles: any[];
@@ -250,6 +265,7 @@ export function normalizeFlowProfile(rawProfile: unknown): FlowProfile {
     // Sequential is the only implemented execution mode right now.
     // Treat any legacy/all-at-once values as sequential until implemented.
     launchOrder: "sequential",
+    browserTabLaunchDedupe: normalizeBrowserTabLaunchDedupeMode(r?.browserTabLaunchDedupe),
     appLaunchOrder: Array.isArray(r?.appLaunchOrder)
       ? (r.appLaunchOrder as unknown[]).map((v) => String(v || "").trim()).filter(Boolean)
       : [],

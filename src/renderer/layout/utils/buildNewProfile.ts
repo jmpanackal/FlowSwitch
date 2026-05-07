@@ -352,6 +352,7 @@ export function buildEmptyFlowProfile(args: {
     launchOrder: "sequential",
     appLaunchOrder: [],
     appLaunchDelays: {},
+    browserTabLaunchDedupe: "by_url_and_app",
     monitors: sourceMonitors.map((monitor, monitorIndex) => ({
       id: monitor.id,
       name: monitor.name,
@@ -429,6 +430,7 @@ export function buildMemoryFlowProfileFromCapture(
     launchOrder: "sequential",
     appLaunchOrder: [],
     appLaunchDelays: {},
+    browserTabLaunchDedupe: "by_url_and_app",
     monitors: orderedMonitors.map((monitor) => ({
       id: monitor.id,
       name: monitor.name,
