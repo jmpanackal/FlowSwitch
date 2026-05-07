@@ -9,6 +9,10 @@ import { LaunchControl } from "./components/LaunchControl";
 import { TitleBarAppMenu } from "./components/TitleBarAppMenu";
 import { TitleBarSidebarToggleIcon } from "./components/TitleBarSidebarToggleIcons";
 import { AppChromeModals } from "./components/AppChromeModals";
+import {
+  LargeProfileLaunchConfirm,
+  type LargeProfileLaunchConfirmPayload,
+} from "./components/LargeProfileLaunchConfirm";
 import { ProfileHeaderSettingsButton } from "./components/ProfileHeaderSettingsButton";
 import { ProfileHeaderMetaChips } from "./components/ProfileHeaderMetaChips";
 import { NewProfileMenu } from "./components/NewProfileMenu";
@@ -83,6 +87,7 @@ import {
   resolveInstalledAppLibraryCategory,
   installedAppCategoryOverrideLookupKeys,
 } from "../utils/installedAppLibraryCategory";
+import { inferIsWebBrowserFromInstalledApp } from "../utils/installedWebBrowserInference";
 import type { FlowProfile, FlowProfileKind, ProfileSavePayload } from "../../types/flow-profile";
 import {
   FLOW_PROFILE_KINDS,
@@ -217,6 +222,23 @@ export default function App() {
   const [launchCancelPending, setLaunchCancelPending] = useState(false);
   const expectedLaunchRunIdRef = useRef<string | null>(null);
   const expectedLaunchProfileIdRef = useRef<string | null>(null);
+  const largeLaunchResolveRef = useRef<((confirmed: boolean) => void) | null>(null);
+  const [largeLaunchModal, setLargeLaunchModal] =
+    useState<LargeProfileLaunchConfirmPayload | null>(null);
+
+  const settleLargeLaunchModal = useCallback((confirmed: boolean) => {
+    const r = largeLaunchResolveRef.current;
+    largeLaunchResolveRef.current = null;
+    setLargeLaunchModal(null);
+    r?.(confirmed);
+  }, []);
+
+  const confirmLargeLaunch = useCallback(async (payload: LargeProfileLaunchConfirmPayload) => {
+    return await new Promise<boolean>((resolve) => {
+      largeLaunchResolveRef.current = resolve;
+      setLargeLaunchModal(payload);
+    });
+  }, []);
 
   const launchRunProgressRunId = lastLaunchProgress?.runId?.trim() ?? "";
   const launchRunIdsMismatched =
@@ -878,6 +900,7 @@ export default function App() {
     setIsLaunching,
     setLaunchFeedback,
     launchFeedbackTimeoutRef,
+    confirmLargeLaunch,
     onLaunchPreparing: (profileId) => {
       expectedLaunchProfileIdRef.current = profileId;
       expectedLaunchRunIdRef.current = null;
@@ -1064,12 +1087,13 @@ export default function App() {
       setOpenLibraryFolderId(null);
 
       // Determine if this is a browser app
-      const isBrowser =
-        appData.name?.toLowerCase().includes("chrome") ||
-        appData.name?.toLowerCase().includes("browser") ||
-        appData.name?.toLowerCase().includes("firefox") ||
-        appData.name?.toLowerCase().includes("safari") ||
-        appData.name?.toLowerCase().includes("edge");
+      const isBrowser = inferIsWebBrowserFromInstalledApp({
+        name: appData.name,
+        executablePath:
+          typeof appData.executablePath === "string"
+            ? appData.executablePath
+            : null,
+      });
 
       // Get fresh app data with current browser tabs
       const freshAppData = { ...appData };
@@ -1139,13 +1163,11 @@ export default function App() {
       setLibrarySelection(null);
       setOpenLibraryFolderId(null);
 
-      const nameLc = app.name?.toLowerCase() || "";
-      const isBrowser =
-        nameLc.includes("chrome")
-        || nameLc.includes("browser")
-        || nameLc.includes("firefox")
-        || nameLc.includes("safari")
-        || nameLc.includes("edge");
+      const isBrowser = inferIsWebBrowserFromInstalledApp({
+        name: app.name,
+        executablePath:
+          typeof app.executablePath === "string" ? app.executablePath : null,
+      });
 
       setSelectedApp({
         type: isBrowser ? "browser" : "app",
@@ -1330,20 +1352,13 @@ export default function App() {
         );
 
         // Refresh browser tabs if this is a browser app
-        const isBrowser =
-          selectedApp.data.name
-            ?.toLowerCase()
-            .includes("chrome") ||
-          selectedApp.data.name
-            ?.toLowerCase()
-            .includes("browser") ||
-          selectedApp.data.name
-            ?.toLowerCase()
-            .includes("firefox") ||
-          selectedApp.data.name
-            ?.toLowerCase()
-            .includes("safari") ||
-          selectedApp.data.name?.toLowerCase().includes("edge");
+        const isBrowser = inferIsWebBrowserFromInstalledApp({
+          name: selectedApp.data.name,
+          executablePath:
+            typeof selectedApp.data.executablePath === "string"
+              ? selectedApp.data.executablePath
+              : null,
+        });
 
         const updatedData = { ...selectedApp.data, ...updates };
 
@@ -2678,7 +2693,7 @@ export default function App() {
             <div className="flex items-center justify-between gap-2 border-b border-flow-border px-3 py-2">
               <div
                 role="tablist"
-                aria-label="Inspector: selection details or launch progress"
+                aria-label="Inspector: selection details or Launch"
                 className="inline-flex max-w-full shrink-0 flex-nowrap items-stretch gap-px rounded-[10px] border border-white/[0.12] bg-black/40 p-0.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.06)] backdrop-blur-sm"
               >
                 <FlowTooltip
@@ -2686,7 +2701,7 @@ export default function App() {
                   delayDuration={380}
                   label={
                     "Placement, paths, and per-app Launch settings for your selection.\n"
-                    + "Live profile launch timeline is on Progress—not this tab."
+                    + "Live profile launch timeline is on Launch—not this tab."
                   }
                 >
                   <button
@@ -2722,7 +2737,7 @@ export default function App() {
                     role="tab"
                     aria-selected={inspectorMode === "launch"}
                     onClick={() => setInspectorMode("launch")}
-                    aria-label="Progress: live launch status for the active or last profile run"
+                    aria-label="Launch: live launch status for the active or last profile run"
                     className={`relative ${FLOW_INSPECTOR_MODE_TAB_BASE} ${
                       inspectorMode === "launch"
                         ? FLOW_INSPECTOR_MODE_TAB_SELECTED
@@ -2734,7 +2749,7 @@ export default function App() {
                       strokeWidth={2}
                       aria-hidden
                     />
-                    Progress
+                    Launch
                     {isLaunching || launchFeedback.status !== "idle" || lastLaunchProgress ? (
                       <span
                         className="absolute -right-0.5 -top-0.5 h-2 w-2 rounded-full bg-flow-accent-blue ring-2 ring-flow-bg-secondary"
@@ -2962,6 +2977,15 @@ export default function App() {
           <p className="text-sm text-flow-text-secondary">Loading profiles…</p>
         </div>
       )}
+
+      {largeLaunchModal ? (
+        <LargeProfileLaunchConfirm
+          isOpen
+          {...largeLaunchModal}
+          onCancel={() => settleLargeLaunchModal(false)}
+          onConfirm={() => settleLargeLaunchModal(true)}
+        />
+      ) : null}
 
       <AppChromeModals
         preferencesOpen={appChromeModal === "preferences"}

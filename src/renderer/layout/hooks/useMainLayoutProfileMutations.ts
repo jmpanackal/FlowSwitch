@@ -21,6 +21,7 @@ import {
   snapZoneForApp,
 } from "../utils/monitorLayoutStacking";
 import { getSnapZonesForMonitor } from "../utils/monitorSnapZones";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 function buildAppsWithMergedInsert(
   apps: any[],
@@ -481,12 +482,13 @@ export function useMainLayoutProfileMutations({
         const appToMove = monitor.apps[appIndex];
 
         // Check if this is a browser app
-        const isBrowser =
-          appToMove.name.toLowerCase().includes("chrome") ||
-          appToMove.name.toLowerCase().includes("browser") ||
-          appToMove.name.toLowerCase().includes("firefox") ||
-          appToMove.name.toLowerCase().includes("safari") ||
-          appToMove.name.toLowerCase().includes("edge");
+        const isBrowser = inferIsWebBrowserFromInstalledApp({
+          name: appToMove.name,
+          executablePath:
+            typeof appToMove.executablePath === "string"
+              ? appToMove.executablePath
+              : null,
+        });
 
         // Collect associated browser tabs if this is a browser
         let associatedTabs: {
@@ -682,11 +684,13 @@ export function useMainLayoutProfileMutations({
         let updatedBrowserTabs = profile.browserTabs || [];
         for (const appToMove of appsToMove) {
           const isBrowser =
-            appToMove.name.toLowerCase().includes("chrome") ||
-            appToMove.name.toLowerCase().includes("browser") ||
-            appToMove.name.toLowerCase().includes("firefox") ||
-            appToMove.name.toLowerCase().includes("safari") ||
-            appToMove.name.toLowerCase().includes("edge");
+            inferIsWebBrowserFromInstalledApp({
+              name: appToMove.name,
+              executablePath:
+                typeof appToMove.executablePath === "string"
+                  ? appToMove.executablePath
+                  : null,
+            });
           if (!isBrowser) continue;
           updatedBrowserTabs = updatedBrowserTabs.map((tab) => {
             if (
@@ -998,19 +1002,13 @@ export function useMainLayoutProfileMutations({
       selectedApp.monitorId
     ) {
       const isBrowser =
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("chrome") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("browser") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("firefox") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("safari") ||
-        selectedApp.data.name?.toLowerCase().includes("edge");
+        inferIsWebBrowserFromInstalledApp({
+          name: selectedApp.data.name,
+          executablePath:
+            typeof selectedApp.data.executablePath === "string"
+              ? selectedApp.data.executablePath
+              : null,
+        });
 
       if (isBrowser) {
         // NEW: Use instance ID for precise matching
@@ -1063,19 +1061,13 @@ export function useMainLayoutProfileMutations({
       selectedApp.monitorId === tab.monitorId
     ) {
       const isBrowser =
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("chrome") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("browser") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("firefox") ||
-        selectedApp.data.name
-          ?.toLowerCase()
-          .includes("safari") ||
-        selectedApp.data.name?.toLowerCase().includes("edge");
+        inferIsWebBrowserFromInstalledApp({
+          name: selectedApp.data.name,
+          executablePath:
+            typeof selectedApp.data.executablePath === "string"
+              ? selectedApp.data.executablePath
+              : null,
+        });
 
       // NEW: Match both browser name AND instance ID
       if (

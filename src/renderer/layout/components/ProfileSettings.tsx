@@ -1,5 +1,5 @@
 import { useState, useEffect, useLayoutEffect, useMemo, useCallback, useRef, useId } from "react";
-import { X, User, Settings, Zap, Volume2, VolumeX, Clock, Minimize2, Maximize2, RotateCcw, Play, ArrowRight, AlertTriangle, Sparkles, Monitor, Copy, Trash2, Ban, HelpCircle, ChevronUp, ChevronDown, ChevronRight, Download, RefreshCw, Upload, Image } from "lucide-react";
+import { X, User, Settings, Zap, Volume2, VolumeX, Clock, Minimize2, Maximize2, RotateCcw, Play, ArrowRight, AlertTriangle, Sparkles, Monitor, Copy, Trash2, Ban, HelpCircle, ChevronUp, ChevronDown, ChevronRight, Download, RefreshCw, Upload, Image, Globe, ListTree } from "lucide-react";
 import { DeleteConfirmation } from "./profile-settings/DeleteConfirmation";
 import { Switch } from "./ui/switch";
 import { Checkbox } from "./ui/checkbox";
@@ -10,12 +10,13 @@ import { HotkeyRecorderField } from "./HotkeyRecorderField";
 import { FlowTooltip } from "./ui/tooltip";
 import { safeIconSrc } from "../../utils/safeIconSrc";
 import { profileAppPlacementKey } from "../../utils/profileAppPlacementKey";
-import type { FlowProfileKind } from "../../../types/flow-profile";
+import type { BrowserTabLaunchDedupeMode, FlowProfileKind } from "../../../types/flow-profile";
 import {
   FLOW_PROFILE_KINDS,
   FLOW_PROFILE_KIND_LABELS,
   FLOW_PROFILE_VISUAL_ICON_IDS,
   FLOW_PROFILE_VISUAL_ICON_LABELS,
+  normalizeBrowserTabLaunchDedupeMode,
   normalizeProfileKind,
   normalizeProfileVisualIcon,
   normalizeStoredProfileIcon,
@@ -59,6 +60,7 @@ interface ProfileSettingsProps {
     launchOrder?: 'all-at-once' | 'sequential';
     appLaunchOrder?: string[];
     appLaunchDelays?: Record<string, number>;
+    browserTabLaunchDedupe?: BrowserTabLaunchDedupeMode;
     monitors?: any[];
     minimizedApps?: any[];
   } | null;
@@ -212,7 +214,10 @@ function ProfileSettingsInner({
   const [launchOrder, setLaunchOrder] = useState<'all-at-once' | 'sequential'>('sequential');
   const [appLaunchOrder, setAppLaunchOrder] = useState<string[]>([]);
   const [appLaunchDelays, setAppLaunchDelays] = useState<Record<string, number>>({});
-  
+  const [browserTabLaunchDedupe, setBrowserTabLaunchDedupe] = useState<BrowserTabLaunchDedupeMode>(
+    "by_url_and_app",
+  );
+
   // App-specific volume settings
   const [appVolumes, setAppVolumes] = useState<Record<string, number>>({});
   const [applyProfileVolumesOnLaunch, setApplyProfileVolumesOnLaunch] = useState(false);
@@ -307,6 +312,9 @@ function ProfileSettingsInner({
       setLaunchMaximized(profile.launchMaximized || false);
       setLaunchOrder('sequential');
       setAppLaunchDelays(profile.appLaunchDelays || {});
+      setBrowserTabLaunchDedupe(normalizeBrowserTabLaunchDedupeMode(
+        (profile as { browserTabLaunchDedupe?: string }).browserTabLaunchDedupe,
+      ));
       // Applying volumes on launch is not implemented yet; keep UI aligned with current behavior.
       setApplyProfileVolumesOnLaunch(false);
       const currentAppIds = getAllApps().map((app) => String(app.instanceId || app.name)).filter(Boolean);
@@ -464,6 +472,7 @@ function ProfileSettingsInner({
       launchOrder,
       appLaunchOrder,
       appLaunchDelays,
+      browserTabLaunchDedupe,
       ...buildVolumeProfilePayload(),
     }),
     [
@@ -485,6 +494,7 @@ function ProfileSettingsInner({
       launchOrder,
       appLaunchOrder,
       appLaunchDelays,
+      browserTabLaunchDedupe,
       buildVolumeProfilePayload,
     ],
   );
@@ -1398,6 +1408,59 @@ function ProfileSettingsInner({
                     })}
                   </div>
                 </div>
+              </div>
+            </div>
+
+            {/* Browser tabs & links */}
+            <div className="rounded-xl border border-flow-border bg-flow-surface p-4">
+              <div className="mb-4 flex items-center gap-3">
+                <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-sky-500/30 bg-sky-500/15">
+                  <Globe className="h-4 w-4 text-sky-300" />
+                </div>
+                <div>
+                  <h3 className="font-medium text-flow-text-primary">Browser tabs &amp; links</h3>
+                  <p className="text-xs text-flow-text-muted">
+                    Saved URLs on browser apps (and legacy profile links). Does not change file or folder content.
+                  </p>
+                </div>
+              </div>
+              <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
+                <button
+                  type="button"
+                  onClick={() => setBrowserTabLaunchDedupe("by_url_and_app")}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all ${
+                    browserTabLaunchDedupe === "by_url_and_app"
+                      ? "border-flow-accent-blue bg-flow-accent-blue/10 text-flow-accent-blue"
+                      : "border-flow-border bg-flow-bg-secondary text-flow-text-secondary hover:bg-flow-surface-elevated"
+                  }`}
+                >
+                  <Globe className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">Open once per URL</div>
+                    <div className="text-xs opacity-80">
+                      Same normalized URL + browser app opens a single tab (default). Duplicates in the list are
+                      skipped at launch.
+                    </div>
+                  </div>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setBrowserTabLaunchDedupe("each_saved_row")}
+                  className={`flex w-full items-start gap-3 rounded-lg border p-3 text-left transition-all ${
+                    browserTabLaunchDedupe === "each_saved_row"
+                      ? "border-flow-accent-blue bg-flow-accent-blue/10 text-flow-accent-blue"
+                      : "border-flow-border bg-flow-bg-secondary text-flow-text-secondary hover:bg-flow-surface-elevated"
+                  }`}
+                >
+                  <ListTree className="mt-0.5 h-4 w-4 shrink-0" />
+                  <div className="min-w-0 flex-1">
+                    <div className="text-sm font-medium">Open every saved row</div>
+                    <div className="text-xs opacity-80">
+                      Each row in your tab list launches separately, even when the URL matches another row. Launch
+                      order follows list order (reordering changes the sequence).
+                    </div>
+                  </div>
+                </button>
               </div>
             </div>
 

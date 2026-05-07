@@ -26,6 +26,7 @@ import {
   getBrowserIcon,
 } from "../utils/layoutDropPresentation";
 import { resolveHostExecutableForCatalogLabel } from "../utils/catalogHostResolve";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 // Enhanced content types for the unified system
 export interface ContentFolder {
@@ -112,10 +113,6 @@ interface ContentManagerProps {
 const CONTENT_SIDEBAR_COMPACT_HELP =
   "Click a row to set path and Opens with. Use ⋯ on a row for Add to layout or Remove from library. Drag the content icon to place precisely on the canvas.";
 
-const SIDEBAR_DRAG_BROWSER_NAMES = new Set(
-  ["Chrome", "Firefox", "Safari", "Edge"].map((s) => s.toLowerCase()),
-);
-
 function resolveInstalledCatalogIconPath(
   catalog: {
     name: string;
@@ -150,13 +147,11 @@ function renderOpensWithDragPreview(
   );
   const AppGlyph = getAppIcon(defaultApp);
   const BrowserGlyph = getBrowserIcon(defaultApp);
-  const tl = defaultApp.trim().toLowerCase();
-  const isLikelyBrowser =
-    SIDEBAR_DRAG_BROWSER_NAMES.has(tl)
-    || tl.includes("chrome")
-    || tl.includes("firefox")
-    || tl.includes("edge")
-    || tl.includes("safari");
+  const hostExe = resolveHostExecutableForCatalogLabel(catalog, defaultApp);
+  const isLikelyBrowser = inferIsWebBrowserFromInstalledApp({
+    name: defaultApp,
+    executablePath: hostExe,
+  });
   return (
     <div className="flex max-w-[240px] items-center gap-2">
       {raster ? (
@@ -355,14 +350,11 @@ export function ContentManager({
     if (raster) {
       return <img src={raster} alt="" className={`${className} rounded object-contain`} />;
     }
-    const tl = String(appName || "").trim().toLowerCase();
-    const isLikelyBrowser =
-      SIDEBAR_DRAG_BROWSER_NAMES.has(tl)
-      || tl.includes("chrome")
-      || tl.includes("firefox")
-      || tl.includes("edge")
-      || tl.includes("safari")
-      || tl.includes("browser");
+    const hostExe = resolveHostExecutableForCatalogLabel(installedAppsCatalog, appName);
+    const isLikelyBrowser = inferIsWebBrowserFromInstalledApp({
+      name: appName,
+      executablePath: hostExe,
+    });
     if (isLikelyBrowser) {
       const Glyph = getBrowserIcon(appName);
       return <Glyph className={className} style={{ color: getBrowserColor(appName) }} />;

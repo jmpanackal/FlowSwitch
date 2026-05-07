@@ -11,6 +11,7 @@ import {
   suspendDocumentTextSelection,
 } from "../utils/documentTextSelection";
 import { FlowTooltip } from "./ui/tooltip";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 const isRenderableIconComponent = (value: unknown): value is LucideIcon => {
   if (typeof value === "function") return true;
@@ -436,11 +437,11 @@ export function AppFileWindow({
     const app = item as AppItem;
     
     // Check if this is a browser app
-    const isBrowser = app.name?.toLowerCase().includes('chrome') || 
-                     app.name?.toLowerCase().includes('browser') ||
-                     app.name?.toLowerCase().includes('firefox') ||
-                     app.name?.toLowerCase().includes('safari') ||
-                     app.name?.toLowerCase().includes('edge');
+    const isBrowser = inferIsWebBrowserFromInstalledApp({
+      name: app.name,
+      executablePath:
+        typeof app.executablePath === "string" ? app.executablePath : null,
+    });
     
     // Get associated files
     const files = app.associatedFiles || [];

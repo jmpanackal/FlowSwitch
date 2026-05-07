@@ -3,6 +3,7 @@ const assert = require('node:assert/strict');
 
 const {
   isWithinAcceptableStateTolerance,
+  isWithinSalvagePlacementTolerance,
   planLaunchSlots,
   scoreReuseCandidate,
   shouldTriggerAmbiguityFallback,
@@ -224,6 +225,37 @@ test('isWithinAcceptableStateTolerance rejects maximized state with underfilled 
         height: 1080,
         state: 'maximized',
       },
+      onTargetMonitor: true,
+    }),
+    false,
+  );
+});
+
+test('isWithinSalvagePlacementTolerance accepts normal drift that strict tolerance rejects', () => {
+  assert.equal(
+    isWithinAcceptableStateTolerance({
+      actual: { left: 100, top: 100, width: 1100, height: 800 },
+      target: { left: 100, top: 100, width: 1280, height: 720, state: 'normal' },
+      onTargetMonitor: true,
+    }),
+    false,
+    'strict tolerance should reject large width delta',
+  );
+  assert.equal(
+    isWithinSalvagePlacementTolerance({
+      actual: { left: 100, top: 100, width: 1100, height: 800 },
+      target: { left: 100, top: 100, width: 1280, height: 720, state: 'normal' },
+      onTargetMonitor: true,
+    }),
+    true,
+  );
+});
+
+test('isWithinSalvagePlacementTolerance rejects tiny windows on target monitor', () => {
+  assert.equal(
+    isWithinSalvagePlacementTolerance({
+      actual: { left: 200, top: 200, width: 100, height: 70 },
+      target: { left: 100, top: 100, width: 1280, height: 720, state: 'normal' },
       onTargetMonitor: true,
     }),
     false,

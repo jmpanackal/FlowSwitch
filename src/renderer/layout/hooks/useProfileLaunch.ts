@@ -8,6 +8,7 @@ import {
 } from "react";
 import type { FlowProfile, ProfileSavePayload } from "../../../types/flow-profile";
 import type { LaunchFeedbackState } from "./useLaunchFeedback";
+import type { LargeProfileLaunchConfirmPayload } from "../components/LargeProfileLaunchConfirm";
 
 type UseProfileLaunchOptions = {
   profiles: FlowProfile[];
@@ -17,7 +18,12 @@ type UseProfileLaunchOptions = {
   setIsLaunching: Dispatch<SetStateAction<boolean>>;
   setLaunchFeedback: Dispatch<SetStateAction<LaunchFeedbackState>>;
   launchFeedbackTimeoutRef: MutableRefObject<number | null>;
-  /** Fired as soon as the user starts a launch (before save + IPC). Use to clear stale run ids. */
+  /**
+   * When main reports launch weight at or above the soft threshold, await this before
+   * calling `launchProfile`. Return false to cancel. Omit to skip the soft-warning step.
+   */
+  confirmLargeLaunch?: (payload: LargeProfileLaunchConfirmPayload) => Promise<boolean>;
+  /** Fired when launch is committed (after save, weight check, and optional soft confirm). */
   onLaunchPreparing?: (profileId: string) => void;
   onLaunchStarted?: (profileId: string, runId: string) => void;
   /** Called when a launch finishes successfully, with wall-clock seconds for this run. */
@@ -34,6 +40,7 @@ export function useProfileLaunch({
   setIsLaunching,
   setLaunchFeedback,
   launchFeedbackTimeoutRef,
+  confirmLargeLaunch,
   onLaunchPreparing,
   onLaunchStarted,
   onLaunchCompletedDuration,
@@ -145,10 +152,9 @@ export function useProfileLaunch({
       }
 
       setIsLaunching(true);
-      onLaunchPreparing?.(launchProfileId);
       setLaunchFeedback({
         status: "in-progress",
-        message: "Launching profile...",
+        message: "Preparing launch…",
         progress: null,
       });
 
@@ -182,6 +188,114 @@ export function useProfileLaunch({
           return;
         }
 
+        if (window.electron?.getProfileLaunchWeight) {
+          try {
+            const weightData = await window.electron.getProfileLaunchWeight(
+              launchProfileId,
+            );
+            if (
+              weightData?.ok
+              && typeof weightData.totalUnits === "number"
+              && weightData.limits
+            ) {
+              const { totalUnits, limits, breakdown } = weightData;
+              const hardMax = Number(limits.hardMax);
+              const softWarn = Number(limits.softWarn);
+              if (Number.isFinite(hardMax) && hardMax > 0 && totalUnits > hardMax) {
+                setLaunchFeedback({
+                  status: "error",
+                  message:
+                    `This profile exceeds the launch size limit (${totalUnits} units; max ${hardMax}). `
+                    + "Remove some apps or browser tabs, or split the profile.",
+                  progress: null,
+                });
+                setIsLaunching(false);
+                launchFeedbackTimeoutRef.current = window.setTimeout(() => {
+                  setLaunchFeedback({
+                    status: "idle",
+                    message: "",
+                    progress: null,
+                  });
+                  launchFeedbackTimeoutRef.current = null;
+                }, 7000);
+                return;
+              }
+              const apps = Number(breakdown?.dedupedAppLaunches ?? 0);
+              const tabs = Number(breakdown?.dedupedBrowserTabs ?? 0);
+              const skippedLaunchCount =
+                typeof weightData?.skippedLaunchTargets?.count === "number"
+                  ? weightData.skippedLaunchTargets.count
+                  : 0;
+              const skippedLaunchSample = Array.isArray(
+                weightData?.skippedLaunchTargets?.sample,
+              )
+                ? weightData.skippedLaunchTargets.sample
+                : [];
+              const preflight = weightData?.preflight as
+                | {
+                    layoutAppSlots?: number;
+                    missingLaunchTargetSkips?: number;
+                    launchableAppLaunches?: number;
+                  }
+                | undefined;
+              if (apps === 0 && tabs === 0) {
+                setLaunchFeedback({
+                  status: "error",
+                  message:
+                    "Nothing to launch: every app tile is missing a path or URL, and there are no browser tabs. "
+                    + "Fix paths in Inspect → Overview or add tabs.",
+                  progress: null,
+                });
+                setIsLaunching(false);
+                scheduleIdleReset();
+                return;
+              }
+              if (
+                confirmLargeLaunch
+                && Number.isFinite(softWarn)
+                && softWarn > 0
+                && totalUnits >= softWarn
+              ) {
+                const confirmed = await confirmLargeLaunch({
+                  profileName: String(currentProfile.name || "").trim() || "This profile",
+                  totalUnits,
+                  appCount: apps,
+                  tabCount: tabs,
+                  softWarn,
+                  hardMax,
+                  skippedLaunchCount,
+                  skippedLaunchSample,
+                  preflightLayoutAppSlots: preflight?.layoutAppSlots,
+                  preflightMissingLaunchTargets: preflight?.missingLaunchTargetSkips,
+                });
+                if (!confirmed) {
+                  setIsLaunching(false);
+                  setLaunchFeedback({
+                    status: "warning",
+                    message: "Launch cancelled.",
+                    progress: null,
+                  });
+                  scheduleIdleReset();
+                  return;
+                }
+              }
+            }
+          } catch (weightErr) {
+            console.warn("[launch] getProfileLaunchWeight failed:", weightErr);
+          }
+        }
+
+        if (pendingLaunchAbortRef.current) {
+          return;
+        }
+
+        onLaunchPreparing?.(launchProfileId);
+        setLaunchFeedback({
+          status: "in-progress",
+          message: "Launching profile…",
+          progress: null,
+        });
+
         const launchResult = await window.electron.launchProfile(
           launchProfileId,
           { fireAndForget: true, launchOrigin: "renderer" },
@@ -192,8 +306,29 @@ export function useProfileLaunch({
         }
 
         if (!launchResult?.ok) {
-          const errorMessage = launchResult?.error
+          let errorMessage = launchResult?.error
             || "Could not launch this profile. Check app executable paths in app details.";
+          if (
+            launchResult?.code === "LAUNCH_TOO_LARGE"
+            && launchResult?.details
+            && typeof launchResult.details === "object"
+          ) {
+            const d = launchResult.details as {
+              totalUnits?: number;
+              limits?: { hardMax?: number };
+            };
+            const total = d.totalUnits;
+            const max = d.limits?.hardMax;
+            if (typeof total === "number" && typeof max === "number") {
+              errorMessage =
+                `This profile exceeds the launch size limit (${total} units; max ${max}). `
+                + "Remove some apps or browser tabs, or split the profile.";
+            }
+          } else if (launchResult?.code === "LAUNCH_NOTHING_TO_RUN") {
+            errorMessage =
+              String(launchResult?.error || "").trim()
+              || "Nothing to launch: fix app paths or add browser tabs.";
+          }
           setLaunchFeedback({
             status: "error",
             message: errorMessage,
@@ -260,8 +395,10 @@ export function useProfileLaunch({
     setIsLaunching,
     setLaunchFeedback,
     launchFeedbackTimeoutRef,
+    confirmLargeLaunch,
     onLaunchPreparing,
     onLaunchStarted,
+    scheduleIdleReset,
   ]);
 
   return {

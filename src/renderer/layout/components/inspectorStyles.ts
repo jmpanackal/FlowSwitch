@@ -17,6 +17,23 @@ export const inspectorSectionLabelTextClass =
 /** Bottom margin for labels not wrapped in a `space-y-*` stack (e.g. Launch tab). */
 export const inspectorSectionLabelClass = `${inspectorSectionLabelTextClass} mb-2`;
 
+/**
+ * Lucide `Globe` for browser tab / URL rows — matches Launch timeline (`text-sky-300`, stroke {@link inspectorBrowserLinkGlobeStrokeWidth}).
+ */
+export const inspectorBrowserLinkGlobeStrokeWidth = 1.5;
+
+/** Inspect sidebar: saved browser tab rows (compact). */
+export const inspectorBrowserTabGlobeIconClass =
+  "h-4 w-4 shrink-0 text-sky-300";
+
+/** Launch timeline / summary primary column (slightly larger Globe). */
+export const inspectorBrowserTabGlobeIconMdClass =
+  "h-5 w-5 shrink-0 text-sky-300";
+
+/** Empty-state hero Globe in Browser tabs section. */
+export const inspectorBrowserTabGlobeEmptyIconClass =
+  "mx-auto mb-2 h-8 w-8 shrink-0 text-sky-300";
+
 /** Top rule + spacing before destructive-only block. */
 export const inspectorDangerZoneClass =
   "mt-4 border-t border-flow-border/50 pt-4";

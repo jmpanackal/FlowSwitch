@@ -168,6 +168,7 @@ Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
   - define soft threshold warning and hard threshold constraints
   - explain expected launch duration/risk before run
   - optional launch sequencing support for dependency-sensitive apps
+- **Status (2026-05-05):** Phases 1–2 implemented (`launch-weight-limits`, `computeLaunchWeight`, main `LAUNCH_TOO_LARGE`, renderer weight IPC + large-launch confirm). **Phase 3 slice:** skipped (non-launchable) app tiles from gather are included in weight IPC and the soft modal; same summary on hard-reject `details`. Full Phase 3 validation vertical + Phase 4 monitor re-weight + Phase 5 stall timeout remain per spec.
 - Merged inbox items: constraints for too many apps, profile launch order, Batch C “competing apps” guidance (soft warnings / copy where overlaps exist with singleton or resource-heavy launch patterns).
 - Done when: users are warned/protected before risky launches and can intentionally choose launch order.
 

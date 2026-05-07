@@ -8,6 +8,7 @@ import {
 import { Settings, Trash2, Move, Shield, Minimize2, File, Folder, Link } from "lucide-react";
 import { FlowTooltip } from "./ui/tooltip";
 import { LucideIcon } from "lucide-react";
+import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
 
 // Type guards for app types
 function isDiscoveredApp(app: any): app is { iconPath: string | null } {
@@ -37,6 +38,8 @@ interface AppWindowProps {
       associatedApp: string;
       useDefaultApp: boolean;
     }[];
+    executablePath?: string | null;
+    shortcutPath?: string | null;
   };
   appIndex: number;
   monitorId: string;
@@ -145,11 +148,11 @@ export function AppWindow({
   // FIXED: Content indicator with browser tabs and files combined
   const renderContentIndicator = () => {
     // Check if this is a browser app
-    const isBrowser = app.name?.toLowerCase().includes('chrome') || 
-                     app.name?.toLowerCase().includes('browser') ||
-                     app.name?.toLowerCase().includes('firefox') ||
-                     app.name?.toLowerCase().includes('safari') ||
-                     app.name?.toLowerCase().includes('edge');
+    const isBrowser = inferIsWebBrowserFromInstalledApp({
+      name: app.name,
+      executablePath:
+        typeof app.executablePath === "string" ? app.executablePath : null,
+    });
     
     // Get associated files
     const files = app.associatedFiles || [];

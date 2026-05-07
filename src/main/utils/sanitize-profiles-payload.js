@@ -31,6 +31,8 @@ const sanitizeProfilesPayload = (profiles) => {
       normalized.id = safeLimitedString(profile.id, MAX_PROFILE_ID_LENGTH);
       normalized.name = safeLimitedString(profile.name, MAX_PROFILE_NAME_LENGTH);
       normalized.icon = sanitizeProfileRootIcon(profile.icon);
+      const tabDedupe = String(profile.browserTabLaunchDedupe || '').trim();
+      normalized.browserTabLaunchDedupe = tabDedupe === 'each_saved_row' ? 'each_saved_row' : 'by_url_and_app';
       if (Array.isArray(profile.browserTabs)) {
         normalized.browserTabs = profile.browserTabs
           .map((tab) => {
