@@ -172,6 +172,12 @@ Canonical cross-doc snapshot lives in `docs/superpowers/unified-backlog.md`.
 - Merged inbox items: constraints for too many apps, profile launch order, Batch C “competing apps” guidance (soft warnings / copy where overlaps exist with singleton or resource-heavy launch patterns).
 - Done when: users are warned/protected before risky launches and can intentionally choose launch order.
 
+1. Profile store backup / recovery
+
+- Problem: a damaged primary `profiles.v1.json` prevents loading any profiles with no automatic fallback copy on disk.
+- **Status (2026-05-15):** `profiles.v1.json.bak` is updated before each successful save when the current primary parses; reads fall back to the backup when the primary is missing or invalid (`src/main/services/profile-store.js`).
+- Done when: typical corruption or partial writes do not leave users with only an empty library if a recent good snapshot exists.
+
 1. Critical layout-editor responsiveness and first-run shell clarity
 
 - Problem: fast repeated drag operations in the monitor layout editor can freeze the app; some users report a blurry UI on first launch—both damage trust before core workflows land.

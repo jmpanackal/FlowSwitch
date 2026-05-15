@@ -1,6 +1,6 @@
 # FlowSwitch Unified Backlog (Canonical)
 
-Last updated: 2026-05-05 (launch guardrails Phase 3 slice)  
+Last updated: 2026-05-15 (profile store backup + guardrails branch PR)  
 Owner: active implementation branch owner
 
 **Release note (marketing):** `package.json` / `website/` prepared for **0.1.4**. Live GitHub downloads require pushing annotated tag **`v0.1.4`** after merge and waiting for the release workflow to attach `FlowSwitch-0.1.4-win-x64-*.exe` assets matching `website/latest.json`.
@@ -154,3 +154,4 @@ Current focus phase: `Phase 2 - Reliability Hardening`
 - `MainLayout` renderer hygiene (2026-05-04): stray `console.log` removed from production paths (`chore/mainlayout-remove-debug-logs`).
 - Shell landmarks (2026-05-04): named root/header/nav/region/main/aside wrappers in `MainLayout` to reduce AX “whole sidebar as one name” noise (M2 follow-up).
 - Layout capture / GitHub #51 (partial, `feature/explorer-windows-profile`): Explorer windows with resolvable `file://` folder URLs get `explorer.exe` plus `associatedFiles` on the captured tile; paths dedupe into profile Content rows. Tab coverage depends on what `Shell.Application.Windows()` exposes on the OS build; launch restore uses the existing `profile-launch-gather` Explorer argv path. **Launch fix (2026-05-05):** sequential Explorer tiles exclude HWNDs already placed earlier in the same run (`placedHandlesInRun` → window-ready-gate `excludeHandles`, reuse candidate filter, `moveWindowToBounds` exclusions, post-modal resume quarantine merge) so the second launch cannot reposition the first window into the second slot when the shell reuses or delays new top-level HWNDs.
+- Profile store resilience (2026-05-15): `profiles.v1.json.bak` is refreshed before each save when the on-disk primary still parses cleanly; `readProfilesFromDisk` (`profile-store.js`) loads from that backup when the primary file is missing or unreadable so a single corrupted primary does not permanently brick the library.
