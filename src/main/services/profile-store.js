@@ -6,6 +6,9 @@ const { sanitizeProfileLaunchFieldsDeep } = require('../utils/profile-launch-fie
 
 const PROFILE_STORE_FILENAME = 'profiles.v1.json';
 
+/** Previous good store snapshot; refreshed only when the on-disk primary parses cleanly. */
+const PROFILE_STORE_BACKUP_SUFFIX = '.bak';
+
 const MAGIC = Buffer.from([0x46, 0x4c, 0x53, 0x32]); // "FLS2"
 const FORMAT_VERSION = 1;
 
@@ -16,6 +19,8 @@ const normalizeProfiles = (raw) => (Array.isArray(raw) ? raw : []);
 const getProfileStorePath = () => (
   path.join(app.getPath('userData'), PROFILE_STORE_FILENAME)
 );
+
+const getProfileStoreBackupPath = () => `${getProfileStorePath()}${PROFILE_STORE_BACKUP_SUFFIX}`;
 
 const parseProfilesPayload = (parsed) => {
   if (Array.isArray(parsed)) return parsed;
@@ -113,6 +118,75 @@ const buildReadSuccess = (parsed) => {
   };
 };
 
+const emptyReadFailure = (code, message) => ({
+  profiles: [],
+  contentLibrary: emptyLibrary(),
+  contentLibraryExclusions: {},
+  storeError: { code, message },
+});
+
+/**
+ * Parse a profile-store file buffer (plain JSON or FLS2+encrypted payload).
+ * @param {Buffer} buf
+ */
+const loadProfilesFromBuffer = (buf) => {
+  if (!buf || buf.length === 0) {
+    return emptyReadFailure('PARSE_FAILED', 'Your profile store file is empty.');
+  }
+
+  if (buf.length >= 5 && buf.subarray(0, 4).equals(MAGIC) && buf[4] === FORMAT_VERSION) {
+    if (!safeStorage.isEncryptionAvailable()) {
+      const message = (
+        'Your profile data is encrypted, but this PC cannot use OS secure storage to unlock it '
+        + '(encryption unavailable). Your profiles were not loaded. '
+        + 'Try signing into Windows with your usual account or move userData to a machine '
+        + 'where Electron safeStorage works.'
+      );
+      console.error('[profile-store] Encrypted store present but OS encryption is unavailable');
+      return emptyReadFailure('ENCRYPTION_UNAVAILABLE', message);
+    }
+    const encrypted = buf.subarray(5);
+    let decrypted;
+    try {
+      decrypted = safeStorage.decryptString(encrypted);
+    } catch (err) {
+      console.error('[profile-store] Decrypt failed:', err);
+      return emptyReadFailure(
+        'DECRYPT_FAILED',
+        (
+          'Could not decrypt your profile data. The file may be corrupted, '
+          + 'or it was created under a different Windows user or machine.'
+        ),
+      );
+    }
+    let parsed;
+    try {
+      parsed = JSON.parse(decrypted);
+    } catch (err) {
+      console.error('[profile-store] JSON parse failed (encrypted payload):', err);
+      return emptyReadFailure(
+        'PARSE_FAILED',
+        'Decrypted profile data could not be read. The file may be damaged.',
+      );
+    }
+    return buildReadSuccess(parsed);
+  }
+
+  let parsed;
+  try {
+    parsed = JSON.parse(buf.toString('utf8'));
+  } catch (err) {
+    console.error('[profile-store] JSON parse failed (plain JSON):', err);
+    return emptyReadFailure(
+      'PARSE_FAILED',
+      (
+        'Your profiles file could not be parsed. It may be damaged or edited incorrectly.'
+      ),
+    );
+  }
+  return buildReadSuccess(parsed);
+};
+
 /**
  * Read profiles + global content library from disk.
  * @returns {{
@@ -124,7 +198,25 @@ const buildReadSuccess = (parsed) => {
  */
 const readProfilesFromDisk = () => {
   const storePath = getProfileStorePath();
+  const backupPath = getProfileStoreBackupPath();
+
+  const tryBackup = (reason) => {
+    if (!fs.existsSync(backupPath)) return null;
+    try {
+      const fromBak = loadProfilesFromBuffer(fs.readFileSync(backupPath));
+      if (!fromBak.storeError) {
+        console.warn(`[profile-store] ${reason}; loaded profiles from backup (${path.basename(backupPath)})`);
+        return fromBak;
+      }
+    } catch (err) {
+      console.error('[profile-store] Failed to read profile store backup:', err);
+    }
+    return null;
+  };
+
   if (!fs.existsSync(storePath)) {
+    const restored = tryBackup('Primary profile store is missing');
+    if (restored) return restored;
     return {
       profiles: [],
       contentLibrary: emptyLibrary(),
@@ -134,80 +226,17 @@ const readProfilesFromDisk = () => {
   }
 
   try {
-    const buf = fs.readFileSync(storePath);
-    if (buf.length >= 5 && buf.subarray(0, 4).equals(MAGIC) && buf[4] === FORMAT_VERSION) {
-      if (!safeStorage.isEncryptionAvailable()) {
-        const message = (
-          'Your profile data is encrypted, but this PC cannot use OS secure storage to unlock it '
-          + '(encryption unavailable). Your profiles were not loaded. '
-          + 'Try signing into Windows with your usual account or move userData to a machine '
-          + 'where Electron safeStorage works.'
-        );
-        console.error('[profile-store] Encrypted store present but OS encryption is unavailable');
-        return {
-          profiles: [],
-          contentLibrary: emptyLibrary(),
-          contentLibraryExclusions: {},
-          storeError: { code: 'ENCRYPTION_UNAVAILABLE', message },
-        };
-      }
-      const encrypted = buf.subarray(5);
-      let decrypted;
-      try {
-        decrypted = safeStorage.decryptString(encrypted);
-      } catch (err) {
-        console.error('[profile-store] Decrypt failed:', err);
-        return {
-          profiles: [],
-          contentLibrary: emptyLibrary(),
-          contentLibraryExclusions: {},
-          storeError: {
-            code: 'DECRYPT_FAILED',
-            message: (
-              'Could not decrypt your profile data. The file may be corrupted, '
-              + 'or it was created under a different Windows user or machine.'
-            ),
-          },
-        };
-      }
-      let parsed;
-      try {
-        parsed = JSON.parse(decrypted);
-      } catch (err) {
-        console.error('[profile-store] JSON parse failed (encrypted payload):', err);
-        return {
-          profiles: [],
-          contentLibrary: emptyLibrary(),
-          contentLibraryExclusions: {},
-          storeError: {
-            code: 'PARSE_FAILED',
-            message: 'Decrypted profile data could not be read. The file may be damaged.',
-          },
-        };
-      }
-      return buildReadSuccess(parsed);
-    }
+    const primary = loadProfilesFromBuffer(fs.readFileSync(storePath));
+    if (!primary.storeError) return primary;
 
-    let parsed;
-    try {
-      parsed = JSON.parse(buf.toString('utf8'));
-    } catch (err) {
-      console.error('[profile-store] JSON parse failed (plain JSON):', err);
-      return {
-        profiles: [],
-        contentLibrary: emptyLibrary(),
-        contentLibraryExclusions: {},
-        storeError: {
-          code: 'PARSE_FAILED',
-          message: (
-            'Your profiles file could not be parsed. It may be damaged or edited incorrectly.'
-          ),
-        },
-      };
-    }
-    return buildReadSuccess(parsed);
+    const restored = tryBackup('Primary profile store is unreadable');
+    if (restored) return restored;
+
+    return primary;
   } catch (error) {
     console.error('[profile-store] Failed to read profiles:', error);
+    const restored = tryBackup('Primary profile store read threw');
+    if (restored) return restored;
     return {
       profiles: [],
       contentLibrary: emptyLibrary(),
@@ -262,10 +291,23 @@ const writeProfilesToDisk = (payload) => {
 
   const safeProfiles = profiles.map((p) => sanitizeProfileLaunchFieldsDeep(sanitizeProfileIconPathsDeep(p)));
   const storePath = getProfileStorePath();
+  const backupPath = getProfileStoreBackupPath();
   const dirPath = path.dirname(storePath);
   const tempPath = `${storePath}.tmp`;
 
   fs.mkdirSync(dirPath, { recursive: true });
+
+  if (fs.existsSync(storePath)) {
+    try {
+      const previous = fs.readFileSync(storePath);
+      const previousOk = loadProfilesFromBuffer(previous);
+      if (!previousOk.storeError) {
+        fs.copyFileSync(storePath, backupPath);
+      }
+    } catch (err) {
+      console.warn('[profile-store] Could not refresh profile store backup before save:', err);
+    }
+  }
 
   const storeBody = {
     version: 1,
