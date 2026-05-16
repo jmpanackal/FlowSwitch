@@ -25,9 +25,9 @@ const getClassResidualCalibration = (className) => {
 
 const getVerificationTolerancePx = (processHintLc) => {
   const key = String(processHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
-  if (isChromiumFamilyProcessKey(key)) return 6;
-  if (key === 'explorer') return 18;
-  return 5;
+  if (key === 'explorer') return 24;
+  if (isChromiumFamilyProcessKey(key)) return 14;
+  return 20;
 };
 
 /**
