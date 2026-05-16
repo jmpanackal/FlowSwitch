@@ -6,7 +6,43 @@ const { isChromiumFamilyProcessKey } = require('./window-candidate-classifier');
  * Bump when `computeCompanionHintsFromProcessRows` matching rules or exports change
  * so `launch-latest.jsonl` can be correlated without relying on app semver.
  */
-const PROCESS_HINTS_VERSION = '1.0.0';
+const PROCESS_HINTS_VERSION = '1.1.0';
+
+/**
+ * Static mapping for UWP/MSIX apps whose runtime process name differs from the
+ * executable shim basename that `getPlacementProcessKey` derives.
+ * Key = shim basename (lowercase, no ext), Value = known runtime process names.
+ */
+const UWP_PROCESS_NAME_ALIASES = new Map([
+  /** Shim basename `mediaplayer` vs packaged `Microsoft.Media.Player.exe` runtime image name. */
+  /** Packaged "Media Player" often runs as `Music.UI` under `Microsoft.ZuneMusic` (WindowsApps). */
+  ['mediaplayer', ['microsoft.media.player', 'music.ui']],
+  ['zunevideo', ['video.ui']],
+  ['zunemusic', ['music.ui']],
+  ['msteams', ['ms-teams']],
+  ['windowsterminal', ['windowsterminal']],
+]);
+
+/**
+ * Process names to scan with `Get-Process` / window enumeration for a placement hint basename.
+ * Includes static UWP/MSIX aliases so pre-launch snapshots see already-running packaged apps.
+ *
+ * @param {string} baseProcessHintLc
+ * @returns {string[]}
+ */
+const getProcessScanNames = (baseProcessHintLc) => {
+  const base = String(baseProcessHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
+  if (!base) return [];
+  const out = [];
+  const push = (n) => {
+    const s = String(n || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (s && !out.includes(s)) out.push(s);
+  };
+  push(base);
+  const aliases = UWP_PROCESS_NAME_ALIASES.get(base);
+  if (aliases) for (const a of aliases) push(a);
+  return out;
+};
 
 /**
  * Expands a base process hint using running top-level window processes.
@@ -21,6 +57,10 @@ const computeCompanionHintsFromProcessRows = (baseProcessHintLc, processRows) =>
   const base = String(baseProcessHintLc || '').trim().toLowerCase().replace(/\.exe$/i, '');
   if (!base) return [];
   const hints = new Set([base]);
+  const uwpAliases = UWP_PROCESS_NAME_ALIASES.get(base);
+  if (uwpAliases) {
+    for (const alias of uwpAliases) hints.add(alias);
+  }
   const minimumMatchLength = Math.max(4, Math.min(10, base.length));
   for (const row of processRows) {
     const name = String(row?.name || '').trim().toLowerCase().replace(/\.exe$/i, '');
@@ -74,4 +114,5 @@ module.exports = {
   PROCESS_HINTS_VERSION,
   buildCompanionProcessHints,
   computeCompanionHintsFromProcessRows,
+  getProcessScanNames,
 };
