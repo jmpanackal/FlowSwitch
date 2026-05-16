@@ -124,7 +124,6 @@ const getPostModalResumeCandidateRejectionReasons = (row, expectedBounds = null)
   if (row.cloaked) reasons.push('cloaked');
   if (row.hung) reasons.push('hung');
   if (row.tool) reasons.push('tool-window');
-  if (!row.enabled) reasons.push('disabled');
   if (row.isMinimized) reasons.push('minimized');
   if (reasons.length > 0) return reasons;
   if (isLikelyPostModalResumeModalBlocker(row, expectedBounds)) {
@@ -133,7 +132,21 @@ const getPostModalResumeCandidateRejectionReasons = (row, expectedBounds = null)
   }
 
   if (String(expectedBounds?.state || '').toLowerCase() === 'maximized') {
-    if (!isLikelyMainPlacementWindowIgnoringBlocker(row, expectedBounds)) {
+    const hasOwner = Boolean(row?.hasOwner);
+    const topMost = Boolean(row?.topMost);
+    if (hasOwner || topMost) {
+      reasons.push('maximized-size-mismatch');
+      return reasons;
+    }
+    const w = Number(row.width || 0);
+    const h = Number(row.height || 0);
+    const ew = Math.max(1, Number(expectedBounds?.width || 0));
+    const eh = Math.max(1, Number(expectedBounds?.height || 0));
+    const widthRatio = w / ew;
+    const heightRatio = h / eh;
+    const areaRatio = (w * h) / (ew * eh);
+    if (!(widthRatio >= 0.55 && heightRatio >= 0.45 && areaRatio >= 0.38
+      && (widthRatio >= 0.72 || heightRatio >= 0.72))) {
       reasons.push('maximized-size-mismatch');
     }
     return reasons;
@@ -168,6 +181,33 @@ const getPostModalResumeCandidateRejectionReasons = (row, expectedBounds = null)
  * would never mark it "ready" and post-modal resume times out (`main-window-timeout`).
  */
 const isLikelyPostModalResumeMainWindowCandidate = (row, expectedBounds = null) => {
+  return getPostModalResumeCandidateRejectionReasons(row, expectedBounds).length === 0;
+};
+
+/**
+ * Rect-only plausibility for post-modal placement stability checks. Uses the same thresholds as
+ * `getPostModalResumeCandidateRejectionReasons` so small mains (e.g. Audacity vs a large tile) are
+ * not rejected by the stricter pre-modal placement rect rules.
+ */
+const isPlacementRectPlausibleForPostModalResume = (rect, expectedBounds = null) => {
+  if (!rect || !expectedBounds) return false;
+  const w = Math.max(0, Number(rect.width || 0));
+  const h = Math.max(0, Number(rect.height || 0));
+  if (w < 8 || h < 8) return false;
+  const row = {
+    width: w,
+    height: h,
+    cloaked: false,
+    hung: false,
+    tool: false,
+    isMinimized: false,
+    enabled: true,
+    className: 'FlowSwitchRectProbe',
+    titleLength: 3,
+    title: 'App',
+    hasOwner: false,
+    topMost: false,
+  };
   return getPostModalResumeCandidateRejectionReasons(row, expectedBounds).length === 0;
 };
 
@@ -574,6 +614,7 @@ module.exports = {
   isLikelyMainPlacementWindow,
   isLikelyMainPlacementWindowIgnoringBlocker,
   isLikelyPostModalResumeMainWindowCandidate,
+  isPlacementRectPlausibleForPostModalResume,
   sortCandidateRows,
   waitForMainWindowReadyOrBlocker,
 };

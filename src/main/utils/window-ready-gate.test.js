@@ -6,6 +6,7 @@ const {
   isLikelyMainPlacementWindow,
   isLikelyModalBlockerWindow,
   isLikelyPostModalResumeMainWindowCandidate,
+  isPlacementRectPlausibleForPostModalResume,
 } = require('../services/window-ready-gate');
 
 const buildRow = (overrides = {}) => ({
@@ -368,6 +369,24 @@ test('waitForMainWindowReadyOrBlocker postModalResumeSizing prefers balanced mai
   });
   assert.equal(result.ready, true);
   assert.equal(result.handle, 'aud-main');
+});
+
+test('isPlacementRectPlausibleForPostModalResume accepts small mains vs large tiles', () => {
+  const bounds = { width: 1441, height: 1250, state: 'normal' };
+  assert.equal(
+    isPlacementRectPlausibleForPostModalResume(
+      { width: 800, height: 600 },
+      bounds,
+    ),
+    true,
+  );
+  assert.equal(
+    isPlacementRectPlausibleForPostModalResume(
+      { width: 200, height: 200 },
+      bounds,
+    ),
+    false,
+  );
 });
 
 test('sortCandidateRows uses deterministic tie-break when scores are equal', () => {

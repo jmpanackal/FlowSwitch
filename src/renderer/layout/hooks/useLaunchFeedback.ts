@@ -11,6 +11,7 @@ export type AppLaunchRowProgress = {
     | "opening-content"
     | "awaiting-confirmation"
     | "done"
+    | "warning"
     | "failed"
     | "skipped";
   /** Raster data URL from main (profile snapshot at launch); validated in mapper. */
@@ -19,6 +20,8 @@ export type AppLaunchRowProgress = {
   location?: string | null;
   /** Small outcome tags (e.g. "Placed", "Confirmation"); "New"/"Reused" may be hidden in the launch panel when redundant. */
   outcomes?: string[] | null;
+  /** While awaiting confirmation: absolute deadline (epoch ms) for UI countdown (aligned with main resume budget). */
+  confirmationDeadlineAtMs?: number | null;
 };
 
 /** Aligns with `launchTimeline.js` JSDoc. */
@@ -34,6 +37,7 @@ export type LaunchActionSubstepState =
   | "queued"
   | "running"
   | "completed"
+  | "warning"
   | "failed";
 
 export type LaunchActionSubstep = {
@@ -61,12 +65,15 @@ export type LaunchAction = {
   }> | null;
   /** Tab actions only: canonical URL for grouping tabs with the owning browser app in the UI. */
   browserTabUrl?: string | null;
+  /** Tab actions only: profile `instanceId` of the browser app that owns this tab (preferred over URL heuristics). */
+  hostAppInstanceId?: string | null;
   /** When set, app timeline includes a `sub-content` substep (parallel with launch vs after verify). */
   contentSubstepMode?: "post-verify" | "parallel-launch" | null;
   /** Main-only hint: post-verify content automation failed (maps to failed `sub-content`). */
   contentOpenFailed?: boolean | null;
   errorMessage?: string | null;
-  failureKind?: "launch" | "placement" | "verification" | null;
+  failureKind?: "launch" | "placement" | "verification" | "confirmation" | null;
+  isAwaitingConfirmation?: boolean | null;
   startedAtMs?: number | null;
   endedAtMs?: number | null;
   substeps?: LaunchActionSubstep[] | null;

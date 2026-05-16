@@ -17,6 +17,17 @@ type ProfileLaunchProgressPanelProps = {
 
 type AppRow = NonNullable<LaunchProgressSnapshot["appLaunchProgress"]>[number];
 
+function formatConfirmationCountdownRemaining(
+  deadlineMs: number | null | undefined,
+  nowMs: number,
+): string | null {
+  if (deadlineMs == null || !Number.isFinite(deadlineMs)) return null;
+  const sec = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
 /** Raster data URL and/or Lucide fallback — matches `MonitorLayout` app tiles. */
 type AppIconVisual = {
   raster?: string;
@@ -129,6 +140,8 @@ function stepBadgeClasses(step: AppRow["step"]): string {
       return "bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/35";
     case "done":
       return "bg-emerald-500/15 text-emerald-200 ring-1 ring-emerald-400/30";
+    case "warning":
+      return "bg-amber-500/20 text-amber-200 ring-1 ring-amber-400/35";
     case "failed":
       return "bg-rose-500/20 text-rose-200 ring-1 ring-rose-400/35";
     case "skipped":
@@ -148,6 +161,8 @@ function stepLabel(step: AppRow["step"]): string {
       return "Confirmation";
     case "done":
       return "Done";
+    case "warning":
+      return "Warning";
     case "failed":
       return "Failed";
     case "skipped":
@@ -157,10 +172,9 @@ function stepLabel(step: AppRow["step"]): string {
   }
 }
 
-const ACTIVE_ROW_STEPS = new Set<AppRow["step"]>([
+const WORKING_ROW_STEPS = new Set<AppRow["step"]>([
   "launching",
   "placing",
-  "awaiting-confirmation",
 ]);
 
 function pickCurrentAppRow(
@@ -169,7 +183,7 @@ function pickCurrentAppRow(
 ): AppRow | null {
   if (!progress) return null;
   const activeName = progress.activeAppName?.trim().toLowerCase() || "";
-  const inFlight = rows.filter((r) => ACTIVE_ROW_STEPS.has(r.step));
+  const inFlight = rows.filter((r) => WORKING_ROW_STEPS.has(r.step));
   if (inFlight.length > 0) {
     if (activeName) {
       const byName = inFlight.find(
@@ -180,9 +194,14 @@ function pickCurrentAppRow(
     return inFlight[0];
   }
   if (activeName) {
-    return rows.find((r) => r.name.trim().toLowerCase() === activeName) ?? null;
+    const named = rows.find((r) => r.name.trim().toLowerCase() === activeName);
+    if (named && named.step !== "awaiting-confirmation") return named;
   }
   return null;
+}
+
+function pickAwaitingConfirmationRows(rows: AppRow[]): AppRow[] {
+  return rows.filter((r) => r.step === "awaiting-confirmation");
 }
 
 function phaseHeadline(
@@ -220,6 +239,7 @@ export function ProfileLaunchProgressPanel({
   variant = "overlay",
 }: ProfileLaunchProgressPanelProps) {
   const [elapsedSec, setElapsedSec] = useState(0);
+  const [tickNow, setTickNow] = useState(() => Date.now());
 
   useEffect(() => {
     const started = Date.now();
@@ -227,6 +247,11 @@ export function ProfileLaunchProgressPanel({
       setElapsedSec(Math.floor((Date.now() - started) / 1000));
     tick();
     const id = window.setInterval(tick, 1000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  useEffect(() => {
+    const id = window.setInterval(() => setTickNow(Date.now()), 250);
     return () => window.clearInterval(id);
   }, []);
 
@@ -248,6 +273,11 @@ export function ProfileLaunchProgressPanel({
   const currentAppRow = useMemo(
     () => pickCurrentAppRow(progress, rows),
     [progress, rows],
+  );
+
+  const awaitingRows = useMemo(
+    () => pickAwaitingConfirmationRows(rows),
+    [rows],
   );
 
   const heroSlot = useMemo(() => {
@@ -389,13 +419,64 @@ export function ProfileLaunchProgressPanel({
         <p className="mt-2 text-[11px] text-flow-text-muted">{tabLine}</p>
       ) : null}
 
+      {awaitingRows.length > 0 ? (
+        <div className="mt-3">
+          <p className={`mb-1.5 text-[11px] font-semibold uppercase tracking-wide text-amber-300/80`}>
+            Awaiting confirmation
+          </p>
+          <ul className="space-y-1.5">
+            {awaitingRows.map((row) => {
+              const rowVisual = resolveVisualForRow(appVisualLookup, row);
+              const confirmCd = formatConfirmationCountdownRemaining(
+                row.confirmationDeadlineAtMs,
+                tickNow,
+              );
+              return (
+                <li
+                  key={row.key}
+                  className={`flex items-center gap-2.5 rounded-lg border border-amber-400/30 bg-amber-500/10 ${
+                    isInspector ? "px-2 py-1.5" : "px-2.5 py-2"
+                  }`}
+                >
+                  <div
+                    className={`flex shrink-0 items-center justify-center overflow-hidden rounded-md bg-amber-400/10 ring-1 ring-amber-400/30 ${
+                      isInspector ? "h-8 w-8" : "h-9 w-9"
+                    }`}
+                  >
+                    <AppIconMark visual={rowVisual} size="row" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className={`truncate font-medium text-amber-100 ${isInspector ? "text-xs" : "text-sm"}`}>
+                      {row.name}
+                    </p>
+                    <p className="truncate text-[10px] text-amber-200/70">
+                      Waiting for user action
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 flex-col items-end gap-0.5">
+                    {confirmCd ? (
+                      <span
+                        className="tabular-nums text-[10px] font-semibold text-amber-100/95"
+                        title="Time remaining before this confirmation wait times out"
+                      >
+                        {confirmCd}
+                      </span>
+                    ) : null}
+                    <span className="shrink-0 rounded-md bg-amber-500/20 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide text-amber-200 ring-1 ring-amber-400/35">
+                      Confirm
+                    </span>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </div>
+      ) : null}
+
       {rows.length > 0 ? (
-        <ul
-          className={`mt-3 space-y-1.5 overflow-y-auto pr-2 sm:pr-3 ${
-            isInspector ? "max-h-[min(40vh,28rem)]" : "max-h-[min(14rem,40vh)]"
-          }`}
-        >
-          {rows.map((row) => {
+        <ul className="mt-3 space-y-1.5">
+
+          {rows.filter((r) => r.step !== "awaiting-confirmation").map((row) => {
             const rowVisual = resolveVisualForRow(appVisualLookup, row);
             return (
               <li

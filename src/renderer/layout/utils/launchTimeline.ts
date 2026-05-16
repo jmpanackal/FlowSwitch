@@ -122,22 +122,42 @@ export function deriveBuckets(input: {
   actions: LaunchAction[];
   activeActionId?: string | null;
   completedCap: number;
-}): { current: LaunchAction | null; upcoming: LaunchAction[]; completed: LaunchAction[] } {
+  /** When main rows say `awaiting-confirmation` but the action flag was missing in transit. */
+  awaitingConfirmationActionIds?: Set<string> | null;
+}): { current: LaunchAction | null; awaitingConfirmation: LaunchAction[]; upcoming: LaunchAction[]; completed: LaunchAction[] } {
   const actions = Array.isArray(input?.actions) ? input.actions : [];
   const completedCap = Math.max(0, toNonNegativeInt(input?.completedCap));
   const activeActionId =
     typeof input?.activeActionId === "string" ? input.activeActionId : null;
+  const fallbackAwaitingIds = input?.awaitingConfirmationActionIds || null;
+
+  const isAwaiting = (a: LaunchAction) => {
+    const id = String(a?.id || "").trim();
+    const fromFlag = Boolean(a.isAwaitingConfirmation) && a.state === "running";
+    // Trust `appLaunchProgress` step ids even if the timeline row is briefly `queued` or the
+    // `isAwaitingConfirmation` flag was missing on IPC; never treat terminal actions as waiting.
+    const fromProgress = (
+      fallbackAwaitingIds?.has(id) === true
+      && !isTerminalAction(a)
+    );
+    return fromFlag || fromProgress;
+  };
 
   let current: LaunchAction | null = null;
   if (activeActionId) {
     const pinned = actions.find((a) => a.id === activeActionId);
-    if (pinned && !isTerminalAction(pinned)) {
+    if (pinned && !isTerminalAction(pinned) && !isAwaiting(pinned)) {
       current = pinned;
     }
   }
   if (!current) {
-    current = actions.find((a) => a.state === "running") ?? null;
+    current = actions.find((a) => a.state === "running" && !isAwaiting(a)) ?? null;
   }
+  if (!current) {
+    current = actions.find((a) => a.state === "queued" && !isAwaiting(a)) ?? null;
+  }
+
+  const awaitingConfirmation = actions.filter((a) => isAwaiting(a) && (!current || a.id !== current.id));
 
   const completedAll = actions.filter((a) => isTerminalAction(a) && (!current || a.id !== current.id));
   const completed =
@@ -148,10 +168,11 @@ export function deriveBuckets(input: {
   const upcoming = actions.filter((a) => {
     if (current && a.id === current.id) return false;
     if (isTerminalAction(a)) return false;
+    if (isAwaiting(a)) return false;
     if (a.state === "queued") return true;
     if (a.state === "running") return true;
     return false;
   });
 
-  return { current, upcoming, completed };
+  return { current, awaitingConfirmation, upcoming, completed };
 }

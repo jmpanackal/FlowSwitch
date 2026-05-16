@@ -226,3 +226,23 @@ test('launch action keeps browserTabUrl when cloning', () => {
   const status = store.getStatus('profile-1');
   assert.equal(status?.actions?.[0]?.browserTabUrl, 'https://github.com/org/repo');
 });
+
+test('launch action keeps hostAppInstanceId when cloning', () => {
+  const store = createLaunchStatusStore({ now: () => 1700000000000 });
+  const run = store.startRun('profile-1');
+  store.publishStatus('profile-1', run.runId, {
+    state: 'in-progress',
+    actions: [
+      {
+        id: 'tab:github',
+        kind: 'tab',
+        title: 'github.com',
+        state: 'completed',
+        browserTabUrl: 'https://github.com/org/repo',
+        hostAppInstanceId: 'edge-instance-1',
+      },
+    ],
+  });
+  const status = store.getStatus('profile-1');
+  assert.equal(status?.actions?.[0]?.hostAppInstanceId, 'edge-instance-1');
+});
