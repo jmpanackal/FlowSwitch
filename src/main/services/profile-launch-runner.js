@@ -8,6 +8,17 @@ const path = require('path');
 const { execFile } = require('child_process');
 const launchLimits = require('../../shared/launch-weight-limits');
 const {
+  CONFIRMATION_USER_WAIT_MS,
+  CONFIRMATION_POST_DISMISS_SETTLE_MS,
+  CONFIRMATION_POST_DISMISS_PLACE_MS,
+  computeConfirmationUserDeadlineMs,
+  computeConfirmationSessionEndsAtMs,
+} = require('../../shared/launch-confirmation-limits');
+const {
+  attemptMainWindowPlacementDuringBlocker,
+  findMainWindowDuringBlocker,
+} = require('./confirmation-main-window-during-blocker');
+const {
   dedupeAppLaunchesFromGather,
   sliceProfileForExcludedMonitors,
   buildSkippedLaunchTargetsSummary,
@@ -376,8 +387,9 @@ const createProfileLaunchRunner = (deps) => {
   // HWNDs that earlier launches in this run have already placed. Treated like quarantined
   // handles: they must not be reselected as the post-modal main window for this launch.
   runPlacedHandles = null,
-  /** Absolute wall-clock when the full confirmation session ends (blocker wait + settle + post-dismiss). Must match UI `confirmationDeadlineAtMs`. */
+  /** Absolute wall-clock when the full confirmation session ends (user wait + settle + post-dismiss). */
   confirmationSessionEndsAtMs = 0,
+  onBlockerWaitPoll = null,
 }) => {
   const launchedPidNumber = Number(launchedPid || 0);
   const blockedHandleSet = new Set(
@@ -575,9 +587,9 @@ const createProfileLaunchRunner = (deps) => {
     return { applied: true, handle: placedHandle };
   };
 
-  const BLOCKER_DISMISS_MAX_MS = 120000;
-  const POST_DISMISS_SETTLE_MS = 800;
-  const POST_DISMISS_MAIN_WINDOW_MS = 32000;
+  const BLOCKER_DISMISS_MAX_MS = CONFIRMATION_USER_WAIT_MS;
+  const POST_DISMISS_SETTLE_MS = CONFIRMATION_POST_DISMISS_SETTLE_MS;
+  const POST_DISMISS_MAIN_WINDOW_MS = CONFIRMATION_POST_DISMISS_PLACE_MS;
   const reservedTailMs = POST_DISMISS_SETTLE_MS + POST_DISMISS_MAIN_WINDOW_MS;
   const sessionEndsAt = Number(confirmationSessionEndsAtMs) > 0
     ? Math.floor(Number(confirmationSessionEndsAtMs))
@@ -634,6 +646,13 @@ const createProfileLaunchRunner = (deps) => {
           quarantinedDuringWait += 1;
         }
         lastScanHadBlocker = true;
+        if (typeof onBlockerWaitPoll === 'function') {
+          try {
+            await onBlockerWaitPoll();
+          } catch {
+            // best-effort main-window sync while the modal is still open
+          }
+        }
         await sleep(BLOCKER_POLL_MS);
         continue;
       }
@@ -1554,17 +1573,41 @@ const launchProfileById = async (profileId, options = {}) => {
       action.state = 'running';
       action.isAwaitingConfirmation = true;
       setSubLabel('sub-launch', 'Launched');
-      setSubLabel('sub-place', 'Positioned');
-      setSubLabel('sub-verify', 'Verified placement');
+      setSubLabel('sub-place', 'Waiting for confirmation');
+      setSubLabel('sub-verify', 'Pending confirmation');
       if (hasContent && isParallel) {
         setSubLabel('sub-content', 'Opened content');
       }
       setSubs([
         ['sub-launch', 'completed'],
-        ['sub-place', 'completed'],
-        ['sub-verify', 'completed'],
+        ['sub-place', 'running'],
+        ['sub-verify', 'queued'],
         ...(hasContent ? [['sub-content', isParallel ? 'completed' : 'queued']] : []),
       ]);
+    } else if (step === 'warning') {
+      action.state = 'warning';
+      const confirmationWarning = Array.isArray(row.outcomes)
+        && row.outcomes.some((o) => /confirmation/i.test(String(o || '').trim()));
+      setSubLabel('sub-launch', 'Launched');
+      if (confirmationWarning) {
+        setSubLabel('sub-place', 'Confirmation not completed');
+        setSubLabel('sub-verify', 'Verification skipped');
+        setSubs([
+          ['sub-launch', 'completed'],
+          ['sub-place', 'failed'],
+          ['sub-verify', 'queued'],
+          ...(hasContent ? [['sub-content', 'queued']] : []),
+        ]);
+      } else {
+        setSubLabel('sub-place', 'Positioned with warnings');
+        setSubLabel('sub-verify', 'Placement warning');
+        setSubs([
+          ['sub-launch', 'completed'],
+          ['sub-place', 'completed'],
+          ['sub-verify', 'failed'],
+          ...(hasContent ? [['sub-content', 'queued']] : []),
+        ]);
+      }
     } else if (step === 'done') {
       const externalNoLayout = Array.isArray(row.outcomes)
         && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_EXTERNAL_OPEN_NO_LAYOUT);
@@ -2504,25 +2547,83 @@ try {
           }
         }
         if (!readyGate.ready && readyGate.blocked && readyGate.blockerKind === 'confirmation') {
-          const existingMainHandle = await findStableExistingMainWindowHandle(activeProcessHints);
-          if (existingMainHandle) {
+          const blockerHandles = Array.from(new Set([
+            ...(Array.isArray(readyGate?.blockerHandles) ? readyGate.blockerHandles : []),
+            String(readyGate?.blockerHandle || '').trim(),
+          ].filter(Boolean)));
+          const syncMainDuringConfirmation = () => attemptMainWindowPlacementDuringBlocker({
+            processHintLc,
+            processHints: activeProcessHints,
+            placementBounds,
+            excludeHandles: blockerHandles,
+            getVisibleWindowInfos,
+            scoreWindowCandidate,
+            isLikelyMainPlacementWindowIgnoringBlocker,
+            moveSpecificWindowHandleToBounds,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'confirmation-main-preplace',
+              appName: launchItem.appName,
+              placementState: placementBounds.state,
+            },
+          });
+          const existingMainDuringConfirmation = await findMainWindowDuringBlocker({
+            processHintLc,
+            processHints: activeProcessHints,
+            placementBounds,
+            excludeHandles: blockerHandles,
+            getVisibleWindowInfos,
+            scoreWindowCandidate,
+            isLikelyMainPlacementWindowIgnoringBlocker,
+          });
+          if (existingMainDuringConfirmation.handle) {
             launchDiagnostics.decision({
               processHintLc,
               strategy: 'window-ready-gate',
               reason: 'confirmation-blocker-bypassed-existing-main-window',
               blockerHandle: readyGate.blockerHandle || null,
-              existingMainHandle,
+              existingMainHandle: existingMainDuringConfirmation.handle,
               preLaunchHandleCount: preLaunchHandleSet.size,
             });
+            await syncMainDuringConfirmation();
             readyGate = {
               ready: true,
               blocked: false,
               timedOut: false,
-              handle: existingMainHandle,
+              handle: existingMainDuringConfirmation.handle,
             };
           }
         }
         if (!readyGate.ready && readyGate.blocked && readyGate.blockerKind === 'confirmation') {
+          const blockerHandles = Array.from(new Set([
+            ...(Array.isArray(readyGate?.blockerHandles) ? readyGate.blockerHandles : []),
+            String(readyGate?.blockerHandle || '').trim(),
+          ].filter(Boolean)));
+          const syncMainDuringConfirmation = () => attemptMainWindowPlacementDuringBlocker({
+            processHintLc,
+            processHints: activeProcessHints,
+            placementBounds,
+            excludeHandles: blockerHandles,
+            getVisibleWindowInfos,
+            scoreWindowCandidate,
+            isLikelyMainPlacementWindowIgnoringBlocker,
+            moveSpecificWindowHandleToBounds,
+            aggressiveMaximize,
+            positionOnlyBeforeMaximize,
+            skipFrameChanged: chromiumNormalSoftPos,
+            launchDiagnostics,
+            diagnosticsContext: {
+              processHintLc,
+              strategy: 'confirmation-main-preplace',
+              appName: launchItem.appName,
+              placementState: placementBounds.state,
+            },
+          });
+          await syncMainDuringConfirmation();
           if (readyGate.blockerHandle && launchItem.monitor) {
             await centerWindowHandleOnMonitor({
               handle: readyGate.blockerHandle,
@@ -2536,21 +2637,18 @@ try {
                 placementState: placementBounds.state,
               },
             });
+            await syncMainDuringConfirmation();
           }
           launchDiagnostics.result({
             processHintLc,
             strategy: 'window-ready-gate',
             reason: 'confirmation-modal-awaiting-user',
             blockerHandle: readyGate.blockerHandle || null,
-            timeoutMs: readyGateTimeoutMs,
+            timeoutMs: CONFIRMATION_USER_WAIT_MS,
           });
-          const CONFIRMATION_BLOCKER_MAX_MS = 120000;
-          const POST_DISMISS_SETTLE_MS_UI = 800;
-          const POST_DISMISS_MAIN_WINDOW_MS_UI = 32000;
-          const confirmationSessionEndsAtMs = Date.now()
-            + CONFIRMATION_BLOCKER_MAX_MS
-            + POST_DISMISS_SETTLE_MS_UI
-            + POST_DISMISS_MAIN_WINDOW_MS_UI;
+          const confirmationStartedAtMs = Date.now();
+          const confirmationUserDeadlineAtMs = computeConfirmationUserDeadlineMs(confirmationStartedAtMs);
+          const confirmationSessionEndsAtMs = computeConfirmationSessionEndsAtMs(confirmationStartedAtMs);
           const pendingEntry = {
             name: launchItem.appName,
             path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
@@ -2561,12 +2659,12 @@ try {
             blockerHandle: readyGate.blockerHandle || null,
             status: 'waiting',
             appIndex,
-            confirmationDeadlineAtMs: confirmationSessionEndsAtMs,
+            confirmationDeadlineAtMs: confirmationUserDeadlineAtMs,
           };
           pendingConfirmations.push(pendingEntry);
           if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
             appLaunchProgress[appIndex].step = 'awaiting-confirmation';
-            appLaunchProgress[appIndex].confirmationDeadlineAtMs = confirmationSessionEndsAtMs;
+            appLaunchProgress[appIndex].confirmationDeadlineAtMs = confirmationUserDeadlineAtMs;
             const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
               ? appLaunchProgress[appIndex].outcomes
               : [];
@@ -2574,31 +2672,42 @@ try {
           }
           activeUiPhase = 'launching';
           activeUiName = launchItem.appName;
-          publishCurrentLaunchStatus('in-progress');
-          void resumePlacementAfterConfirmationModal({
-            processHintLc,
-            processHints: activeProcessHints,
-            blockedHandles: Array.from(new Set([
-              ...(Array.isArray(readyGate?.blockerHandles) ? readyGate.blockerHandles : []),
-              String(readyGate?.blockerHandle || '').trim(),
-            ].filter(Boolean))),
-            launchedPid: launchedChild?.pid || 0,
-            placementBounds,
-            monitor: launchItem.monitor,
-            aggressiveMaximize,
-            positionOnlyBeforeMaximize,
-            skipFrameChanged: chromiumNormalSoftPos,
-            launchDiagnostics,
-            runPlacedHandles: placedHandlesInRun,
-            diagnosticsContext: {
+          publishCurrentLaunchStatus('awaiting-confirmations');
+          let resumeResult = {
+            resolved: false,
+            status: 'waiting',
+            handle: null,
+          };
+          try {
+            resumeResult = await resumePlacementAfterConfirmationModal({
               processHintLc,
-              strategy: 'post-modal-resume',
-              appName: launchItem.appName,
-              placementState: placementBounds.state,
-            },
-            confirmationSessionEndsAtMs,
-          }).then((resumeResult) => {
-            if (!isCurrentRunActive()) return;
+              processHints: activeProcessHints,
+              blockedHandles: blockerHandles,
+              launchedPid: launchedChild?.pid || 0,
+              placementBounds,
+              monitor: launchItem.monitor,
+              aggressiveMaximize,
+              positionOnlyBeforeMaximize,
+              skipFrameChanged: chromiumNormalSoftPos,
+              launchDiagnostics,
+              runPlacedHandles: placedHandlesInRun,
+              diagnosticsContext: {
+                processHintLc,
+                strategy: 'post-modal-resume',
+                appName: launchItem.appName,
+                placementState: placementBounds.state,
+              },
+              confirmationSessionEndsAtMs,
+              onBlockerWaitPoll: syncMainDuringConfirmation,
+            });
+          } catch {
+            resumeResult = {
+              resolved: false,
+              status: 'waiting',
+              handle: null,
+            };
+          }
+          if (isCurrentRunActive()) {
             const status = String(resumeResult?.status || '').trim().toLowerCase();
             const isPlacementFailure = (status === 'placement-failed');
             const mappedStatus = (
@@ -2633,8 +2742,9 @@ try {
                 row.step = 'warning';
                 delete row.confirmationDeadlineAtMs;
                 const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
+                const confirmationWaitSec = Math.round(CONFIRMATION_USER_WAIT_MS / 1000);
                 const warningLabel = status === 'waiting'
-                  ? 'Confirmation not received'
+                  ? `Confirmation not received within ${confirmationWaitSec} seconds`
                   : (status === 'timeout'
                     ? 'Dialog closed, but the main window was not ready in time.'
                     : 'Confirmation could not be completed.');
@@ -2671,25 +2781,10 @@ try {
                 }
               }
             }
-          }).catch(() => {
-            if (!isCurrentRunActive()) return;
-            pendingEntry.status = 'warning';
-            if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
-              const nowTs = Date.now();
-              const row = appLaunchProgress[appIndex];
-              row.step = 'warning';
-              delete row.confirmationDeadlineAtMs;
-              const tact = executionActions[appTimelineIndexByApp[appIndex]];
-              if (tact) {
-                tact.state = 'warning';
-                tact.failureKind = 'confirmation';
-                tact.errorMessage = 'Resume after confirmation failed unexpectedly.';
-                tact.endedAtMs = nowTs;
-              }
-            }
-          }).finally(() => {
-            finalizeRunIfPendingConfirmationsSettled();
-          });
+            publishCurrentLaunchStatus(
+              countUnresolvedPendingConfirmations() > 0 ? 'awaiting-confirmations' : 'in-progress',
+            );
+          }
           return;
         }
 
