@@ -134,6 +134,28 @@ test("computeEta returns low/high confidence buckets", () => {
   assert.equal(etaHigh.confidence, "high");
 });
 
+test("deriveBuckets places awaiting-confirmation ids in awaiting bucket when action is queued", () => {
+  const awaitingIds = new Set(["app:audacity"]);
+  const { current, awaitingConfirmation, upcoming } = deriveBuckets({
+    actions: [
+      baseAction({ id: "app:anki", state: "running" }),
+      baseAction({
+        id: "app:audacity",
+        state: "queued",
+        isAwaitingConfirmation: false,
+      }),
+      baseAction({ id: "app:next", state: "queued" }),
+    ],
+    activeActionId: "app:anki",
+    completedCap: 5,
+    awaitingConfirmationActionIds: awaitingIds,
+  });
+  assert.equal(current?.id, "app:anki");
+  assert.equal(awaitingConfirmation.length, 1);
+  assert.equal(awaitingConfirmation[0]?.id, "app:audacity");
+  assert.ok(upcoming.some((a) => a.id === "app:next"));
+});
+
 test("deriveBuckets pins a single active action and caps completed", () => {
   const { current, upcoming, completed } = deriveBuckets({
     actions: [

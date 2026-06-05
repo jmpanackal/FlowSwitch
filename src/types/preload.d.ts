@@ -59,6 +59,7 @@ declare global {
           status?: "waiting" | "resolved" | "failed";
           handle?: string;
           resolvedAt?: number;
+          confirmationDeadlineAtMs?: number;
         }>;
         pendingConfirmationCount?: number;
         unresolvedPendingConfirmationCount?: number;
@@ -141,6 +142,7 @@ declare global {
             iconDataUrl?: string | null;
             location?: string;
             outcomes?: string[];
+            confirmationDeadlineAtMs?: number;
           }>;
           pendingConfirmations: Array<{
             name: string;
@@ -151,6 +153,7 @@ declare global {
             status?: "waiting" | "resolved" | "failed";
             handle?: string;
             resolvedAt?: number;
+            confirmationDeadlineAtMs?: number;
           }>;
           updatedAt: number;
         } | null;

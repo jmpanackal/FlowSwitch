@@ -58,6 +58,7 @@
     "@radix-ui/react-tooltip": "^1.2.8",
     "clsx": "^2.1.1",
     "icon-extractor": "^1.0.3",
+    "koffi": "^2.15.6",
     "lucide-react": "^0.536.0",
     "react": "^18.2.0",
     "react-dom": "^18.2.0",

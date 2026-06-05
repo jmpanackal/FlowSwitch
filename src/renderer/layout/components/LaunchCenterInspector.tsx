@@ -10,7 +10,6 @@ import {
   Check,
   ChevronRight,
   Globe,
-  Link2,
   Loader2,
   Sparkles,
   X,
@@ -28,7 +27,11 @@ import {
   computeSubstepWeightedProgress,
   deriveBuckets,
 } from "../utils/launchTimeline";
-import { orderLaunchActionsForProgressDisplay } from "../utils/launchTimelineDisplayOrder";
+import {
+  orderLaunchActionsForProgressDisplay,
+  resolveActionLeadForProgressCard,
+  shouldSkipBucketActionForNestedTabDisplay,
+} from "../utils/launchTimelineDisplayOrder";
 import {
   inspectorBrowserLinkGlobeStrokeWidth,
   inspectorBrowserTabGlobeIconClass,
@@ -48,6 +51,30 @@ type LaunchCenterInspectorProps = {
 };
 
 type Row = NonNullable<LaunchProgressSnapshot["appLaunchProgress"]>[number];
+
+/** When `appLaunchProgress` is awaiting but the matching timeline row is missing, still render the popup strip. */
+function syntheticAwaitingLaunchAction(row: Row, id: string): LaunchAction {
+  return {
+    id,
+    kind: "app",
+    title: String(row?.name || "").trim() || "App",
+    targetLocation: row?.location ? String(row.location).trim() : null,
+    state: "running",
+    iconDataUrl: row?.iconDataUrl ?? null,
+    pills: null,
+    smartDecisions: null,
+    contentItems: null,
+    browserTabUrl: null,
+    contentSubstepMode: null,
+    contentOpenFailed: false,
+    isAwaitingConfirmation: true,
+    errorMessage: null,
+    failureKind: null,
+    startedAtMs: null,
+    endedAtMs: null,
+    substeps: null,
+  };
+}
 
 const COMPLETED_CAP = 5;
 
@@ -272,11 +299,21 @@ function pickNonTrivialSmartDecisionLine(action: LaunchAction): string | null {
   if (!raw.length) return null;
   const isTrivial = (t: string) =>
     /^(?:reusing|reused) existing window$/i.test(t)
-    || /^waiting \d+s delay$/i.test(t);
+    || /^waiting \d+s delay$/i.test(t)
+    || /^launched new instance\.?$/i.test(t);
   for (let i = raw.length - 1; i >= 0; i -= 1) {
     if (!isTrivial(raw[i])) return raw[i];
   }
   return null;
+}
+
+function pickWarningExplanation(action: LaunchAction): string | null {
+  const err = (action.errorMessage || "").trim();
+  if (action.failureKind === "confirmation") {
+    return err || "A confirmation dialog was not dismissed, so placement could not finish.";
+  }
+  if (err) return err;
+  return pickNonTrivialSmartDecisionLine(action);
 }
 
 function TerminalCompletedTrailing({ action }: { action: LaunchAction }) {
@@ -451,7 +488,10 @@ function LaunchSummarySubstepIcon({
   substep: LaunchActionSubstep;
   warnSubstepIds?: Set<string> | null;
 }) {
-  if (warnSubstepIds?.has(substep.id) && substep.state === "completed") {
+  if (
+    substep.state === "warning"
+    || (warnSubstepIds?.has(substep.id) && substep.state === "completed")
+  ) {
     return <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300/95" strokeWidth={2.2} aria-hidden />;
   }
   if (substep.state === "completed") {
@@ -482,20 +522,10 @@ function LaunchSummaryAppRow({
   const warnSubstepIds = shouldMarkVerifySubstepAsWarning(action)
     ? new Set(["sub-verify"])
     : null;
-  const warningNote = status === "warn" ? pickNonTrivialSmartDecisionLine(action) : null;
+  const warningNote = status === "warn" ? pickWarningExplanation(action) : null;
   const errorNote = status === "error" ? (action.errorMessage || "").trim() : "";
   const decisionLines = appSummaryDecisionLines(action);
   const contentItems = decisionLines.contentItems;
-  const structuredContent = contentItems.length > 0;
-  const contentNotesForOk = structuredContent
-    ? decisionLines.contentNotes.filter((n) => !isAggregateFolderFileOpenedSummaryLine(n))
-    : decisionLines.contentNotes;
-  const okNotes = status === "ok"
-    ? [
-      ...contentNotesForOk,
-      ...(decisionLines.reusableNote ? [decisionLines.reusableNote] : []),
-    ]
-    : [];
   const okPrimary = status === "ok" ? (
     <span
       className="flex h-6 w-6 shrink-0 items-center justify-center self-start text-emerald-400/95"
@@ -511,36 +541,23 @@ function LaunchSummaryAppRow({
   );
   const detailBody =
     status === "ok" ? (
-      okNotes.length > 0 || contentItems.length > 0 ? (
-        <div className="space-y-1">
-          {okNotes.length > 0 ? (
-            <ul className="space-y-0.5">
-              {okNotes.map((note) => (
-                <li key={note} className="text-[11px] leading-snug text-flow-text-secondary break-words">
-                  {note}
-                </li>
-              ))}
-            </ul>
-          ) : null}
-          {contentItems.length > 0 ? (
-            <ul className="space-y-0.5 rounded-lg bg-white/[0.025] px-2 py-1 ring-1 ring-white/5">
-              {contentItems.map((item, index) => {
-                const name = String(item?.name || item?.path || "Content item").trim();
-                const key = `${String(item?.path || name)}:${index}`;
-                return (
-                  <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-snug text-flow-text-secondary">
-                    <span className="shrink-0 leading-none" aria-hidden>
-                      <FileIcon type={fileIconTypeForLaunchSummaryItem(item)} className="h-3.5 w-3.5" />
-                    </span>
-                    <span className="min-w-0 truncate" title={String(item?.path || name)}>
-                      {name}
-                    </span>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
-        </div>
+      contentItems.length > 0 ? (
+        <ul className="space-y-0.5 rounded-lg bg-white/[0.025] px-2 py-1 ring-1 ring-white/5">
+          {contentItems.map((item, index) => {
+            const name = String(item?.name || item?.path || "Content item").trim();
+            const key = `${String(item?.path || name)}:${index}`;
+            return (
+              <li key={key} className="flex min-w-0 items-center gap-1.5 text-[11px] leading-snug text-flow-text-secondary">
+                <span className="shrink-0 leading-none" aria-hidden>
+                  <FileIcon type={fileIconTypeForLaunchSummaryItem(item)} className="h-3.5 w-3.5" />
+                </span>
+                <span className="min-w-0 truncate" title={String(item?.path || name)}>
+                  {name}
+                </span>
+              </li>
+            );
+          })}
+        </ul>
       ) : null
     ) : (
       <ul className="space-y-0.5">
@@ -594,6 +611,29 @@ function Chip({ children }: { children: string }) {
   );
 }
 
+function formatConfirmationCountdownRemaining(
+  deadlineMs: number | null | undefined,
+  nowMs: number,
+): string | null {
+  if (deadlineMs == null || !Number.isFinite(deadlineMs)) return null;
+  const sec = Math.max(0, Math.ceil((deadlineMs - nowMs) / 1000));
+  const m = Math.floor(sec / 60);
+  const s = sec % 60;
+  return `${m}:${String(s).padStart(2, "0")}`;
+}
+
+function confirmationDeadlineMsForPrimaryApp(
+  progress: LaunchProgressSnapshot | null,
+  primary: LaunchAction,
+): number | null {
+  const id = String(primary.id || "").trim();
+  if (!id.startsWith("app:")) return null;
+  const key = id.slice(4);
+  const row = progress?.appLaunchProgress?.find((r) => String(r.key || "").trim() === key);
+  const d = row?.confirmationDeadlineAtMs;
+  return d != null && Number.isFinite(Number(d)) ? Number(d) : null;
+}
+
 function resolveActionDisplayLocation(
   action: LaunchAction,
   progress: LaunchProgressSnapshot | null,
@@ -611,67 +651,6 @@ function resolveActionDisplayLocation(
     }
   }
   if (action.kind === "tab") return "Browser";
-  return null;
-}
-
-type TabHostMeta = {
-  appTitle: string;
-  appIconDataUrl?: string | null;
-};
-
-function normalizeActionUrlKey(raw: string | null | undefined): string {
-  const s = String(raw || "").trim();
-  if (!s) return "";
-  try {
-    const u = new URL(s);
-    return u.href.replace(/\/$/, "").toLowerCase();
-  } catch {
-    return s.toLowerCase();
-  }
-}
-
-function actionUrlMatchKeys(raw: string | null | undefined): string[] {
-  const full = normalizeActionUrlKey(raw);
-  if (!full) return [];
-  const keys = new Set([full]);
-  try {
-    const host = new URL(String(raw || "")).hostname.trim().toLowerCase();
-    if (host) keys.add(`host:${host}`);
-  } catch {
-    // ignore non-URL strings
-  }
-  return Array.from(keys);
-}
-
-function buildTabHostLookup(actions: LaunchAction[] | null | undefined): Map<string, TabHostMeta> {
-  const out = new Map<string, TabHostMeta>();
-  const list = Array.isArray(actions) ? actions : [];
-  for (const a of list) {
-    if (a.kind !== "app") continue;
-    const host: TabHostMeta = {
-      appTitle: String(a.title || "").trim() || "Browser",
-      appIconDataUrl: a.iconDataUrl ?? null,
-    };
-    for (const item of a.contentItems ?? []) {
-      if (String(item?.type || "").toLowerCase() !== "link") continue;
-      for (const k of actionUrlMatchKeys(item?.path ?? "")) {
-        if (!k || out.has(k)) continue;
-        out.set(k, host);
-      }
-    }
-  }
-  return out;
-}
-
-function resolveTabHostForAction(
-  action: LaunchAction,
-  tabHostLookup: Map<string, TabHostMeta>,
-): TabHostMeta | null {
-  if (action.kind !== "tab") return null;
-  for (const k of actionUrlMatchKeys(action.browserTabUrl)) {
-    const host = tabHostLookup.get(k);
-    if (host) return host;
-  }
   return null;
 }
 
@@ -818,67 +797,6 @@ function ActionIcon({
   );
 }
 
-function LaunchActionLeadSurface({
-  action,
-  progress,
-  tabHost,
-  trailing,
-}: {
-  action: LaunchAction;
-  progress: LaunchProgressSnapshot | null;
-  tabHost?: TabHostMeta | null;
-  trailing?: ReactNode;
-}) {
-  const tabHostIconSrc = safeIconSrc(tabHost?.appIconDataUrl ?? undefined);
-  return (
-    <div className="flex min-w-0 flex-1 items-center gap-2.5">
-      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/35 ring-1 ring-white/12">
-        <ActionIcon action={action} size="sm" />
-      </div>
-      <div className="min-w-0 flex-1">
-        <span className="block truncate text-[11px] font-semibold leading-tight text-flow-text-primary">
-          {action.title}
-        </span>
-        {action.kind === "tab" && tabHost?.appTitle ? (
-          <span className="mt-0.5 flex min-w-0 items-center gap-1.5 text-[10px] text-flow-text-muted">
-            <span className="inline-flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-white/[0.06] ring-1 ring-white/12">
-              <Link2 className="h-2.5 w-2.5 text-flow-text-muted/90" aria-hidden />
-            </span>
-            <span className="shrink-0 text-[9px] uppercase tracking-wide text-flow-text-muted/80">
-              Opens with:
-            </span>
-            {tabHostIconSrc ? (
-              <img
-                src={tabHostIconSrc}
-                alt=""
-                className="h-3 w-3 shrink-0 rounded object-cover ring-1 ring-white/20"
-                draggable={false}
-              />
-            ) : (
-              <Globe className="h-3 w-3 shrink-0 text-flow-text-muted" aria-hidden />
-            )}
-          </span>
-        ) : null}
-        <ActionPlacementSummary action={action} progress={progress} compact />
-      </div>
-      {trailing}
-    </div>
-  );
-}
-
-function substepDisplayLabel(s: LaunchActionSubstep): string {
-  if (s.id === "sub-confirm" && s.state === "completed" && s.label === "Waiting for confirmation") {
-    return "Confirmed";
-  }
-  return s.label;
-}
-
-function shouldMarkVerifySubstepAsWarning(action: LaunchAction): boolean {
-  if (action.state !== "warning") return false;
-  const pills = Array.isArray(action.pills) ? action.pills : [];
-  return pills.some((p) => String(p || "").trim().toLowerCase() === "constrained");
-}
-
 function humanLaunchActionState(
   state: LaunchAction["state"],
   runState: string | null | undefined,
@@ -912,6 +830,81 @@ function actionStateLabel(
   return humanLaunchActionState(action.state, runState);
 }
 
+function LaunchActionLeadSurface({
+  action,
+  progress,
+  linkedTabs,
+  emphasisTabId,
+  trailing,
+}: {
+  action: LaunchAction;
+  progress: LaunchProgressSnapshot | null;
+  linkedTabs?: LaunchAction[] | null;
+  emphasisTabId?: string | null;
+  trailing?: ReactNode;
+}) {
+  return (
+    <div className="flex min-w-0 flex-1 items-start gap-2.5">
+      <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md bg-black/35 ring-1 ring-white/12">
+        <ActionIcon action={action} size="sm" />
+      </div>
+      <div className="min-w-0 flex-1">
+        <div className="flex min-w-0 items-start justify-between gap-2">
+          <div className="min-w-0 flex-1 pr-1">
+            <span className="block truncate text-[11px] font-semibold leading-tight text-flow-text-primary">
+              {action.title}
+            </span>
+            <ActionPlacementSummary action={action} progress={progress} compact />
+          </div>
+          {trailing ? (
+            <div className="shrink-0 self-start pt-0.5">
+              {trailing}
+            </div>
+          ) : null}
+        </div>
+        {linkedTabs?.length ? (
+          <ul className="mt-1.5 space-y-1 border-t border-white/[0.08] pt-1.5">
+            {linkedTabs.map((t) => {
+              const emphasized = emphasisTabId === t.id;
+              return (
+                <li key={t.id} className="flex items-start gap-2">
+                  <div className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded bg-black/25 ring-1 ring-white/10">
+                    <ActionIcon action={t} size="sm" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <span
+                      className={
+                        emphasized
+                          ? "block truncate text-[11px] font-semibold leading-tight text-sky-100"
+                          : "block truncate text-[11px] font-medium leading-tight text-flow-text-primary/95"
+                      }
+                    >
+                      {t.title}
+                    </span>
+                    <p className="mt-0.5 truncate text-[10px] text-flow-text-muted">
+                      {humanLaunchActionState(t.state, progress?.runState)}
+                    </p>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function substepDisplayLabel(s: LaunchActionSubstep): string {
+  return s.label;
+}
+
+function shouldMarkVerifySubstepAsWarning(action: LaunchAction): boolean {
+  if (action.state !== "warning") return false;
+  const pills = Array.isArray(action.pills) ? action.pills : [];
+  return pills.some((p) => String(p || "").trim().toLowerCase() === "constrained");
+}
+
 function displaySubstepsForAction(
   action: LaunchAction,
   runState: string | null | undefined,
@@ -938,7 +931,7 @@ function displaySubstepsForAction(
 
   const firstQueued = next.findIndex((s) => s.state === "queued");
   const hadStartedWork = next.some(
-    (s) => s.state === "completed" || s.state === "failed",
+    (s) => s.state === "completed" || s.state === "warning" || s.state === "failed",
   );
   if (hadStartedWork && firstQueued >= 0) next[firstQueued].state = "failed";
   return next;
@@ -957,7 +950,7 @@ function SubstepList({
     <ul className="mt-1.5 space-y-1 border-t border-white/[0.08] pt-1.5">
       {subs.map((s) => (
         <li key={s.id} className="flex items-center gap-2 text-[11px] text-flow-text-secondary">
-          {(warnSubstepIds?.has(s.id) && s.state === "completed") ? (
+          {(warnSubstepIds?.has(s.id) && s.state === "completed") || s.state === "warning" ? (
             <AlertTriangle className="h-3.5 w-3.5 shrink-0 text-amber-300/95" strokeWidth={2.25} aria-hidden />
           ) : s.state === "running" && !reducedMotion ? (
             <Loader2 className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/80" aria-hidden />
@@ -1129,10 +1122,6 @@ export function LaunchCenterInspector({
     () => orderLaunchActionsForProgressDisplay(actions ?? []),
     [actions],
   );
-  const tabHostLookup = useMemo(
-    () => buildTabHostLookup(timelineActions),
-    [timelineActions],
-  );
 
   const pauseAccumRef = useRef(0);
   const pauseAnchorRef = useRef<number | null>(null);
@@ -1218,6 +1207,19 @@ export function LaunchCenterInspector({
     return computeEta({ nowMs: Date.now(), actions: timelineActions, progress: progressModel });
   }, [timelineActions, hasTimeline, progressModel]);
 
+  const awaitingConfirmationActionIds = useMemo(() => {
+    const rows = progress?.appLaunchProgress;
+    if (!Array.isArray(rows)) return null;
+    const ids = new Set<string>();
+    for (const row of rows) {
+      if (String(row?.step || "").trim().toLowerCase() === "awaiting-confirmation") {
+        const k = String(row?.key || "").trim();
+        if (k) ids.add(`app:${k}`);
+      }
+    }
+    return ids.size > 0 ? ids : null;
+  }, [progress?.appLaunchProgress]);
+
   const buckets = useMemo(() => {
     if (!hasTimeline || !timelineActions.length || !progressModel) return null;
     const cap = showAllCompleted ? 999 : COMPLETED_CAP;
@@ -1225,10 +1227,41 @@ export function LaunchCenterInspector({
       actions: timelineActions,
       activeActionId: progress?.activeActionId ?? null,
       completedCap: cap,
+      awaitingConfirmationActionIds,
     });
-  }, [timelineActions, hasTimeline, progressModel, progress?.activeActionId, showAllCompleted]);
+  }, [timelineActions, hasTimeline, progressModel, progress?.activeActionId, showAllCompleted, awaitingConfirmationActionIds]);
 
   const renderBuckets = buckets;
+
+  const awaitingConfirmationRows = useMemo(() => {
+    const rows = progress?.appLaunchProgress;
+    if (!Array.isArray(rows)) return [];
+    return rows.filter(
+      (r) => String(r?.step || "").trim().toLowerCase() === "awaiting-confirmation",
+    );
+  }, [progress?.appLaunchProgress]);
+
+  /** Popup list: prefer `appLaunchProgress` (same source as per-app rows), then any extra bucket entries. */
+  const awaitingPopupActions = useMemo((): LaunchAction[] => {
+    const bucketList = buckets?.awaitingConfirmation ?? [];
+    const out: LaunchAction[] = [];
+    const seen = new Set<string>();
+    const add = (a: LaunchAction | null | undefined) => {
+      if (!a?.id || seen.has(a.id)) return;
+      seen.add(a.id);
+      out.push(a);
+    };
+
+    for (const row of awaitingConfirmationRows) {
+      const k = String(row?.key || "").trim();
+      if (!k) continue;
+      const id = `app:${k}`;
+      const timelineAct = timelineActions.find((act) => act.id === id && act.kind === "app");
+      add(timelineAct ?? syntheticAwaitingLaunchAction(row, id));
+    }
+    for (const a of bucketList) add(a);
+    return out;
+  }, [awaitingConfirmationRows, timelineActions, buckets?.awaitingConfirmation]);
 
   /** Total attached content targets across timeline actions (for Run overview). */
   const runOverviewContentItemCount = useMemo(() => {
@@ -1708,14 +1741,6 @@ export function LaunchCenterInspector({
                 ) : null}
               </div>
             ) : null}
-            {isLaunching && waitingOnConfirmationUi ? (
-              <div className="mt-2 rounded-lg border border-amber-400/25 bg-amber-500/10 px-2.5 py-2 text-[11px] leading-snug text-amber-100/95 ring-1 ring-amber-400/20">
-                <p className="font-semibold text-amber-50/95">Waiting on a confirmation dialog</p>
-                <p className="mt-0.5 text-amber-100/85">
-                  The launch timer is paused. Queued steps stay deferred until the dialog is dismissed.
-                </p>
-              </div>
-            ) : null}
             {isLaunching ? (
               <div className="mt-2 flex justify-end">
                 <button
@@ -1730,7 +1755,67 @@ export function LaunchCenterInspector({
           </div>
 
           <>
-              {renderBuckets?.current ? (
+              {awaitingPopupActions.length > 0 ? (
+                <div
+                  className="relative isolate mt-3 rounded-xl border border-amber-400/30 bg-gradient-to-b from-amber-500/[0.08] to-flow-bg-secondary/80 p-3"
+                >
+                  <p className="relative mb-1.5 text-[12px] font-semibold tracking-wide text-amber-300/90">
+                    Popup detected
+                  </p>
+                  <p className="mb-2 text-[10px] leading-snug text-amber-200/75">
+                    Please close each app&apos;s popup so FlowSwitch can finish positioning it. Other apps will continue to launch in the meantime.
+                  </p>
+                  <ul className="min-w-0 space-y-1.5">
+                    {awaitingPopupActions.map((a) => {
+                      const lead = resolveActionLeadForProgressCard(a, timelineActions);
+                      return (
+                      <li key={a.id} className="list-none min-w-0">
+                        <div
+                          className={LAUNCH_LEAD_LAYOUT_SHELL_CLASS}
+                          style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
+                        >
+                          <LaunchActionLeadSurface
+                            action={lead.primary}
+                            linkedTabs={lead.linkedTabs}
+                            emphasisTabId={lead.emphasisTabId}
+                            progress={progress}
+                            trailing={(() => {
+                              const deadline = confirmationDeadlineMsForPrimaryApp(
+                                progress,
+                                lead.primary,
+                              );
+                              const cd = formatConfirmationCountdownRemaining(deadline, nowMs);
+                              return (
+                                <span className="flex shrink-0 flex-col items-end gap-0.5">
+                                  {cd ? (
+                                    <span
+                                      className="tabular-nums text-[10px] font-semibold text-amber-100/95"
+                                      title="Time remaining before this confirmation wait times out"
+                                    >
+                                      {cd}
+                                    </span>
+                                  ) : null}
+                                  <span className="shrink-0 rounded-md bg-amber-500/20 px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wide text-amber-200 ring-1 ring-amber-400/35">
+                                    Confirm
+                                  </span>
+                                </span>
+                              );
+                            })()}
+                          />
+                        </div>
+                      </li>
+                      );
+                    })}
+                  </ul>
+                </div>
+              ) : null}
+
+              {renderBuckets?.current ? (() => {
+                const lead = resolveActionLeadForProgressCard(
+                  renderBuckets.current,
+                  timelineActions,
+                );
+                return (
                 <div
                   className={`relative isolate mt-3 rounded-xl border border-flow-accent-blue/35 bg-gradient-to-b from-flow-text-primary/[0.07] to-flow-bg-secondary/80 p-3 ${
                     renderBuckets.current.state === "running"
@@ -1746,28 +1831,38 @@ export function LaunchCenterInspector({
                     style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
                   >
                     <LaunchActionLeadSurface
-                      action={renderBuckets.current}
+                      action={lead.primary}
+                      linkedTabs={lead.linkedTabs}
+                      emphasisTabId={lead.emphasisTabId}
                       progress={progress}
-                      tabHost={resolveTabHostForAction(renderBuckets.current, tabHostLookup)}
                     />
                   </div>
                   <div className="relative min-w-0">
                     <CurrentActionExpandedBody
-                      action={renderBuckets.current}
+                      action={lead.primary}
                       reducedMotion={reducedMotion}
                       runState={runState}
                     />
                   </div>
                 </div>
-              ) : null}
+                );
+              })() : null}
 
-              {renderBuckets && renderBuckets.upcoming.length > 0 && timelineActions.length > 1 ? (
+              {renderBuckets
+              && renderBuckets.upcoming.some(
+                (a) => !shouldSkipBucketActionForNestedTabDisplay(a, timelineActions),
+              )
+              && timelineActions.length > 1 ? (
                 <div className="mt-3">
                   <p className="mb-1 text-[10px] font-semibold uppercase tracking-wide text-flow-text-muted">
                     Upcoming
                   </p>
-                  <ul className="scrollbar-elegant max-h-[min(28vh,12rem)] min-w-0 space-y-1 overflow-y-auto overscroll-contain pr-2 sm:pr-3">
-                    {renderBuckets.upcoming.map((a) => (
+                  <ul className="min-w-0 space-y-1">
+                    {renderBuckets.upcoming
+                      .filter((a) => !shouldSkipBucketActionForNestedTabDisplay(a, timelineActions))
+                      .map((a) => {
+                      const lead = resolveActionLeadForProgressCard(a, timelineActions);
+                      return (
                       <li key={a.id} className="list-none min-w-0 text-flow-text-secondary">
                         <div className="rounded-[10px] p-px ring-1 ring-inset ring-transparent">
                           <div
@@ -1775,16 +1870,13 @@ export function LaunchCenterInspector({
                             style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
                           >
                             <LaunchActionLeadSurface
-                              action={a}
+                              action={lead.primary}
+                              linkedTabs={lead.linkedTabs}
+                              emphasisTabId={lead.emphasisTabId}
                               progress={progress}
-                              tabHost={resolveTabHostForAction(a, tabHostLookup)}
                               trailing={(
                                 <>
-                                  {waitingOnConfirmationUi && a.state === "queued" ? (
-                                    <span className="shrink-0 rounded bg-white/8 px-1.5 py-0.5 text-[9px] font-medium text-flow-text-muted ring-1 ring-white/10">
-                                      Deferred
-                                    </span>
-                                  ) : null}
+                                  {null}
                                   {a.state === "running" ? (
                                     <Loader2
                                       className="h-3.5 w-3.5 shrink-0 animate-spin text-flow-accent-blue/70"
@@ -1797,7 +1889,8 @@ export function LaunchCenterInspector({
                           </div>
                         </div>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </div>
               ) : null}
@@ -1827,9 +1920,13 @@ export function LaunchCenterInspector({
                     </button>
                   ) : null}
                 </div>
-                <ul className="scrollbar-elegant max-h-[min(32vh,14rem)] min-w-0 space-y-1 overflow-y-auto overscroll-contain pr-2 sm:pr-3">
+                <ul className="min-w-0 space-y-1">
                   {renderBuckets?.completed.length ? (
-                    renderBuckets.completed.map((a) => (
+                    renderBuckets.completed
+                      .filter((a) => !shouldSkipBucketActionForNestedTabDisplay(a, timelineActions))
+                      .map((a) => {
+                      const lead = resolveActionLeadForProgressCard(a, timelineActions);
+                      return (
                       <li key={a.id} className="list-none space-y-1 rounded-[10px] bg-white/[0.04] p-0.5">
                         <div className="rounded-[10px] p-px ring-1 ring-inset ring-transparent">
                           <div
@@ -1837,30 +1934,24 @@ export function LaunchCenterInspector({
                             style={LAUNCH_LEAD_LAYOUT_SHELL_STYLE}
                           >
                             <LaunchActionLeadSurface
-                              action={a}
+                              action={lead.primary}
+                              linkedTabs={lead.linkedTabs}
+                              emphasisTabId={lead.emphasisTabId}
                               progress={progress}
-                              tabHost={resolveTabHostForAction(a, tabHostLookup)}
                               trailing={<TerminalCompletedTrailing action={a} />}
                             />
                           </div>
                         </div>
-                        <div className="flex flex-wrap items-center gap-1 px-0.5">
-                          {visibleLaunchPills(a.pills).map((p) => (
-                            <span
-                              key={p}
-                              className="rounded bg-white/5 px-1 py-0.5 text-[9px] text-flow-text-muted ring-1 ring-white/10"
-                            >
-                              {p}
-                            </span>
-                          ))}
-                          {actionDurationLabel(a) ? (
+                        {actionDurationLabel(a) ? (
+                          <div className="px-0.5">
                             <span className="text-[10px] text-flow-text-muted tabular-nums">
                               {actionDurationLabel(a)}
                             </span>
-                          ) : null}
-                        </div>
+                          </div>
+                        ) : null}
                       </li>
-                    ))
+                      );
+                    })
                   ) : (
                     <li className="text-[11px] text-flow-text-muted">No completed actions yet.</li>
                   )}

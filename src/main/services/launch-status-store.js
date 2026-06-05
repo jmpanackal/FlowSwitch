@@ -30,16 +30,23 @@ const cloneLaunchRowIconDataUrl = (value) => {
 };
 
 const cloneAppLaunchProgress = (rows) => (
-  (Array.isArray(rows) ? rows : []).map((item, index) => ({
-    key: String(item?.key || '').trim() || `app-${index}`,
-    name: String(item?.name || '').trim() || 'App',
-    step: normalizeAppLaunchStep(item?.step),
-    iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
-    location: item?.location ? String(item.location) : undefined,
-    outcomes: Array.isArray(item?.outcomes)
-      ? item.outcomes.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 6)
-      : undefined,
-  }))
+  (Array.isArray(rows) ? rows : []).map((item, index) => {
+    const deadline = clampNullableFiniteNumber(item?.confirmationDeadlineAtMs);
+    const base = {
+      key: String(item?.key || '').trim() || `app-${index}`,
+      name: String(item?.name || '').trim() || 'App',
+      step: normalizeAppLaunchStep(item?.step),
+      iconDataUrl: cloneLaunchRowIconDataUrl(item?.iconDataUrl),
+      location: item?.location ? String(item.location) : undefined,
+      outcomes: Array.isArray(item?.outcomes)
+        ? item.outcomes.map((v) => String(v || '').trim()).filter(Boolean).slice(0, 6)
+        : undefined,
+    };
+    if (deadline != null) {
+      return { ...base, confirmationDeadlineAtMs: deadline };
+    }
+    return base;
+  })
 );
 
 const normalizeLaunchActionState = (value) => {
@@ -63,7 +70,7 @@ const normalizeLaunchActionKind = (value) => {
 const normalizeLaunchFailureKind = (value) => {
   if (value == null) return null;
   const normalized = String(value || '').trim().toLowerCase();
-  const allowed = new Set(['launch', 'placement', 'verification']);
+  const allowed = new Set(['launch', 'placement', 'verification', 'confirmation']);
   return allowed.has(normalized) ? normalized : null;
 };
 
@@ -166,6 +173,9 @@ const cloneLaunchActions = (value) => {
     const browserTabUrl = item?.browserTabUrl != null
       ? (clampString(item.browserTabUrl, 1000, { allowNull: true }) || null)
       : null;
+    const hostAppInstanceId = item?.hostAppInstanceId != null
+      ? (clampString(item.hostAppInstanceId, 128, { allowNull: true }) || null)
+      : null;
 
     return {
       id,
@@ -178,6 +188,7 @@ const cloneLaunchActions = (value) => {
       contentItems,
       contentSubstepMode,
       contentOpenFailed,
+      isAwaitingConfirmation: Boolean(item?.isAwaitingConfirmation),
       errorMessage,
       failureKind,
       startedAtMs,
@@ -185,6 +196,7 @@ const cloneLaunchActions = (value) => {
       substeps,
       targetLocation,
       browserTabUrl,
+      ...(hostAppInstanceId ? { hostAppInstanceId } : {}),
     };
   });
 };
@@ -201,6 +213,7 @@ const clonePendingConfirmations = (pendingConfirmations) => (
     status: normalizePendingStatus(item?.status),
     handle: item?.handle ? String(item.handle) : undefined,
     resolvedAt: Number.isFinite(Number(item?.resolvedAt)) ? Number(item.resolvedAt) : undefined,
+    confirmationDeadlineAtMs: clampNullableFiniteNumber(item?.confirmationDeadlineAtMs),
   }))
 );
 

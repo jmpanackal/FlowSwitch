@@ -203,6 +203,7 @@ const {
   getVisibleWindowInfos,
   placeChromiumByRankedWindows,
   waitForWindowResponsive,
+  getPowerShellSpawnCount,
 } = createWindowPlacementRuntime({
   isChromiumFamilyProcessKey,
   isChromiumTopLevelWindowRow,
@@ -856,6 +857,7 @@ const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
   getForegroundWindowHandle,
   waitForWindowResponsive,
   placeChromiumByRankedWindows,
+  getPowerShellSpawnCount,
   moveWindowToBounds,
   bringWindowHandleToFront,
   stabilizeKnownHandlePlacement,

@@ -5,6 +5,13 @@ const {
   createVerifyAndCorrectWindowPlacement,
   isRectCloseToTargetBounds,
 } = require('./placement-orchestrator');
+const {
+  getCachedEnum,
+  setCachedEnum,
+  invalidateEnumHint,
+} = require('./window-enum-cache');
+const psRunspace = require('./ps-runspace');
+const { getProcessScanNames } = require('./process-hints');
 
 const createWindowPlacementRuntime = (deps) => {
   const {
@@ -24,6 +31,50 @@ const createWindowPlacementRuntime = (deps) => {
   const clamp = (value, min, max) => Math.max(min, Math.min(max, value));
 
   const normalizeWindowClassName = (value) => String(value || '').trim().toLowerCase();
+  const isFlagEnabled = (flagName, defaultValue = false) => {
+    const raw = String(process.env[flagName] || '').trim().toLowerCase();
+    if (!raw) return defaultValue;
+    return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+  };
+  const shouldUseRectFfi = () => (
+    process.platform === 'win32'
+    && process.env.FLOWSWITCH_USE_RECT_FFI !== '0'
+    && isFlagEnabled('FLOWSWITCH_USE_RECT_FFI', false)
+  );
+  const shouldUseMoveFfi = () => (
+    process.platform === 'win32'
+    && process.env.FLOWSWITCH_USE_MOVE_FFI !== '0'
+    && isFlagEnabled('FLOWSWITCH_USE_MOVE_FFI', false)
+  );
+  const shouldUseEnumCache = () => isFlagEnabled('FLOWSWITCH_USE_ENUM_CACHE', true);
+  const shouldUsePsRunspace = () => (
+    process.platform === 'win32' && isFlagEnabled('FLOWSWITCH_USE_PS_RUNSPACE', false)
+  );
+  const powershellSpawnCounter = { count: 0 };
+
+  let _win32Rect = null;
+  const loadWin32Rect = () => {
+    if (!shouldUseRectFfi()) return null;
+    if (_win32Rect !== null) return _win32Rect || null;
+    try {
+      _win32Rect = require('./win32-window-rect');
+    } catch {
+      _win32Rect = undefined;
+    }
+    return _win32Rect || null;
+  };
+
+  let _win32Move = null;
+  const loadWin32Move = () => {
+    if (!shouldUseMoveFfi()) return null;
+    if (_win32Move !== null) return _win32Move || null;
+    try {
+      _win32Move = require('./win32-window-move');
+    } catch {
+      _win32Move = undefined;
+    }
+    return _win32Move || null;
+  };
 
   const getPlacementCommandBounds = (bounds, processHintLc) => {
     if (!bounds) return bounds;
@@ -361,6 +412,12 @@ const createWindowPlacementRuntime = (deps) => {
         return;
       }
 
+      const placementNameHintsPs = (() => {
+        const list = getProcessScanNames(safeProcessNameHint);
+        if (!list.length) return '@()';
+        return `@(${list.map((n) => `'${String(n).replace(/'/g, "''")}'`).join(',')})`;
+      })();
+
       const commandBounds = frameCompensationMode === 'none'
         ? bounds
         : getPlacementCommandBounds(bounds, safeProcessNameHint);
@@ -522,15 +579,29 @@ const createWindowPlacementRuntime = (deps) => {
           }
         } catch {}
       }
+      $uintTree = New-Object 'System.Collections.Generic.HashSet[uint32]'
+      foreach ($tp in $treePids) {
+        try { [void]$uintTree.Add([uint32][int]$tp) } catch {}
+      }
+      if ($uintTree.Count -gt 0) {
+        foreach ($eh in [Win32]::FindVisibleWindowsForPids($uintTree, $excludedSet)) {
+          [void]$candidates.Add($eh)
+        }
+      }
     }
 
-    # Strategy 2: EnumWindows — compiled C# callback finds ALL visible windows, not just MainWindowHandle
-    if ($candidates.Count -eq 0 -and -not [string]::IsNullOrWhiteSpace("${safeProcessNameHint.replace(/"/g, '`"')}")) {
+    # Strategy 2: EnumWindows by process image name(s) — UWP shims often spawn a child whose HWND
+    # never appears on MainWindowHandle of the launcher PID (e.g. mediaplayer -> Microsoft.Media.Player).
+    $placementHintNames = ${placementNameHintsPs}
+    if ($candidates.Count -eq 0 -and $placementHintNames.Count -gt 0) {
       $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
-      try {
-        $procs = Get-Process -Name "${safeProcessNameHint.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
-        foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
-      } catch {}
+      foreach ($hn in $placementHintNames) {
+        if ([string]::IsNullOrWhiteSpace($hn)) { continue }
+        try {
+          $procs = Get-Process -Name $hn -ErrorAction SilentlyContinue
+          foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
+        } catch {}
+      }
       if ($pids.Count -gt 0) {
         $enumResults = [Win32]::FindVisibleWindowsForPids($pids, $excludedSet)
         foreach ($eh in $enumResults) { [void]$candidates.Add($eh) }
@@ -576,6 +647,10 @@ const createWindowPlacementRuntime = (deps) => {
           const output = String(stdout || '').trim();
           const [status, handle] = output.split('|');
           const applied = (status || '').toLowerCase() === 'ok';
+          if (applied && shouldUseEnumCache()) {
+            const enumInvKey = getProcessScanNames(safeProcessNameHint).join('|') || safeProcessNameHint;
+            invalidateEnumHint(enumInvKey, diagnosticsContext?.runId || '__global__');
+          }
           if (!applied && diagnostics) {
             diagnostics.failure({
               ...diagnosticsContext,
@@ -601,7 +676,7 @@ const createWindowPlacementRuntime = (deps) => {
     })
   );
 
-  const moveSpecificWindowHandleToBounds = ({
+  const moveSpecificWindowHandleToBounds = async ({
     handle,
     bounds,
     processHintLc = '',
@@ -611,32 +686,64 @@ const createWindowPlacementRuntime = (deps) => {
     frameCompensationMode = 'auto',
     diagnostics = null,
     diagnosticsContext = {},
-  }) => (
-    new Promise((resolve) => {
-      const safeHandle = String(handle || '').trim();
-      if (!safeHandle || !bounds) {
-        resolve({ applied: false, handle: null });
-        return;
+  }) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle || !bounds) {
+      return { applied: false, handle: null };
+    }
+
+    const processKey = String(processHintLc || diagnosticsContext?.processHintLc || '').trim().toLowerCase();
+    const commandBounds = frameCompensationMode === 'none'
+      ? bounds
+      : getPlacementCommandBounds(bounds, processKey);
+    const left = Number(commandBounds.left || 0);
+    const top = Number(commandBounds.top || 0);
+    const width = Math.max(120, Number(commandBounds.width || 800));
+    const height = Math.max(120, Number(commandBounds.height || 600));
+    const basePosFlags = 0x0044;
+    const setPosFlags = positionOnlyBeforeMaximize
+      ? 0x0045
+      : (skipFrameChanged ? basePosFlags : (basePosFlags | 0x0020));
+    const windowState = commandBounds.state === 'maximized'
+      ? 3 // SW_MAXIMIZE
+      : commandBounds.state === 'minimized'
+        ? 6 // SW_MINIMIZE
+        : 5; // SW_SHOW
+
+    const ffiMove = loadWin32Move();
+    if (ffiMove) {
+      try {
+        const result = await ffiMove.moveWindowHandleToBounds(safeHandle, commandBounds, {
+          aggressiveMaximize,
+          positionOnlyBeforeMaximize,
+          skipFrameChanged,
+        });
+        if (result?.applied) {
+          if (shouldUseEnumCache()) {
+            invalidateEnumHint(processKey || processHintLc, diagnosticsContext?.runId || '__global__');
+          }
+          return {
+            applied: true,
+            handle: String(result.handle || safeHandle),
+            status: 'ffi-applied',
+            outputSnippet: null,
+            error: null,
+          };
+        }
+      } catch (error) {
+        if (diagnostics) {
+          diagnostics.failure({
+            ...diagnosticsContext,
+            strategy: 'move-specific-window-handle',
+            reason: 'ffi-placement-failed-fallback-powershell',
+            handle: safeHandle,
+            error: String(error?.message || error),
+          });
+        }
       }
+    }
 
-      const processKey = String(processHintLc || diagnosticsContext?.processHintLc || '').trim().toLowerCase();
-      const commandBounds = frameCompensationMode === 'none'
-        ? bounds
-        : getPlacementCommandBounds(bounds, processKey);
-      const left = Number(commandBounds.left || 0);
-      const top = Number(commandBounds.top || 0);
-      const width = Math.max(120, Number(commandBounds.width || 800));
-      const height = Math.max(120, Number(commandBounds.height || 600));
-      const basePosFlags = 0x0044;
-      const setPosFlags = positionOnlyBeforeMaximize
-        ? 0x0045
-        : (skipFrameChanged ? basePosFlags : (basePosFlags | 0x0020));
-      const windowState = commandBounds.state === 'maximized'
-        ? 3 // SW_MAXIMIZE
-        : commandBounds.state === 'minimized'
-          ? 6 // SW_MINIMIZE
-          : 5; // SW_SHOW
-
+    return new Promise((resolve) => {
       const psScript = `
   Add-Type -TypeDefinition @"
   using System;
@@ -680,6 +787,7 @@ const createWindowPlacementRuntime = (deps) => {
   }
   Write-Output "ok|${safeHandle.replace(/"/g, '`"')}"`;
 
+      powershellSpawnCounter.count += 1;
       execFile(
         'powershell.exe',
         ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
@@ -688,6 +796,9 @@ const createWindowPlacementRuntime = (deps) => {
           const output = String(stdout || '').trim();
           const [status, outHandle] = output.split('|');
           const applied = (status || '').toLowerCase() === 'ok';
+          if (applied && shouldUseEnumCache()) {
+            invalidateEnumHint(processKey || processHintLc, diagnosticsContext?.runId || '__global__');
+          }
           if (!applied && diagnostics) {
             diagnostics.failure({
               ...diagnosticsContext,
@@ -708,8 +819,8 @@ const createWindowPlacementRuntime = (deps) => {
           });
         },
       );
-    })
-  );
+    });
+  };
 
   const maximizeWindowHandle = (handle) => (
     new Promise((resolve) => {
@@ -977,6 +1088,7 @@ const createWindowPlacementRuntime = (deps) => {
       const rows = await getVisibleWindowInfos(safeProcess, {
         diagnostics,
         diagnosticsContext,
+        runId: diagnosticsContext?.runId,
       });
       let candidates = rows
         .filter((row) => row?.handle)
@@ -1210,7 +1322,7 @@ const createWindowPlacementRuntime = (deps) => {
         lastRect = measuredRect;
         const onTarget = isWindowOnTargetMonitor({ rect: measuredRect, monitor, bounds });
         const closeEnough = bounds.state === 'normal'
-          ? isRectCloseToTargetBounds(measuredRect, bounds, 8)
+          ? isRectCloseToTargetBounds(measuredRect, bounds, 20)
           : true;
         if (onTarget && closeEnough) {
           return { verified: true, corrected, handle: safeHandle };
@@ -1224,7 +1336,7 @@ const createWindowPlacementRuntime = (deps) => {
             && Math.abs(Number(previousMeasuredRect.height || 0) - Number(measuredRect.height || 0)) <= 2
           );
           stagnantMeasurementCount = stagnant ? (stagnantMeasurementCount + 1) : 0;
-          if (stagnantMeasurementCount >= 1) {
+          if (stagnantMeasurementCount >= 2) {
             stoppedForStagnation = true;
             break;
           }
@@ -1337,6 +1449,22 @@ const createWindowPlacementRuntime = (deps) => {
         return;
       }
 
+      const ffiRect = loadWin32Rect();
+      if (ffiRect) {
+        try {
+          const result = ffiRect.getWindowPlacementRects(safeHandle);
+          if (result && typeof result === 'object') {
+            resolve({
+              outerRect: result.outerRect || null,
+              visibleRect: result.visibleRect || null,
+            });
+            return;
+          }
+        } catch {
+          // Fall back to PowerShell.
+        }
+      }
+
       const psScript = `
   Add-Type -TypeDefinition @"
   using System;
@@ -1385,6 +1513,7 @@ const createWindowPlacementRuntime = (deps) => {
   }
   $out | ConvertTo-Json -Depth 4`;
 
+      powershellSpawnCounter.count += 1;
       execFile(
         'powershell.exe',
         ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
@@ -1540,153 +1669,224 @@ const createWindowPlacementRuntime = (deps) => {
     describeMonitor,
   });
 
-  const getVisibleWindowInfos = (processName, options = {}) => (
-    new Promise((resolve) => {
-      const diagnostics = options?.diagnostics || null;
-      const diagnosticsContext = options?.diagnosticsContext || {};
-      const expectNonEmpty = options?.expectNonEmpty === true;
-      const includeNonVisible = options?.includeNonVisible === true;
-      const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
-      if (!safeName) { resolve([]); return; }
+  const getVisibleWindowInfos = async (processName, options = {}) => {
+    const diagnostics = options?.diagnostics || null;
+    const diagnosticsContext = options?.diagnosticsContext || {};
+    const expectNonEmpty = options?.expectNonEmpty === true;
+    const includeNonVisible = options?.includeNonVisible === true;
+    const runId = String(options?.runId || diagnosticsContext?.runId || '__global__').trim();
+    const safeName = String(processName || '').trim().toLowerCase().replace(/\.exe$/i, '');
+    if (!safeName) return [];
 
-      const psScript = `
-  Add-Type -TypeDefinition @"
-  using System;
-  using System.Collections.Generic;
-  using System.Runtime.InteropServices;
-  using System.Text;
-  public static class WinEnum {
-    [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
-    [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
-    [StructLayout(LayoutKind.Sequential)]
-    public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
-    public delegate bool EnumWinProc(IntPtr hWnd, IntPtr lp);
-    [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWinProc cb, IntPtr lp);
-    [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
-    [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
-    [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
-    [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
-    [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
-    [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
-    [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
-    [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
-    public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids, bool includeNonVisible) {
-      var r = new List<Dictionary<string, object>>();
-      EnumWindows((h, l) => {
-        if (!includeNonVisible && !IsWindowVisible(h)) return true;
-        uint p; GetWindowThreadProcessId(h, out p);
-        if (!pids.Contains(p)) return true;
-        RECT rect;
-        if (!GetWindowRect(h, out rect)) return true;
-        int width = rect.Right - rect.Left;
-        int height = rect.Bottom - rect.Top;
-        if (!includeNonVisible && (width <= 80 || height <= 80)) return true;
-        long exStyle = GetWindowLongPtr(h, -20).ToInt64();
-        bool isToolWindow = (exStyle & 0x00000080L) != 0; // WS_EX_TOOLWINDOW
-        int cloaked = 0;
-        try { DwmGetWindowAttribute(h, 14, out cloaked, 4); } catch { cloaked = 0; } // DWMWA_CLOAKED
-        var cls = new StringBuilder(256);
-        GetClassName(h, cls, cls.Capacity);
-        var title = new StringBuilder(256);
-        GetWindowText(h, title, title.Capacity);
-        int titleLen = GetWindowTextLength(h);
-        IntPtr owner = GetWindow(h, 4); // GW_OWNER
-        bool hasOwner = owner != IntPtr.Zero;
-        bool topMost = (exStyle & 0x00000008L) != 0; // WS_EX_TOPMOST
-        var row = new Dictionary<string, object>();
-        row["handle"] = ((long)h).ToString();
-        row["width"] = width;
-        row["height"] = height;
-        row["area"] = width * height;
-        row["enabled"] = IsWindowEnabled(h);
-        row["isMinimized"] = IsIconic(h);
-        row["hung"] = IsHungAppWindow(h);
-        row["tool"] = isToolWindow;
-        row["cloaked"] = cloaked != 0;
-        row["className"] = cls.ToString();
-        row["title"] = title.ToString();
-        row["titleLength"] = titleLen;
-        row["hasOwner"] = hasOwner;
-        row["topMost"] = topMost;
-        row["isWindowVisible"] = IsWindowVisible(h);
-        r.Add(row);
-        return true;
-      }, IntPtr.Zero);
-      return r;
+    const scanNames = getProcessScanNames(safeName);
+    const enumCacheKey = scanNames.join('|');
+
+    if (shouldUseEnumCache() && runId) {
+      const cached = getCachedEnum(enumCacheKey, runId);
+      if (cached) return cached;
     }
+
+    const normalizeRows = (rawRows) => (
+      (Array.isArray(rawRows) ? rawRows : [rawRows])
+        .filter(Boolean)
+        .map((row) => ({
+          handle: String(row.handle || ''),
+          width: Number(row.width || 0),
+          height: Number(row.height || 0),
+          area: Number(row.area || 0),
+          enabled: Boolean(row.enabled),
+          isMinimized: Boolean(row.isMinimized),
+          hung: Boolean(row.hung),
+          tool: Boolean(row.tool),
+          cloaked: Boolean(row.cloaked),
+          className: String(row.className || ''),
+          title: String(row.title || ''),
+          titleLength: Number(row.titleLength || 0),
+          hasOwner: Boolean(row.hasOwner),
+          topMost: Boolean(row.topMost),
+          isWindowVisible: Boolean(row.isWindowVisible),
+        }))
+        .filter((row) => row.handle)
+    );
+
+    const winEnumCSharp = `
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+public static class WinEnum {
+  [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
+  [DllImport("user32.dll")] public static extern bool SetProcessDpiAwarenessContext(IntPtr dpiContext);
+  [StructLayout(LayoutKind.Sequential)]
+  public struct RECT { public int Left; public int Top; public int Right; public int Bottom; }
+  public delegate bool EnumWinProc(IntPtr hWnd, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool EnumWindows(EnumWinProc cb, IntPtr lp);
+  [DllImport("user32.dll")] public static extern bool IsWindowVisible(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsWindowEnabled(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsIconic(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern bool IsHungAppWindow(IntPtr hWnd);
+  [DllImport("user32.dll")] public static extern uint GetWindowThreadProcessId(IntPtr hWnd, out uint pid);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+  [DllImport("user32.dll")] public static extern bool GetWindowRect(IntPtr hWnd, out RECT lpRect);
+  [DllImport("user32.dll")] public static extern IntPtr GetWindow(IntPtr hWnd, uint uCmd);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetClassName(IntPtr hWnd, StringBuilder lpClassName, int nMaxCount);
+  [DllImport("user32.dll", CharSet=CharSet.Unicode)] public static extern int GetWindowText(IntPtr hWnd, StringBuilder lpString, int nMaxCount);
+  [DllImport("user32.dll")] public static extern int GetWindowTextLength(IntPtr hWnd);
+  [DllImport("dwmapi.dll")] public static extern int DwmGetWindowAttribute(IntPtr hwnd, int dwAttribute, out int pvAttribute, int cbAttribute);
+  public static List<Dictionary<string, object>> FindVisibleWindows(HashSet<uint> pids, bool includeNonVisible) {
+    var r = new List<Dictionary<string, object>>();
+    EnumWindows((h, l) => {
+      if (!includeNonVisible && !IsWindowVisible(h)) return true;
+      uint p; GetWindowThreadProcessId(h, out p);
+      if (!pids.Contains(p)) return true;
+      RECT rect;
+      if (!GetWindowRect(h, out rect)) return true;
+      int width = rect.Right - rect.Left;
+      int height = rect.Bottom - rect.Top;
+      if (!includeNonVisible && (width <= 80 || height <= 80)) return true;
+      long exStyle = GetWindowLongPtr(h, -20).ToInt64();
+      bool isToolWindow = (exStyle & 0x00000080L) != 0;
+      int cloaked = 0;
+      try { DwmGetWindowAttribute(h, 14, out cloaked, 4); } catch { cloaked = 0; }
+      var cls = new StringBuilder(256);
+      GetClassName(h, cls, cls.Capacity);
+      var title = new StringBuilder(256);
+      GetWindowText(h, title, title.Capacity);
+      int titleLen = GetWindowTextLength(h);
+      IntPtr owner = GetWindow(h, 4);
+      bool hasOwner = owner != IntPtr.Zero;
+      bool topMost = (exStyle & 0x00000008L) != 0;
+      var row = new Dictionary<string, object>();
+      row["handle"] = ((long)h).ToString();
+      row["width"] = width;
+      row["height"] = height;
+      row["area"] = width * height;
+      row["enabled"] = IsWindowEnabled(h);
+      row["isMinimized"] = IsIconic(h);
+      row["hung"] = IsHungAppWindow(h);
+      row["tool"] = isToolWindow;
+      row["cloaked"] = cloaked != 0;
+      row["className"] = cls.ToString();
+      row["title"] = title.ToString();
+      row["titleLength"] = titleLen;
+      row["hasOwner"] = hasOwner;
+      row["topMost"] = topMost;
+      row["isWindowVisible"] = IsWindowVisible(h);
+      r.Add(row);
+      return true;
+    }, IntPtr.Zero);
+    return r;
   }
+}`;
+
+    const legacyEnumerate = (scanNameList, includeFlag) => (
+      new Promise((resolveLegacy) => {
+        const namesForPs = (Array.isArray(scanNameList) ? scanNameList : [scanNameList])
+          .map((n) => String(n || '').trim().toLowerCase().replace(/\.exe$/i, ''))
+          .filter(Boolean);
+        const nameArrayPs = namesForPs.length
+          ? `@(${namesForPs.map((n) => `'${n.replace(/'/g, "''")}'`).join(',')})`
+          : '@()';
+        const psScript = `
+Add-Type -TypeDefinition @"
+${winEnumCSharp}
 "@
-  try { [void][WinEnum]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
-  try { [void][WinEnum]::SetProcessDPIAware() } catch {}
-  $pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
+try { [void][WinEnum]::SetProcessDpiAwarenessContext([IntPtr]::new(-4)) } catch {}
+try { [void][WinEnum]::SetProcessDPIAware() } catch {}
+$pids = New-Object 'System.Collections.Generic.HashSet[uint32]'
+$hintNames = ${nameArrayPs}
+foreach ($hn in $hintNames) {
+  if ([string]::IsNullOrWhiteSpace($hn)) { continue }
   try {
-    $procs = Get-Process -Name "${safeName.replace(/"/g, '`"')}" -ErrorAction SilentlyContinue
+    $procs = Get-Process -Name $hn -ErrorAction SilentlyContinue
     foreach ($p in $procs) { [void]$pids.Add([uint32]$p.Id) }
   } catch {}
-  if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
-  $includeNonVisible = ${includeNonVisible ? '$true' : '$false'}
-  $rows = [WinEnum]::FindVisibleWindows($pids, $includeNonVisible)
-  $rows | ConvertTo-Json -Depth 5`;
+}
+if ($pids.Count -eq 0) { Write-Output "[]"; exit 0 }
+$includeNonVisible = ${includeFlag ? '$true' : '$false'}
+$rows = [WinEnum]::FindVisibleWindows($pids, $includeNonVisible)
+$rows | ConvertTo-Json -Depth 5`;
 
-      execFile(
-        'powershell.exe',
-        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
-        { windowsHide: true, timeout: 8000, maxBuffer: 1024 * 256 },
-        (execError, stdout) => {
-          const output = String(stdout || '').trim();
-          try {
-            const parsed = JSON.parse(output || '[]');
-            const rows = Array.isArray(parsed) ? parsed : [parsed];
-            const normalizedRows = rows.filter(Boolean).map((row) => ({
-              handle: String(row.handle || ''),
-              width: Number(row.width || 0),
-              height: Number(row.height || 0),
-              area: Number(row.area || 0),
-              enabled: Boolean(row.enabled),
-              isMinimized: Boolean(row.isMinimized),
-              hung: Boolean(row.hung),
-              tool: Boolean(row.tool),
-              cloaked: Boolean(row.cloaked),
-              className: String(row.className || ''),
-              title: String(row.title || ''),
-              titleLength: Number(row.titleLength || 0),
-              hasOwner: Boolean(row.hasOwner),
-              topMost: Boolean(row.topMost),
-              isWindowVisible: Boolean(row.isWindowVisible),
-            })).filter((row) => row.handle);
-            if (expectNonEmpty && normalizedRows.length === 0 && diagnostics) {
-              diagnostics.failure({
-                ...diagnosticsContext,
-                strategy: 'get-visible-window-infos',
-                reason: 'no-visible-windows',
-                processName: safeName,
-                outputSnippet: output.slice(0, 200) || null,
-                error: execError ? String(execError?.message || execError) : null,
-              });
+        powershellSpawnCounter.count += 1;
+        execFile(
+          'powershell.exe',
+          ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', psScript],
+          { windowsHide: true, timeout: 8000, maxBuffer: 1024 * 256 },
+          (_execError, stdout) => {
+            try {
+              const parsed = JSON.parse(String(stdout || '').trim() || '[]');
+              resolveLegacy(Array.isArray(parsed) ? parsed : [parsed]);
+            } catch {
+              resolveLegacy([]);
             }
-            resolve(normalizedRows);
-          } catch (parseError) {
-            if (diagnostics) {
-              diagnostics.failure({
-                ...diagnosticsContext,
-                strategy: 'get-visible-window-infos',
-                reason: 'windows-info-parse-failed',
-                processName: safeName,
-                outputSnippet: output.slice(0, 200) || null,
-                error: String(parseError?.message || parseError || 'parse-error'),
-                commandError: execError ? String(execError?.message || execError) : null,
-              });
-            }
-            resolve([]);
+          },
+        );
+      })
+    );
+
+    const mergeEnumRows = (primary, extra) => {
+      const seen = new Set();
+      const out = [];
+      for (const list of [primary, extra]) {
+        for (const row of (Array.isArray(list) ? list : [])) {
+          const h = String(row?.handle || '').trim();
+          if (!h || seen.has(h)) continue;
+          seen.add(h);
+          out.push(row);
+        }
+      }
+      return out;
+    };
+
+    let rows = [];
+    try {
+      if (shouldUsePsRunspace()) {
+        psRunspace.start(winEnumCSharp);
+        if (scanNames.length > 1) {
+          let merged = [];
+          for (const n of scanNames) {
+            const part = await psRunspace.query(n, includeNonVisible, 8000, (name, flag) => (
+              legacyEnumerate([name], flag)
+            ));
+            merged = mergeEnumRows(merged, part);
           }
-        },
-      );
-    })
-  );
+          rows = merged;
+        } else {
+          const sole = scanNames[0] || safeName;
+          rows = await psRunspace.query(sole, includeNonVisible, 8000, (n, flag) => (
+            legacyEnumerate([n], flag)
+          ));
+        }
+      } else {
+        rows = await legacyEnumerate(scanNames, includeNonVisible);
+      }
+    } catch (error) {
+      if (diagnostics) {
+        diagnostics.failure({
+          ...diagnosticsContext,
+          strategy: 'get-visible-window-infos',
+          reason: 'enumeration-failed',
+          processName: safeName,
+          error: String(error?.message || error),
+        });
+      }
+      rows = [];
+    }
+
+    const normalizedRows = normalizeRows(rows);
+    if (expectNonEmpty && normalizedRows.length === 0 && diagnostics) {
+      diagnostics.failure({
+        ...diagnosticsContext,
+        strategy: 'get-visible-window-infos',
+        reason: 'no-visible-windows',
+        processName: safeName,
+      });
+    }
+    if (shouldUseEnumCache() && runId) {
+      setCachedEnum(enumCacheKey, runId, normalizedRows);
+    }
+    return normalizedRows;
+  };
 
   /**
    * Prefer Chromium top-level HWNDs (Chrome_WidgetWin_1) with largest area; avoids narrow strips / blank surfaces.
@@ -1697,10 +1897,12 @@ const createWindowPlacementRuntime = (deps) => {
     aggressiveMaximize,
     positionOnlyBeforeMaximize,
     skipFrameChanged = false,
+    hasReadyHandle = false,
     diagnostics = null,
     diagnosticsContext = {},
   }) => {
-    const maxRounds = 26;
+    const maxRounds = hasReadyHandle ? 6 : 26;
+    const candidateSlice = hasReadyHandle ? 3 : 12;
     let lastRankedSample = [];
     for (let round = 0; round < maxRounds; round += 1) {
       const rows = await getVisibleWindowInfos(processHintLc, {
@@ -1709,6 +1911,7 @@ const createWindowPlacementRuntime = (deps) => {
           ...diagnosticsContext,
           attemptIndex: round + 1,
         },
+        runId: diagnosticsContext?.runId,
       });
       if (rows.length === 0) {
         await sleep(120);
@@ -1727,7 +1930,7 @@ const createWindowPlacementRuntime = (deps) => {
           ...row,
           score: scoreWindowCandidate(row, { chromiumProcessHint: processHintLc }),
         }));
-      for (const row of ranked.slice(0, 12)) {
+      for (const row of ranked.slice(0, candidateSlice)) {
         const r = await moveSpecificWindowHandleToBounds({
           handle: row.handle,
           bounds: placementBounds,
@@ -1770,6 +1973,7 @@ const createWindowPlacementRuntime = (deps) => {
       const rows = await getVisibleWindowInfos(processName, {
         diagnostics,
         diagnosticsContext,
+        runId: diagnosticsContext?.runId,
       });
       const row = rows.find((candidate) => String(candidate.handle) === safeHandle);
       if (row) lastRow = row;
@@ -1818,6 +2022,7 @@ const createWindowPlacementRuntime = (deps) => {
     getVisibleWindowInfos,
     placeChromiumByRankedWindows,
     waitForWindowResponsive,
+    getPowerShellSpawnCount: () => Number(powershellSpawnCounter.count || 0),
   };
 };
 

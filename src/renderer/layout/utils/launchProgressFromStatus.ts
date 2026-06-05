@@ -16,6 +16,7 @@ const APP_STEP_SET = new Set<AppLaunchRowProgress["step"]>([
   "opening-content",
   "awaiting-confirmation",
   "done",
+  "warning",
   "failed",
   "skipped",
 ]);
@@ -42,6 +43,7 @@ const SUBSTEP_STATE_SET = new Set<LaunchActionSubstepState>([
   "queued",
   "running",
   "completed",
+  "warning",
   "failed",
 ]);
 
@@ -81,7 +83,7 @@ function normalizeFailureKind(
   raw: unknown,
 ): LaunchAction["failureKind"] {
   const s = String(raw ?? "").trim().toLowerCase();
-  if (s === "launch" || s === "placement" || s === "verification") return s;
+  if (s === "launch" || s === "placement" || s === "verification" || s === "confirmation") return s;
   return null;
 }
 
@@ -156,6 +158,8 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
   const targetLocation = locRaw ? locRaw.slice(0, MAX_LIST_STRING_LEN) : null;
   const tabUrlRaw = String(o.browserTabUrl ?? "").trim();
   const browserTabUrl = tabUrlRaw ? tabUrlRaw.slice(0, MAX_CONTENT_PATH_LEN) : null;
+  const hostIidRaw = String(o.hostAppInstanceId ?? "").trim();
+  const hostAppInstanceId = hostIidRaw ? hostIidRaw.slice(0, 128) : null;
   const modeRaw = String(o.contentSubstepMode ?? "").trim().toLowerCase();
   const contentSubstepMode: LaunchAction["contentSubstepMode"] =
     modeRaw === "post-verify" || modeRaw === "parallel-launch" ? modeRaw : null;
@@ -171,12 +175,14 @@ function mapLaunchAction(raw: unknown, index: number): LaunchAction {
     contentItems: mapLaunchActionContentItems(o.contentItems),
     contentSubstepMode,
     contentOpenFailed: Boolean(o.contentOpenFailed),
+    isAwaitingConfirmation: Boolean(o.isAwaitingConfirmation),
     errorMessage,
     failureKind,
     startedAtMs: optionalFiniteMs(o.startedAtMs ?? o.startedAt),
     endedAtMs: optionalFiniteMs(o.endedAtMs ?? o.endedAt),
     substeps: substeps.length ? substeps : null,
     browserTabUrl,
+    ...(hostAppInstanceId ? { hostAppInstanceId } : {}),
   };
 }
 
@@ -247,7 +253,9 @@ export function progressFromLaunchStatus(status: {
           .filter(Boolean)
           .slice(0, 6)
       : [];
-    return {
+    const rowObj = row && typeof row === "object" ? (row as Record<string, unknown>) : {};
+    const confirmationDeadlineAtMs = optionalFiniteMs(rowObj.confirmationDeadlineAtMs);
+    const mapped: AppLaunchRowProgress = {
       key: String(row?.key || "").trim() || `row-${index}`,
       name: String(row?.name || "").trim() || "App",
       step,
@@ -255,6 +263,10 @@ export function progressFromLaunchStatus(status: {
       location: location || null,
       outcomes: outcomes.length ? outcomes : null,
     };
+    if (confirmationDeadlineAtMs != null) {
+      mapped.confirmationDeadlineAtMs = confirmationDeadlineAtMs;
+    }
+    return mapped;
   });
 
   const activeActionId =

@@ -16,6 +16,8 @@ const { buildBrowserTabLaunchList } = require('../utils/browser-tab-launch-list'
 const { PROCESS_HINTS_VERSION } = require('./process-hints');
 const { hiddenProcessNamePatterns } = require('./windows-process-service');
 const { launchIconDataUrlFromProfileApp } = require('../utils/launch-ui-icons');
+const { isPlacementRectPlausibleForPostModalResume } = require('./window-ready-gate');
+const { toHwnd, IsWindow } = require('./win32-ffi');
 
 /** App row outcome: opened via shell only — profile has no saved bounds to place or verify. */
 const OUTCOME_EXTERNAL_OPEN_NO_LAYOUT = 'ExternalOpenNoLayout';
@@ -72,6 +74,7 @@ const createProfileLaunchRunner = (deps) => {
     getForegroundWindowHandle,
     waitForWindowResponsive,
     placeChromiumByRankedWindows,
+    getPowerShellSpawnCount,
     moveWindowToBounds,
     bringWindowHandleToFront,
     stabilizeKnownHandlePlacement,
@@ -373,6 +376,8 @@ const createProfileLaunchRunner = (deps) => {
   // HWNDs that earlier launches in this run have already placed. Treated like quarantined
   // handles: they must not be reselected as the post-modal main window for this launch.
   runPlacedHandles = null,
+  /** Absolute wall-clock when the full confirmation session ends (blocker wait + settle + post-dismiss). Must match UI `confirmationDeadlineAtMs`. */
+  confirmationSessionEndsAtMs = 0,
 }) => {
   const launchedPidNumber = Number(launchedPid || 0);
   const blockedHandleSet = new Set(
@@ -380,32 +385,22 @@ const createProfileLaunchRunner = (deps) => {
       .map((handle) => String(handle || '').trim())
       .filter(Boolean),
   );
+  // Only true confirmation/blocker HWNDs should gate dismissal detection. `runPlacedHandles`
+  // includes other apps' windows that stay visible, which previously kept "blocker" forever
+  // visible and caused false timeouts after the user dismissed the dialog.
+  const blockerPresenceHandleSet = new Set(blockedHandleSet);
   if (runPlacedHandles && typeof runPlacedHandles[Symbol.iterator] === 'function') {
     for (const handle of runPlacedHandles) {
       const normalized = String(handle || '').trim();
       if (normalized) blockedHandleSet.add(normalized);
     }
   }
-  const blockerPresenceHandleSet = new Set(blockedHandleSet);
+  // Snapshot before wait-phase quarantine: while the dialog is up we add every visible non-main
+  // row to `blockedHandleSet`. Apps like Audacity keep a normal-sized main behind the modal; it
+  // often fails the 52% tile rule and was quarantined, then invisible to post-dismiss discovery.
+  const blockedHandleSetPostDismissBaseline = new Set(blockedHandleSet);
   const rejectedPostModalHandleSet = new Set();
 
-  const isPlausibleRectForPlacement = (rect, targetBounds) => {
-    if (!rect || !targetBounds) return false;
-    const rectWidth = Math.max(0, Number(rect.width || 0));
-    const rectHeight = Math.max(0, Number(rect.height || 0));
-    const targetWidth = Math.max(1, Number(targetBounds.width || 0));
-    const targetHeight = Math.max(1, Number(targetBounds.height || 0));
-    if (rectWidth < Math.max(360, Math.floor(targetWidth * 0.3))) return false;
-    if (rectHeight < Math.max(220, Math.floor(targetHeight * 0.24))) return false;
-    const expectedAspect = targetWidth / Math.max(1, targetHeight);
-    const aspect = rectWidth / Math.max(1, rectHeight);
-    if (aspect < Math.max(0.82, expectedAspect * 0.72) || aspect > Math.min(3.2, expectedAspect * 2.1)) {
-      return false;
-    }
-    const areaRatio = (rectWidth * rectHeight) / (targetWidth * targetHeight);
-    if (areaRatio < 0.22) return false;
-    return true;
-  };
   const isHandlePlausibleAndStable = async (candidateHandle) => {
     const stableSamplesNeeded = 2;
     const samples = 3;
@@ -414,21 +409,21 @@ const createProfileLaunchRunner = (deps) => {
     for (let i = 0; i < samples; i += 1) {
       const rects = await getWindowPlacementRectsByHandle(candidateHandle);
       const rect = rects?.visibleRect || rects?.outerRect || null;
-      if (!isPlausibleRectForPlacement(rect, placementBounds)) return false;
+      if (!isPlacementRectPlausibleForPostModalResume(rect, placementBounds)) return false;
       const area = Number(rect?.width || 0) * Number(rect?.height || 0);
       if (prevArea != null) {
         const ratio = area / Math.max(1, prevArea);
         if (ratio < 0.7 || ratio > 1.35) {
           stableCount = 0;
           prevArea = area;
-          await sleep(180);
+          await sleep(120);
           continue;
         }
       }
       stableCount += 1;
       prevArea = area;
       if (stableCount >= stableSamplesNeeded) return true;
-      await sleep(180);
+      await sleep(120);
     }
     return false;
   };
@@ -499,7 +494,6 @@ const createProfileLaunchRunner = (deps) => {
         && !row?.tool
         && !row?.isMinimized
         && (placementBounds.state !== 'maximized' || (!row?.hasOwner && !row?.topMost))
-        && row?.enabled
         && Number(row?.width || 0) >= 280
         && Number(row?.height || 0) >= 140
       ))
@@ -581,14 +575,41 @@ const createProfileLaunchRunner = (deps) => {
     return { applied: true, handle: placedHandle };
   };
 
-  const resumeDeadline = Date.now() + 120000;
+  const BLOCKER_DISMISS_MAX_MS = 120000;
+  const POST_DISMISS_SETTLE_MS = 800;
+  const POST_DISMISS_MAIN_WINDOW_MS = 32000;
+  const reservedTailMs = POST_DISMISS_SETTLE_MS + POST_DISMISS_MAIN_WINDOW_MS;
+  const sessionEndsAt = Number(confirmationSessionEndsAtMs) > 0
+    ? Math.floor(Number(confirmationSessionEndsAtMs))
+    : (Date.now() + BLOCKER_DISMISS_MAX_MS + reservedTailMs);
+  const resumeDeadline = Math.min(
+    Date.now() + BLOCKER_DISMISS_MAX_MS,
+    Math.max(Date.now(), sessionEndsAt - reservedTailMs),
+  );
+
+  const blockerHandleAppearsPresent = (visibleHandlesSet, handleStr) => {
+    const h = String(handleStr || '').trim();
+    if (!h) return false;
+    if (process.platform === 'win32') {
+      try {
+        const hwnd = toHwnd(h);
+        if (hwnd === 0n || hwnd == null) return false;
+        if (!IsWindow(hwnd)) return false;
+      } catch {
+        // Enumeration-only if FFI fails
+      }
+    }
+    return visibleHandlesSet.has(h);
+  };
 
   // Phase 1: actively wait for the confirmation blocker to be dismissed. While the blocker is
   // still visible, every observed candidate is added to quarantine so pre-dismissal companion/
   // transient windows cannot later win as the "main" post-confirmation window.
   const awaitBlockerDismissal = async () => {
     let quarantinedDuringWait = 0;
-    let lastScanHadBlocker = true;
+    let lastScanHadBlocker = false;
+    const BLOCKER_POLL_MS = 120;
+    const DISMISS_CONFIRM_MS = 90;
     while (Date.now() <= resumeDeadline) {
       const rows = await collectResumeCandidates([], { includeBlocked: true });
       const visibleHandles = new Set(
@@ -597,7 +618,7 @@ const createProfileLaunchRunner = (deps) => {
           .filter(Boolean),
       );
       const blockerStillVisible = Array.from(blockerPresenceHandleSet).some((handle) => (
-        visibleHandles.has(handle)
+        blockerHandleAppearsPresent(visibleHandles, handle)
       ));
       if (blockerStillVisible) {
         for (const row of rows) {
@@ -613,7 +634,25 @@ const createProfileLaunchRunner = (deps) => {
           quarantinedDuringWait += 1;
         }
         lastScanHadBlocker = true;
-        await sleep(360);
+        await sleep(BLOCKER_POLL_MS);
+        continue;
+      }
+      await sleep(DISMISS_CONFIRM_MS);
+      if (Date.now() > resumeDeadline) {
+        return { dismissed: false, quarantinedDuringWait };
+      }
+      const rowsConfirm = await collectResumeCandidates([], { includeBlocked: true });
+      const visibleConfirm = new Set(
+        rowsConfirm
+          .map((row) => String(row?.handle || '').trim())
+          .filter(Boolean),
+      );
+      const blockerBack = Array.from(blockerPresenceHandleSet).some((handle) => (
+        blockerHandleAppearsPresent(visibleConfirm, handle)
+      ));
+      if (blockerBack) {
+        lastScanHadBlocker = true;
+        await sleep(BLOCKER_POLL_MS);
         continue;
       }
       if (launchDiagnostics) {
@@ -647,11 +686,17 @@ const createProfileLaunchRunner = (deps) => {
       handle: null,
     };
   }
+  blockedHandleSet.clear();
+  for (const handle of blockedHandleSetPostDismissBaseline) {
+    blockedHandleSet.add(handle);
+  }
   // Mandatory settle delay after blocker dismissal. This gives the host application time to
   // destroy pre-confirmation windows and spawn its real main window before we attempt winner
   // selection, avoiding latching onto transient or companion-process windows (e.g. steamwebhelper
   // overlay / friends list) that were visible pre-dismissal.
-  await sleep(800);
+  await sleep(POST_DISMISS_SETTLE_MS);
+
+  const postDismissDeadline = sessionEndsAt;
 
   const pidTreePreflight = await tryPidTreePlacement('pid-tree-main-window-preflight');
   if (pidTreePreflight.applied && pidTreePreflight.handle) {
@@ -664,7 +709,6 @@ const createProfileLaunchRunner = (deps) => {
 
   // Phase 2: run resume gate with expanded hints for discovery, but still exclude quarantined
   // pre-dismissal handles from eligibility.
-  const postDismissDeadline = Date.now() + 12000;
   let resumeGate = null;
   while (Date.now() <= postDismissDeadline) {
     const remainingMs = postDismissDeadline - Date.now();
@@ -674,7 +718,7 @@ const createProfileLaunchRunner = (deps) => {
       processHints: normalizedScanHints,
       expectedBounds: placementBounds,
       timeoutMs: gateTimeoutMs,
-      pollMs: 320,
+      pollMs: 220,
       diagnostics: launchDiagnostics,
       listWindows: getVisibleWindowInfos,
       sleep,
@@ -779,7 +823,10 @@ const createProfileLaunchRunner = (deps) => {
       await sleep(420);
       continue;
     }
-    break;
+    const tailMs = postDismissDeadline - Date.now();
+    if (tailMs <= 0) break;
+    await sleep(Math.max(160, Math.min(480, tailMs)));
+    continue;
   }
   if (!resumeGate?.ready || !resumeGate?.handle) {
     // Fallback for apps that expose a usable post-dismiss window that misses strict winner
@@ -1108,6 +1155,7 @@ const launchProfileById = async (profileId, options = {}) => {
   const placementRecords = [];
   let launchedAppCount = 0;
   let launchedTabCount = 0;
+  let mainLoopComplete = false;
   const requestedLaunchOrder = profile?.launchOrder === 'sequential' ? 'sequential' : 'all-at-once';
   const launchOrder = 'sequential';
   const appLaunchDelays = (profile?.appLaunchDelays && typeof profile.appLaunchDelays === 'object')
@@ -1225,6 +1273,13 @@ const launchProfileById = async (profileId, options = {}) => {
   };
 
   const makeAppSubsteps = (contentSubstepMode) => {
+    const contentStep = contentSubstepMode ? {
+      id: 'sub-content',
+      label: 'Opening content',
+      state: 'queued',
+      startedAtMs: null,
+      endedAtMs: null,
+    } : null;
     const steps = [
       {
         id: 'sub-launch',
@@ -1233,6 +1288,11 @@ const launchProfileById = async (profileId, options = {}) => {
         startedAtMs: null,
         endedAtMs: null,
       },
+    ];
+    if (contentStep && contentSubstepMode === 'parallel-launch') {
+      steps.push(contentStep);
+    }
+    steps.push(
       {
         id: 'sub-place',
         label: 'Positioning window',
@@ -1247,23 +1307,10 @@ const launchProfileById = async (profileId, options = {}) => {
         startedAtMs: null,
         endedAtMs: null,
       },
-    ];
-    if (contentSubstepMode) {
-      steps.push({
-        id: 'sub-content',
-        label: 'Opening content',
-        state: 'queued',
-        startedAtMs: null,
-        endedAtMs: null,
-      });
+    );
+    if (contentStep && contentSubstepMode !== 'parallel-launch') {
+      steps.push(contentStep);
     }
-    steps.push({
-      id: 'sub-confirm',
-      label: 'Waiting for confirmation',
-      state: 'queued',
-      startedAtMs: null,
-      endedAtMs: null,
-    });
     return steps;
   };
 
@@ -1370,10 +1417,14 @@ const launchProfileById = async (profileId, options = {}) => {
       && spaForContentMode.length > 1
       && launchRowForContent.executablePath
     );
+    const hasFileContent = builtFileContentItemsForMode && builtFileContentItemsForMode.length > 0;
+    const hasSpawnArgContent = spaForContentMode.length > 0 && !explorerMultiTabForMode;
     const contentSubstepMode = (
-      builtFileContentItemsForMode && builtFileContentItemsForMode.length > 0
+      hasFileContent
         ? (explorerMultiTabForMode ? 'post-verify' : 'parallel-launch')
-        : null
+        : hasSpawnArgContent
+          ? 'parallel-launch'
+          : null
     );
     executionActions.push({
       id: `app:${row.key}`,
@@ -1397,7 +1448,7 @@ const launchProfileById = async (profileId, options = {}) => {
   }
 
   const tabUrlToTimelineIndex = new Map();
-  for (const { key, label, url } of tabUrlList) {
+  for (const { key, label, url, appInstanceId } of tabUrlList) {
     tabUrlToTimelineIndex.set(key, executionActions.length);
     executionActions.push({
       id: tabActionIdForUrl(key),
@@ -1405,6 +1456,7 @@ const launchProfileById = async (profileId, options = {}) => {
       title: label,
       targetLocation: 'Browser',
       browserTabUrl: url,
+      hostAppInstanceId: String(appInstanceId || '').trim() || null,
       state: 'queued',
       iconDataUrl: null,
       pills: null,
@@ -1425,6 +1477,7 @@ const launchProfileById = async (profileId, options = {}) => {
 
   const syncAppTimelineFromRow = (action, row) => {
     if (!action || !row) return;
+    action.isAwaitingConfirmation = false;
     const step = row.step;
     const subs = action.substeps || [];
     const sl = (id) => subs.find((s) => s.id === id);
@@ -1444,7 +1497,6 @@ const launchProfileById = async (profileId, options = {}) => {
     setSubLabel('sub-launch', 'Launching');
     setSubLabel('sub-place', 'Positioning window');
     setSubLabel('sub-verify', 'Verifying placement');
-    setSubLabel('sub-confirm', 'Waiting for confirmation');
     if (hasContent) {
       setSubLabel('sub-content', 'Opening content');
     }
@@ -1455,7 +1507,6 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'queued'],
         ['sub-verify', 'queued'],
         ...(hasContent ? [['sub-content', 'queued']] : []),
-        ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'launching') {
       action.state = 'running';
@@ -1464,7 +1515,6 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'queued'],
         ['sub-verify', 'queued'],
         ...(hasContent && isParallel ? [['sub-content', 'running']] : hasContent ? [['sub-content', 'queued']] : []),
-        ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'placing') {
       action.state = 'running';
@@ -1477,7 +1527,6 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'running'],
         ['sub-verify', 'queued'],
         ...(hasContent && isParallel ? [['sub-content', 'completed']] : hasContent ? [['sub-content', 'queued']] : []),
-        ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'verifying') {
       action.state = 'running';
@@ -1488,7 +1537,6 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'completed'],
         ['sub-verify', 'running'],
         ...(hasContent ? [['sub-content', 'queued']] : []),
-        ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'opening-content') {
       action.state = 'running';
@@ -1501,10 +1549,10 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'completed'],
         ['sub-verify', 'completed'],
         ['sub-content', 'running'],
-        ['sub-confirm', 'queued'],
       ]);
     } else if (step === 'awaiting-confirmation') {
       action.state = 'running';
+      action.isAwaitingConfirmation = true;
       setSubLabel('sub-launch', 'Launched');
       setSubLabel('sub-place', 'Positioned');
       setSubLabel('sub-verify', 'Verified placement');
@@ -1516,15 +1564,12 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'completed'],
         ['sub-verify', 'completed'],
         ...(hasContent ? [['sub-content', isParallel ? 'completed' : 'queued']] : []),
-        ['sub-confirm', 'running'],
       ]);
     } else if (step === 'done') {
       const externalNoLayout = Array.isArray(row.outcomes)
         && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_EXTERNAL_OPEN_NO_LAYOUT);
       const constrainedPlacement = Array.isArray(row.outcomes)
         && row.outcomes.some((o) => String(o || '').trim() === OUTCOME_CONSTRAINED_PLACEMENT);
-      const hadConfirmation = Array.isArray(row.outcomes)
-        && row.outcomes.some((o) => String(o || '').trim() === 'Confirmation');
       if (externalNoLayout) {
         action.state = 'warning';
         appendSmartDecision(
@@ -1547,18 +1592,7 @@ const launchProfileById = async (profileId, options = {}) => {
         ['sub-place', 'completed'],
         ['sub-verify', 'completed'],
         ...(hasContent ? [['sub-content', 'completed']] : []),
-        ['sub-confirm', 'completed'],
       ]);
-      const confirmSub = sl('sub-confirm');
-      if (confirmSub) {
-        if (externalNoLayout) {
-          confirmSub.label = 'Not applicable';
-        } else if (hadConfirmation) {
-          confirmSub.label = 'Confirmed';
-        } else {
-          confirmSub.label = 'No confirmation needed';
-        }
-      }
     } else if (step === 'failed') {
       action.state = 'failed';
       const fk = action.failureKind || 'launch';
@@ -1569,7 +1603,6 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-place', 'failed'],
           ['sub-verify', 'queued'],
           ...(hasContent ? [['sub-content', 'queued']] : []),
-          ['sub-confirm', 'queued'],
         ]);
       } else if (fk === 'verification' && contentFail && hasContent) {
         setSubs([
@@ -1577,7 +1610,6 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-place', 'completed'],
           ['sub-verify', 'completed'],
           ['sub-content', 'failed'],
-          ['sub-confirm', 'queued'],
         ]);
       } else if (fk === 'verification') {
         setSubs([
@@ -1585,7 +1617,6 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-place', 'completed'],
           ['sub-verify', 'failed'],
           ...(hasContent ? [['sub-content', 'queued']] : []),
-          ['sub-confirm', 'queued'],
         ]);
       } else {
         setSubs([
@@ -1593,7 +1624,6 @@ const launchProfileById = async (profileId, options = {}) => {
           ['sub-place', 'queued'],
           ['sub-verify', 'queued'],
           ...(hasContent ? [['sub-content', 'queued']] : []),
-          ['sub-confirm', 'queued'],
         ]);
       }
     } else if (step === 'skipped') {
@@ -1616,8 +1646,12 @@ const launchProfileById = async (profileId, options = {}) => {
   ).length;
 
   const resolveActiveActionId = () => {
-    const running = executionActions.find((a) => a.state === 'running');
-    if (running) return running.id;
+    const activeNonConfirmation = executionActions.find(
+      (a) => a.state === 'running' && !a.isAwaitingConfirmation,
+    );
+    if (activeNonConfirmation) return activeNonConfirmation.id;
+    const anyRunning = executionActions.find((a) => a.state === 'running');
+    if (anyRunning) return anyRunning.id;
     return null;
   };
 
@@ -1670,6 +1704,10 @@ const launchProfileById = async (profileId, options = {}) => {
     .length;
   const finalizeRunIfPendingConfirmationsSettled = () => {
     if (!isCurrentRunActive()) return;
+    if (!mainLoopComplete) {
+      publishCurrentLaunchStatus('in-progress');
+      return;
+    }
     const unresolvedCount = countUnresolvedPendingConfirmations();
     if (unresolvedCount > 0) {
       publishCurrentLaunchStatus('awaiting-confirmations');
@@ -1918,8 +1956,9 @@ try {
     const widthDelta = Math.abs(Number(finalRect.width || 0) - Number(targetBounds.width || 0));
     const heightDelta = Math.abs(Number(finalRect.height || 0) - Number(targetBounds.height || 0));
     const anchoredNearTargetOrigin = leftDelta <= 24 && topDelta <= 24;
+    const sizeCloseEnough = widthDelta <= 24 && heightDelta <= 24;
     const largeSizeConstraintDelta = widthDelta >= 80 || heightDelta >= 80;
-    return anchoredNearTargetOrigin && largeSizeConstraintDelta;
+    return anchoredNearTargetOrigin && (sizeCloseEnough || largeSizeConstraintDelta);
   };
   profileDiagnostics.start({
     strategy: 'launch-profile',
@@ -1973,6 +2012,9 @@ try {
       appName: launchItem?.appName || 'unknown',
       runId: activeRunId,
     });
+    const psSpawnBefore = typeof getPowerShellSpawnCount === 'function'
+      ? Number(getPowerShellSpawnCount() || 0)
+      : 0;
     try {
       if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
         const tactReset = executionActions[appTimelineIndexByApp[appIndex]];
@@ -2502,6 +2544,13 @@ try {
             blockerHandle: readyGate.blockerHandle || null,
             timeoutMs: readyGateTimeoutMs,
           });
+          const CONFIRMATION_BLOCKER_MAX_MS = 120000;
+          const POST_DISMISS_SETTLE_MS_UI = 800;
+          const POST_DISMISS_MAIN_WINDOW_MS_UI = 32000;
+          const confirmationSessionEndsAtMs = Date.now()
+            + CONFIRMATION_BLOCKER_MAX_MS
+            + POST_DISMISS_SETTLE_MS_UI
+            + POST_DISMISS_MAIN_WINDOW_MS_UI;
           const pendingEntry = {
             name: launchItem.appName,
             path: launchItem.executablePath || launchItem.shortcutPath || launchItem.launchUrl || '',
@@ -2511,10 +2560,13 @@ try {
             processHintLc,
             blockerHandle: readyGate.blockerHandle || null,
             status: 'waiting',
+            appIndex,
+            confirmationDeadlineAtMs: confirmationSessionEndsAtMs,
           };
           pendingConfirmations.push(pendingEntry);
           if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
             appLaunchProgress[appIndex].step = 'awaiting-confirmation';
+            appLaunchProgress[appIndex].confirmationDeadlineAtMs = confirmationSessionEndsAtMs;
             const prev = Array.isArray(appLaunchProgress[appIndex].outcomes)
               ? appLaunchProgress[appIndex].outcomes
               : [];
@@ -2522,7 +2574,7 @@ try {
           }
           activeUiPhase = 'launching';
           activeUiName = launchItem.appName;
-          publishCurrentLaunchStatus('awaiting-confirmations');
+          publishCurrentLaunchStatus('in-progress');
           void resumePlacementAfterConfirmationModal({
             processHintLc,
             processHints: activeProcessHints,
@@ -2544,15 +2596,17 @@ try {
               appName: launchItem.appName,
               placementState: placementBounds.state,
             },
+            confirmationSessionEndsAtMs,
           }).then((resumeResult) => {
             if (!isCurrentRunActive()) return;
             const status = String(resumeResult?.status || '').trim().toLowerCase();
+            const isPlacementFailure = (status === 'placement-failed');
             const mappedStatus = (
               status === 'resolved'
                 ? 'resolved'
-                : status === 'waiting'
-                  ? 'waiting'
-                  : 'failed'
+                : isPlacementFailure
+                  ? 'failed'
+                  : 'warning'
             );
             pendingEntry.status = mappedStatus;
             if (resumeResult?.handle) pendingEntry.handle = String(resumeResult.handle);
@@ -2566,32 +2620,37 @@ try {
               const tact = executionActions[appTimelineIndexByApp[appIndex]];
               if (mappedStatus === 'resolved') {
                 row.step = 'done';
+                delete row.confirmationDeadlineAtMs;
                 const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
                 row.outcomes = Array.from(new Set([...prev, 'Confirmed']));
                 if (tact) {
-                  const confirmSub = Array.isArray(tact.substeps)
-                    ? tact.substeps.find((s) => s.id === 'sub-confirm')
-                    : null;
-                  if (confirmSub) {
-                    if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
-                    confirmSub.state = 'completed';
-                    confirmSub.endedAtMs = nowTs;
-                    confirmSub.label = 'Confirmed';
-                  }
                   if (tact.state === 'running' || tact.state === 'queued') {
                     tact.state = 'completed';
                   }
                   if (!tact.endedAtMs) tact.endedAtMs = nowTs;
                 }
+              } else if (mappedStatus === 'warning') {
+                row.step = 'warning';
+                delete row.confirmationDeadlineAtMs;
+                const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
+                const warningLabel = status === 'waiting'
+                  ? 'Confirmation not received'
+                  : (status === 'timeout'
+                    ? 'Dialog closed, but the main window was not ready in time.'
+                    : 'Confirmation could not be completed.');
+                row.outcomes = Array.from(new Set([...prev, warningLabel]));
+                if (tact) {
+                  tact.state = 'warning';
+                  tact.failureKind = 'confirmation';
+                  tact.errorMessage = warningLabel;
+                  tact.endedAtMs = nowTs;
+                }
               } else if (mappedStatus === 'failed') {
                 row.step = 'failed';
+                delete row.confirmationDeadlineAtMs;
                 const prev = Array.isArray(row.outcomes) ? row.outcomes : [];
                 row.outcomes = Array.from(new Set([...prev, 'Confirmation failed']));
-                const failReason = (
-                  status === 'placement-failed'
-                    ? 'Confirmation dialog closed, but placement verification failed.'
-                    : 'Confirmation dialog flow ended without a usable main window.'
-                );
+                const failReason = 'Confirmation dialog closed, but placement verification failed.';
                 if (!failedApps.some(
                   (item) => String(item?.name || '').trim() === String(launchItem.appName || '').trim()
                     && String(item?.path || '').trim() === String(launchItem.executablePath || '').trim(),
@@ -2605,15 +2664,6 @@ try {
                   });
                 }
                 if (tact) {
-                  const confirmSub = Array.isArray(tact.substeps)
-                    ? tact.substeps.find((s) => s.id === 'sub-confirm')
-                    : null;
-                  if (confirmSub) {
-                    if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
-                    confirmSub.state = 'failed';
-                    confirmSub.endedAtMs = nowTs;
-                    confirmSub.label = 'Confirmation failed';
-                  }
                   tact.state = 'failed';
                   tact.failureKind = 'placement';
                   tact.errorMessage = failReason;
@@ -2621,30 +2671,23 @@ try {
                 }
               }
             }
-            finalizeRunIfPendingConfirmationsSettled();
           }).catch(() => {
             if (!isCurrentRunActive()) return;
-            pendingEntry.status = 'failed';
+            pendingEntry.status = 'warning';
             if (Number.isInteger(appIndex) && appLaunchProgress[appIndex]) {
               const nowTs = Date.now();
-              appLaunchProgress[appIndex].step = 'failed';
+              const row = appLaunchProgress[appIndex];
+              row.step = 'warning';
+              delete row.confirmationDeadlineAtMs;
               const tact = executionActions[appTimelineIndexByApp[appIndex]];
               if (tact) {
-                const confirmSub = Array.isArray(tact.substeps)
-                  ? tact.substeps.find((s) => s.id === 'sub-confirm')
-                  : null;
-                if (confirmSub) {
-                  if (!confirmSub.startedAtMs) confirmSub.startedAtMs = nowTs;
-                  confirmSub.state = 'failed';
-                  confirmSub.endedAtMs = nowTs;
-                  confirmSub.label = 'Confirmation failed';
-                }
-                tact.state = 'failed';
-                tact.failureKind = 'placement';
-                tact.errorMessage = 'Confirmation dialog flow ended without a usable main window.';
+                tact.state = 'warning';
+                tact.failureKind = 'confirmation';
+                tact.errorMessage = 'Resume after confirmation failed unexpectedly.';
                 tact.endedAtMs = nowTs;
               }
             }
+          }).finally(() => {
             finalizeRunIfPendingConfirmationsSettled();
           });
           return;
@@ -2837,9 +2880,11 @@ try {
             aggressiveMaximize,
             positionOnlyBeforeMaximize,
             skipFrameChanged: chromiumNormalSoftPos,
+            hasReadyHandle: Boolean(readyGate?.ready && String(readyGate?.handle || '').trim()),
             diagnostics: launchDiagnostics,
             diagnosticsContext: {
               processHintLc,
+              runId: activeRunId,
               placementState: placementBounds.state,
             },
           });
@@ -3226,6 +3271,7 @@ try {
           && launchItem.monitor
           && placementBounds.state === 'normal'
           && !shouldDelayChromiumMaximize
+          && !reusedAlreadyWithinTolerance
         ) {
           placementRecords.push({
             appName: launchItem.appName,
@@ -3318,6 +3364,7 @@ try {
           && isChromiumFamily
           && placementBounds.state === 'normal'
           && !shouldDelayChromiumMaximize
+          && !placementVerified
         ) {
           await sleep(260);
           await moveSpecificWindowHandleToBounds({
@@ -3372,7 +3419,9 @@ try {
           && launchItem.monitor
           && !shouldDelayChromiumMaximize
         ) {
-          const stabilizationDurationMs = isChromiumFamily ? 2000 : 5600;
+          const stabilizationDurationMs = placementVerified
+            ? (isChromiumFamily ? 900 : 1000)
+            : (isChromiumFamily ? 1600 : 2000);
           // Some apps resize/reframe after initial launch; keep correcting for a short window.
           const stabilized = await stabilizePlacementForSlowLaunch({
             processHintLc,
@@ -3387,6 +3436,7 @@ try {
             diagnostics: launchDiagnostics,
             diagnosticsContext: {
               processHintLc,
+              runId: activeRunId,
               strategy: 'normal-stabilization',
               placementState: placementBounds.state,
             },
@@ -3463,10 +3513,11 @@ try {
           && shouldDelayChromiumMaximize
           && !skipDelayedChromiumMaximizeStabilization
         ) {
-          await waitForWindowResponsive(processHintLc, result.handle, 2200, {
+          await waitForWindowResponsive(processHintLc, result.handle, 1200, {
             diagnostics: launchDiagnostics,
             diagnosticsContext: {
               processHintLc,
+              runId: activeRunId,
               strategy: 'chromium-delayed-maximize-wait',
               candidateHandle: result.handle,
             },
@@ -3780,6 +3831,16 @@ try {
       }
       activeUiPhase = null;
       activeUiName = null;
+      const psSpawnAfter = typeof getPowerShellSpawnCount === 'function'
+        ? Number(getPowerShellSpawnCount() || 0)
+        : psSpawnBefore;
+      launchDiagnostics.result({
+        strategy: 'powershell-spawn-count',
+        reason: 'launch-item-complete',
+        processHintLc: getPlacementProcessKey(launchItem) || null,
+        spawnDelta: Math.max(0, psSpawnAfter - psSpawnBefore),
+        spawnTotal: psSpawnAfter,
+      });
       publishCurrentLaunchStatus('in-progress');
     } catch (error) {
       launchDiagnostics.failure({
@@ -3812,6 +3873,16 @@ try {
       }
       activeUiPhase = null;
       activeUiName = null;
+      const psSpawnAfter = typeof getPowerShellSpawnCount === 'function'
+        ? Number(getPowerShellSpawnCount() || 0)
+        : psSpawnBefore;
+      launchDiagnostics.result({
+        strategy: 'powershell-spawn-count',
+        reason: 'launch-item-failed',
+        processHintLc: getPlacementProcessKey(launchItem) || null,
+        spawnDelta: Math.max(0, psSpawnAfter - psSpawnBefore),
+        spawnTotal: psSpawnAfter,
+      });
       publishCurrentLaunchStatus('in-progress');
     }
   };
@@ -3930,6 +4001,7 @@ try {
     await launchTabEntry(tabEntry);
   }
 
+  mainLoopComplete = true;
   activeUiPhase = null;
   activeUiName = null;
   publishCurrentLaunchStatus('in-progress');
@@ -4032,6 +4104,44 @@ try {
       activeRunId,
       failedApps.length === 0 ? 'complete' : 'failed',
     );
+  } else {
+    const GRACE_MS_PER_APP = 8000;
+    const graceMs = unresolvedPendingConfirmations.length * GRACE_MS_PER_APP;
+    const graceDeadline = Date.now() + graceMs;
+    const pollGrace = () => new Promise((resolve) => {
+      const check = () => {
+        if (!isCurrentRunActive()) { resolve(); return; }
+        if (countUnresolvedPendingConfirmations() === 0) {
+          finalizeRunIfPendingConfirmationsSettled();
+          resolve();
+          return;
+        }
+        if (Date.now() >= graceDeadline) {
+          for (const entry of pendingConfirmations) {
+            if (String(entry?.status || '').toLowerCase() !== 'waiting') continue;
+            entry.status = 'warning';
+            const idx = entry.appIndex;
+            if (Number.isInteger(idx) && appLaunchProgress[idx]) {
+              appLaunchProgress[idx].step = 'warning';
+              const tact = executionActions[appTimelineIndexByApp[idx]];
+              if (tact) {
+                tact.state = 'warning';
+                tact.failureKind = 'confirmation';
+                tact.errorMessage = 'Confirmation dialog was not dismissed by user';
+                tact.endedAtMs = Date.now();
+              }
+            }
+          }
+          finalizeRunIfPendingConfirmationsSettled();
+          resolve();
+          return;
+        }
+        publishCurrentLaunchStatus('awaiting-confirmations');
+        setTimeout(check, 1000);
+      };
+      check();
+    });
+    await pollGrace();
   }
   return {
     ok: failedApps.length === 0,

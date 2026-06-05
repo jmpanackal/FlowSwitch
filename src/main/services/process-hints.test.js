@@ -4,7 +4,18 @@ const {
   PROCESS_HINTS_VERSION,
   buildCompanionProcessHints,
   computeCompanionHintsFromProcessRows,
+  getProcessScanNames,
 } = require('./process-hints');
+
+test('getProcessScanNames includes UWP runtime aliases for mediaplayer', () => {
+  const expected = ['mediaplayer', 'microsoft.media.player', 'music.ui'];
+  assert.deepEqual(getProcessScanNames('mediaplayer'), expected);
+  assert.deepEqual(getProcessScanNames('MediaPlayer.EXE'), expected);
+});
+
+test('getProcessScanNames returns single entry when no alias map', () => {
+  assert.deepEqual(getProcessScanNames('notepad'), ['notepad']);
+});
 
 test('PROCESS_HINTS_VERSION is a non-empty semver-style token', () => {
   assert.match(PROCESS_HINTS_VERSION, /^\d+\.\d+\.\d+$/);
