@@ -2243,11 +2243,28 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       }
 
       if (windowInfo.isMinimized) {
+        const halfW = mappedWindow.size.width / 2;
+        const halfH = mappedWindow.size.height / 2;
+        const left = mappedWindow.position.x - halfW;
+        const top = mappedWindow.position.y - halfH;
+        const right = mappedWindow.position.x + halfW;
+        const bottom = mappedWindow.position.y + halfH;
+        const margin = 2;
+        const rememberedPlacementVisible =
+          left >= margin
+          && top >= margin
+          && right <= 100 - margin
+          && bottom <= 100 - margin;
+
         minimizedApps.push({
           ...mappedWindow,
           targetMonitor: monitor.id,
-          sourcePosition: mappedWindow.position,
-          sourceSize: mappedWindow.size,
+          ...(rememberedPlacementVisible
+            ? {
+              sourcePosition: mappedWindow.position,
+              sourceSize: mappedWindow.size,
+            }
+            : {}),
         });
       } else {
         monitor.apps.push(mappedWindow);
