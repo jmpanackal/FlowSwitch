@@ -34,7 +34,7 @@ const { toHwnd, IsWindow } = require('./win32-ffi');
 const OUTCOME_EXTERNAL_OPEN_NO_LAYOUT = 'ExternalOpenNoLayout';
 const OUTCOME_CONSTRAINED_PLACEMENT = 'ConstrainedPlacement';
 const CONSTRAINED_PLACEMENT_DECISION_TEXT = (
-  'This app has a fixed window size and was positioned as close to the snap zone as possible.'
+  "This app's minimum window size is larger than the assigned zone, so it was anchored to the zone as closely as possible."
 );
 const OBS_ERROR_WINDOW_TITLE_SET = new Set([
   'error',
@@ -2279,6 +2279,56 @@ try {
           reuseEligiblePreLaunchHandleCount: preLaunchHandleSet.size,
           preLaunchWindowSample: summarizeWindowRows(preLaunchWindowInfos, 3),
         });
+        // Reuse-miss diagnostic: when an already-open, single-instance app (e.g. Anki) isn't
+        // matched by its process-name scan, we launch a duplicate that immediately hands off and
+        // exits, so placement fails. Capture the real window-owning processes once so we can learn
+        // the actual process/window identity and fix detection. Scoped to the failing case only.
+        if (
+          preLaunchHandleSet.size === 0
+          && !isChromiumFamily
+          && !isDuplicateProcessLaunch
+          && placementBounds.state !== 'minimized'
+        ) {
+          try {
+            const runningWindowProcesses = await getRunningWindowProcesses();
+            const appNameLc = String(launchItem.appName || '').trim().toLowerCase();
+            const appNameTokens = appNameLc.split(/[^a-z0-9]+/i).filter((t) => t.length >= 3);
+            const matchesHint = (row) => {
+              const name = String(row?.ProcessName || row?.processName || '').trim().toLowerCase();
+              const title = String(row?.MainWindowTitle || row?.title || '').trim().toLowerCase();
+              if (!name && !title) return false;
+              if (processHintLc && (name.includes(processHintLc) || title.includes(processHintLc))) {
+                return true;
+              }
+              return appNameTokens.some((t) => name.includes(t) || title.includes(t));
+            };
+            const rows = Array.isArray(runningWindowProcesses) ? runningWindowProcesses : [];
+            const summarize = (row) => ({
+              processName: String(row?.ProcessName || row?.processName || '') || null,
+              pid: Number(row?.Id || row?.id || 0) || null,
+              title: String(row?.MainWindowTitle || row?.title || '').slice(0, 60) || null,
+              className: String(row?.WindowClass || row?.className || '') || null,
+              width: Number(row?.Width || row?.width || 0) || null,
+              height: Number(row?.Height || row?.height || 0) || null,
+            });
+            launchDiagnostics.decision({
+              processHintLc,
+              appName: launchItem.appName || null,
+              strategy: 'launch-target-mode',
+              reason: 'reuse-miss-window-process-inventory',
+              runningWindowProcessCount: rows.length,
+              likelyMatches: rows.filter(matchesHint).map(summarize).slice(0, 8),
+              windowProcessSample: rows.map(summarize).slice(0, 30),
+            });
+          } catch (inventoryError) {
+            launchDiagnostics.decision({
+              processHintLc,
+              strategy: 'launch-target-mode',
+              reason: 'reuse-miss-window-process-inventory-failed',
+              error: String(inventoryError?.message || inventoryError),
+            });
+          }
+        }
         const findStableExistingMainWindowHandle = async (processHintsForScan = []) => {
           if (preLaunchHandleSet.size === 0) return null;
           const normalizedHints = Array.from(new Set(
@@ -2796,6 +2846,7 @@ try {
           if (readyHandle) {
             const placementRects = await getWindowPlacementRectsByHandle(readyHandle);
             const measuredRect = placementRects?.visibleRect || placementRects?.outerRect || null;
+            const placementStateLc = String(placementBounds?.state || 'normal').trim().toLowerCase();
             const onTargetMonitor = isWindowOnTargetMonitor({
               rect: measuredRect,
               monitor: launchItem.monitor,
@@ -2806,10 +2857,29 @@ try {
               target: placementBounds,
               onTargetMonitor,
             });
+            const dx = Math.abs(Number(measuredRect?.left || 0) - Number(placementBounds?.left || 0));
+            const dy = Math.abs(Number(measuredRect?.top || 0) - Number(placementBounds?.top || 0));
+            const dw = Math.abs(Number(measuredRect?.width || 0) - Number(placementBounds?.width || 0));
+            const dh = Math.abs(Number(measuredRect?.height || 0) - Number(placementBounds?.height || 0));
+            const isNearExactNormalMatch = (
+              placementStateLc === 'normal'
+              && dx <= 2
+              && dy <= 2
+              && dw <= 2
+              && dh <= 2
+            );
+            const canSkipCorrectiveMove = (
+              onTargetMonitor
+              && (
+                placementStateLc !== 'normal'
+                ? withinTolerance
+                : isNearExactNormalMatch
+              )
+            );
             if (launchStatusMode === 'reused_existing_window') {
               const foregroundHandle = await getForegroundWindowHandle();
               const alreadyForeground = foregroundHandle === readyHandle;
-              if (onTargetMonitor && withinTolerance) {
+              if (canSkipCorrectiveMove) {
                 result = {
                   applied: true,
                   handle: readyHandle,
@@ -2829,7 +2899,7 @@ try {
               }
             } else if (
               shouldDelayChromiumMaximize
-              && onTargetMonitor
+              && canSkipCorrectiveMove
             ) {
               // Chromium delayed-maximize path: if spawned window is already on the target monitor,
               // skip normal-state corrective move/stabilization to avoid visible "window thrash".
@@ -2845,7 +2915,7 @@ try {
                 handle: readyHandle,
                 placementState: placementBounds.state,
               });
-            } else if (onTargetMonitor && withinTolerance) {
+            } else if (canSkipCorrectiveMove) {
               // If a newly detected handle is already on target and within tolerance,
               // skip corrective placement to avoid visible resize/move thrash.
               result = {
