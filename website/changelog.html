@@ -54,7 +54,7 @@
           <a href="./changelog.html" aria-current="page">Changelog</a>
         </nav>
         <a
-          href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.4/FlowSwitch-0.1.4-win-x64-installer.exe"
+          href="https://github.com/jmpanackal/FlowSwitch/releases/download/v0.1.5/FlowSwitch-0.1.5-win-x64-installer.exe"
           id="header-download"
           class="btn btn--primary"
           data-download-link="1"
@@ -69,6 +69,19 @@
         <p class="subpage-lead">High-level release notes for FlowSwitch.</p>
 
         <div class="timeline">
+          <div class="timeline-entry">
+            <div class="timeline-entry__head">
+              <span class="timeline-entry__version">v0.1.5</span>
+              <span class="timeline-entry__tag">early access</span>
+              <span class="timeline-entry__date">June 2026</span>
+            </div>
+            <ul>
+              <li>Faster profile launch placement via native Win32 helpers (koffi) and a reusable PowerShell runspace, reducing per-window overhead on large profiles.</li>
+              <li>Live Center progress: substep-weighted timeline, nested browser tabs under owning apps, and clearer confirmation resume after modal dialogs.</li>
+              <li>Large-profile launch guardrails: preflight weight checks, salvage placement for drifted windows, and launch summary improvements.</li>
+              <li>Inspector sidebar polish: Progress toggle, path card layout, and shell UX refinements (loading gate, Escape closes overlays).</li>
+            </ul>
+          </div>
           <div class="timeline-entry">
             <div class="timeline-entry__head">
               <span class="timeline-entry__version">v0.1.4</span>
