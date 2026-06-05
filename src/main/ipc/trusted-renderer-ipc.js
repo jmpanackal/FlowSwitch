@@ -17,6 +17,7 @@ const {
   listExplorerFilesystemFolderPathsForRootHwnd,
   listExplorerShellWindows,
 } = require('../services/explorer-window-tab-paths');
+const { resolveCaptureAppIdentity } = require('../services/capture-app-identity');
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
@@ -1859,6 +1860,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
   handleTrustedIpc('capture-running-app-layout', async () => {
   try {
     const processes = await getRunningWindowProcesses();
+    const installedAppsCatalog = await ensureInstalledAppsCatalog(false);
     const targetMonitors = buildSystemMonitorSnapshot();
     const minimizedApps = [];
     const captureAllowList = new Set(['steamwebhelper', 'explorer']);
@@ -2183,21 +2185,26 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       const relY = relTop + (relH / 2);
 
       // Preserve app icon metadata for layout-memory-created profiles and previews.
-      let iconPath = null;
-      if (windowInfo.executablePath) {
-        iconPath = await getSafeIconDataUrl(windowInfo.executablePath);
-      }
-
       const round1 = (n) => Math.round(n * 10) / 10;
       const processName = String(windowInfo.name || '');
-      const normalizedAppName = (
-        processName.toLowerCase() === 'steamwebhelper'
-        || processName.toLowerCase() === 'steam'
-      ) ? 'Steam' : processName;
+      const captureIdentity = resolveCaptureAppIdentity(
+        {
+          name: processName,
+          title: windowInfo.title || '',
+          executablePath: windowInfo.executablePath || null,
+        },
+        installedAppsCatalog,
+        { getCanonicalAppKey, normalizeCatalogDisplayName },
+      );
+      let iconPath = captureIdentity.iconPath || null;
+      const resolvedExecutablePath = captureIdentity.executablePath || windowInfo.executablePath || null;
+      if (!iconPath && resolvedExecutablePath) {
+        iconPath = await getSafeIconDataUrl(resolvedExecutablePath);
+      }
       let mappedWindow = {
-        name: normalizedAppName,
+        name: captureIdentity.name,
         iconPath,
-        executablePath: windowInfo.executablePath || null,
+        executablePath: resolvedExecutablePath,
         position: {
           x: Math.max(0, Math.min(100, round1(relX))),
           y: Math.max(0, Math.min(100, round1(relY))),
