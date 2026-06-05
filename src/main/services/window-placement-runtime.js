@@ -15,7 +15,6 @@ const { getProcessScanNames } = require('./process-hints');
 
 const createWindowPlacementRuntime = (deps) => {
   const {
-    isChromiumFamilyProcessKey,
     isChromiumTopLevelWindowRow,
     physicalBoundsFromDip,
     getMonitorPlacementRect,
@@ -76,15 +75,45 @@ const createWindowPlacementRuntime = (deps) => {
     return _win32Move || null;
   };
 
-  const getPlacementCommandBounds = (bounds, processHintLc) => {
-    if (!bounds) return bounds;
+  /**
+   * Measure a window's invisible frame insets: the gap between the outer window rect
+   * (`GetWindowRect`) and the visible frame (`DWMWA_EXTENDED_FRAME_BOUNDS`). Standard resizable
+   * windows reserve a few physical pixels of invisible border on the left/right/bottom (and
+   * occasionally top) that Windows' own snap accounts for. Measuring per-window keeps this correct
+   * for every app and DPI without hardcoded per-class offsets.
+   */
+  const measureWindowFrameInsetsByHandle = async (handle) => {
+    const safeHandle = String(handle || '').trim();
+    if (!safeHandle) return null;
+    const rects = await getWindowPlacementRectsByHandle(safeHandle);
+    const outer = rects?.outerRect || null;
+    const visible = rects?.visibleRect || null;
+    if (!outer || !visible) return null;
+    const outerRight = Number(outer.left || 0) + Number(outer.width || 0);
+    const outerBottom = Number(outer.top || 0) + Number(outer.height || 0);
+    const visibleRight = Number(visible.left || 0) + Number(visible.width || 0);
+    const visibleBottom = Number(visible.top || 0) + Number(visible.height || 0);
+    return {
+      left: Math.max(0, Number(visible.left || 0) - Number(outer.left || 0)),
+      top: Math.max(0, Number(visible.top || 0) - Number(outer.top || 0)),
+      right: Math.max(0, outerRight - visibleRight),
+      bottom: Math.max(0, outerBottom - visibleBottom),
+    };
+  };
+
+  /**
+   * Expand normal-state target bounds by a window's measured invisible-border insets so the
+   * *visible* frame lands flush on the requested snap zone (matching native Windows snap).
+   */
+  const expandBoundsByFrameInsets = (bounds, insets) => {
+    if (!bounds || !insets) return bounds;
     if (String(bounds.state || '').toLowerCase() !== 'normal') return bounds;
-    if (!isChromiumFamilyProcessKey(String(processHintLc || '').trim().toLowerCase())) return bounds;
     return {
       ...bounds,
-      left: Number(bounds.left || 0) - 8,
-      width: Math.max(120, Number(bounds.width || 0) + 16),
-      height: Math.max(120, Number(bounds.height || 0) + 8),
+      left: Math.round(Number(bounds.left || 0) - Number(insets.left || 0)),
+      top: Math.round(Number(bounds.top || 0) - Number(insets.top || 0)),
+      width: Math.max(120, Math.round(Number(bounds.width || 0) + Number(insets.left || 0) + Number(insets.right || 0))),
+      height: Math.max(120, Math.round(Number(bounds.height || 0) + Number(insets.top || 0) + Number(insets.bottom || 0))),
     };
   };
 
@@ -418,9 +447,10 @@ const createWindowPlacementRuntime = (deps) => {
         return `@(${list.map((n) => `'${String(n).replace(/'/g, "''")}'`).join(',')})`;
       })();
 
-      const commandBounds = frameCompensationMode === 'none'
-        ? bounds
-        : getPlacementCommandBounds(bounds, safeProcessNameHint);
+      // PID-tree placement has no concrete HWND yet, so frame insets cannot be measured up front.
+      // Initial bounds are applied as-is; the post-placement verify pass measures the resolved
+      // window's insets and converges the visible frame flush to the snap zone.
+      const commandBounds = bounds;
       const left = Number(commandBounds.left || 0);
       const top = Number(commandBounds.top || 0);
       const width = Math.max(120, Number(commandBounds.width || 800));
@@ -693,9 +723,16 @@ const createWindowPlacementRuntime = (deps) => {
     }
 
     const processKey = String(processHintLc || diagnosticsContext?.processHintLc || '').trim().toLowerCase();
-    const commandBounds = frameCompensationMode === 'none'
-      ? bounds
-      : getPlacementCommandBounds(bounds, processKey);
+    // Compensate for the window's invisible border so the visible frame lands flush on the snap
+    // zone. Skipped when the caller already supplies outer-frame bounds (frameCompensationMode
+    // 'none', e.g. verify/center passes) to avoid double compensation.
+    let commandBounds = bounds;
+    if (frameCompensationMode !== 'none' && String(bounds.state || '').toLowerCase() === 'normal') {
+      const insets = await measureWindowFrameInsetsByHandle(safeHandle);
+      if (insets) {
+        commandBounds = expandBoundsByFrameInsets(bounds, insets);
+      }
+    }
     const left = Number(commandBounds.left || 0);
     const top = Number(commandBounds.top || 0);
     const width = Math.max(120, Number(commandBounds.width || 800));
@@ -2001,7 +2038,8 @@ $rows | ConvertTo-Json -Depth 5`;
     sleep,
     clamp,
     normalizeWindowClassName,
-    getPlacementCommandBounds,
+    measureWindowFrameInsetsByHandle,
+    expandBoundsByFrameInsets,
     trySnapLayoutPartitionBounds,
     applySnapZoneOverlapCompensation,
     buildWindowBoundsForApp,
