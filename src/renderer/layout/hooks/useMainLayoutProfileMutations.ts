@@ -22,6 +22,7 @@ import {
 } from "../utils/monitorLayoutStacking";
 import { getSnapZonesForMonitor } from "../utils/monitorSnapZones";
 import { inferIsWebBrowserFromInstalledApp } from "../../utils/installedWebBrowserInference";
+import { resolveMonitorAppPlacement, type MonitorAppPlacementResult } from "../utils/monitorAppPlacement";
 
 function buildAppsWithMergedInsert(
   apps: any[],
@@ -287,21 +288,45 @@ export function useMainLayoutProfileMutations({
             `${newApp.name}-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
         };
 
+        const targetMonitor = profile.monitors.find((m) => m.id === monitorId);
+        const skipAutoPlacement =
+          typeof mergeIntoAppIndex === "number"
+          && targetMonitor?.apps[mergeIntoAppIndex];
+        const resolvedPlacement: MonitorAppPlacementResult = skipAutoPlacement
+          ? {
+              position: appWithInstanceId.position,
+              size: appWithInstanceId.size,
+            }
+          : resolveMonitorAppPlacement({
+              monitor: targetMonitor || { apps: [] },
+              requestedPosition: appWithInstanceId.position,
+              requestedSize: appWithInstanceId.size,
+            });
+        const effectiveMergeIndex =
+          typeof mergeIntoAppIndex === "number"
+            ? mergeIntoAppIndex
+            : resolvedPlacement.mergeIntoAppIndex;
+        const appToInsert = {
+          ...appWithInstanceId,
+          position: resolvedPlacement.position,
+          size: resolvedPlacement.size,
+        };
+
         return {
           ...profile,
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id !== monitorId) return monitor;
 
             const nextApps =
-              typeof mergeIntoAppIndex === "number"
-              && monitor.apps[mergeIntoAppIndex]
+              typeof effectiveMergeIndex === "number"
+              && monitor.apps[effectiveMergeIndex]
                 ? buildAppsWithMergedInsert(
                     monitor.apps,
-                    appWithInstanceId,
-                    mergeIntoAppIndex,
+                    appToInsert,
+                    effectiveMergeIndex,
                     monitor,
                   )
-                : [...monitor.apps, appWithInstanceId];
+                : [...monitor.apps, appToInsert];
 
             return {
               ...monitor,
@@ -672,12 +697,24 @@ export function useMainLayoutProfileMutations({
         }
 
         const appsToMove = ordered.map((i) => sourceMonitor.apps[i]!);
+        const targetMonitor = profile.monitors.find((m) => m.id === targetMonitorId);
+        const leadApp = appsToMove[0]!;
+        const resolvedPlacement = resolveMonitorAppPlacement({
+          monitor: targetMonitor || { apps: [] },
+          requestedPosition: newPosition || leadApp.position,
+          requestedSize: newSize || leadApp.size,
+          preferRequestedPosition: Boolean(newPosition),
+        });
+        const effectiveMergeIndex =
+          typeof mergeIntoAppIndex === "number"
+            ? mergeIntoAppIndex
+            : resolvedPlacement.mergeIntoAppIndex;
 
         const movedApps = appsToMove.map((appToMove) => ({
           ...appToMove,
           monitorId: targetMonitorId,
-          position: newPosition || { x: 50, y: 50 },
-          size: newSize || appToMove.size,
+          position: resolvedPlacement.position,
+          size: resolvedPlacement.size,
           instanceId: appToMove.instanceId,
         }));
 
@@ -718,8 +755,8 @@ export function useMainLayoutProfileMutations({
             }
             if (monitor.id === targetMonitorId) {
               const canMerge =
-                typeof mergeIntoAppIndex === "number"
-                && monitor.apps[mergeIntoAppIndex];
+                typeof effectiveMergeIndex === "number"
+                && monitor.apps[effectiveMergeIndex];
               let nextApps: any[];
               if (canMerge) {
                 nextApps =
@@ -727,13 +764,13 @@ export function useMainLayoutProfileMutations({
                     ? buildAppsWithMergedInsert(
                         monitor.apps,
                         movedApps[0]!,
-                        mergeIntoAppIndex!,
+                        effectiveMergeIndex!,
                         monitor,
                       )
                     : buildAppsWithMergedInsertMany(
                         monitor.apps,
                         movedApps,
-                        mergeIntoAppIndex!,
+                        effectiveMergeIndex!,
                         monitor,
                       );
               } else {
@@ -820,6 +857,19 @@ export function useMainLayoutProfileMutations({
         }
 
         // Create app object for target monitor, using remembered position/size if available
+        const targetMonitor = profile.monitors.find(
+          (m) => m.id === finalTargetMonitorId,
+        );
+        const resolvedPlacement = resolveMonitorAppPlacement({
+          monitor: targetMonitor || { apps: [] },
+          requestedPosition: newPosition || minimizedApp.sourcePosition,
+          requestedSize: newSize || minimizedApp.sourceSize,
+          preferRequestedPosition: Boolean(newPosition),
+        });
+        const effectiveMergeIndex =
+          typeof mergeIntoAppIndex === "number"
+            ? mergeIntoAppIndex
+            : resolvedPlacement.mergeIntoAppIndex;
         const newApp: any = {
           name: minimizedApp.name,
           icon: minimizedApp.icon,
@@ -828,13 +878,8 @@ export function useMainLayoutProfileMutations({
           shortcutPath: (minimizedApp as any).shortcutPath ?? null,
           launchUrl: (minimizedApp as any).launchUrl ?? null,
           color: minimizedApp.color,
-          position: newPosition ||
-            minimizedApp.sourcePosition || { x: 50, y: 50 },
-          size: newSize ||
-            minimizedApp.sourceSize || {
-              width: 60,
-              height: 60,
-            },
+          position: resolvedPlacement.position,
+          size: resolvedPlacement.size,
           volume: minimizedApp.volume || 50,
           launchBehavior: "new" as const,
           runAsAdmin: false,
@@ -857,12 +902,12 @@ export function useMainLayoutProfileMutations({
           monitors: profile.monitors.map((monitor) => {
             if (monitor.id === finalTargetMonitorId) {
               const nextApps =
-                typeof mergeIntoAppIndex === "number"
-                && monitor.apps[mergeIntoAppIndex]
+                typeof effectiveMergeIndex === "number"
+                && monitor.apps[effectiveMergeIndex]
                   ? buildAppsWithMergedInsert(
                       monitor.apps,
                       newApp,
-                      mergeIntoAppIndex,
+                      effectiveMergeIndex,
                       monitor,
                     )
                   : [...monitor.apps, newApp];
