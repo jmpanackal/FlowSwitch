@@ -17,6 +17,11 @@ test('getProcessScanNames returns single entry when no alias map', () => {
   assert.deepEqual(getProcessScanNames('notepad'), ['notepad']);
 });
 
+test('getProcessScanNames includes Settings host aliases for immersivecontrolpanel', () => {
+  const expected = ['immersivecontrolpanel', 'systemsettings', 'applicationframehost'];
+  assert.deepEqual(getProcessScanNames('immersivecontrolpanel'), expected);
+});
+
 test('PROCESS_HINTS_VERSION is a non-empty semver-style token', () => {
   assert.match(PROCESS_HINTS_VERSION, /^\d+\.\d+\.\d+$/);
 });

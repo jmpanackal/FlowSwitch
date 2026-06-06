@@ -183,3 +183,31 @@ test('gatherProfileAppLaunches uses explorer for file-only associated paths on w
     }
   }
 });
+
+test('enrichProfileAppsLaunchTargetsFromCatalog fills missing launch targets from catalog', () => {
+  const { enrichProfileAppsLaunchTargetsFromCatalog } = createProfileLaunchGatherers(stubDeps());
+  const profile = {
+    monitors: [
+      {
+        id: 'm1',
+        apps: [{ name: 'Control Panel', iconPath: 'data:image/png;base64,x' }],
+      },
+    ],
+    minimizedApps: [],
+  };
+  const catalog = [
+    {
+      name: 'Control Panel',
+      launchUrl: 'shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel',
+      shortcutPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Control Panel.lnk',
+    },
+  ];
+  const enriched = enrichProfileAppsLaunchTargetsFromCatalog(
+    profile,
+    catalog,
+    (name) => String(name || '').trim().toLowerCase(),
+  );
+  const app = enriched.monitors[0].apps[0];
+  assert.ok(app.launchUrl.startsWith('shell:AppsFolder\\'));
+  assert.ok(String(app.shortcutPath).endsWith('Control Panel.lnk'));
+});

@@ -11,6 +11,13 @@ test('isSafeAppLaunchUrl allows listed custom protocols', () => {
   assert.equal(isSafeAppLaunchUrl('cursor://file/path'), true);
 });
 
+test('isSafeAppLaunchUrl allows shell AppsFolder monikers', () => {
+  assert.equal(
+    isSafeAppLaunchUrl('shell:AppsFolder\\Microsoft.WindowsCalculator_8wekyb3d8bbwe!App'),
+    true,
+  );
+});
+
 test('isSafeAppLaunchUrl rejects http(s) and file', () => {
   assert.equal(isSafeAppLaunchUrl('https://example.com'), false);
   assert.equal(isSafeAppLaunchUrl('http://example.com'), false);

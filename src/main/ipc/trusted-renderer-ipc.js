@@ -21,6 +21,8 @@ const { resolveCaptureAppIdentity } = require('../services/capture-app-identity'
 
 /** Filled when `registerTrustedRendererIpc` runs; kicks off a background catalog scan on Windows. */
 let scheduleInstalledAppsCatalogWarmup = () => {};
+/** Shared catalog accessor for launch-time target backfill (set during IPC registration). */
+let ensureInstalledAppsCatalog = async () => [];
 
 const catalogLaunchIdentityKey = (e) => (
   `${String(e?.name || '').trim()}\0${e?.shortcutPath ?? ''}\0${e?.launchUrl ?? ''}`
@@ -1454,7 +1456,7 @@ const registerTrustedRendererIpc = (handleTrustedIpc, deps) => {
       .sort((a, b) => a.name.localeCompare(b.name, undefined, { sensitivity: 'base' }));
   };
 
-  const ensureInstalledAppsCatalog = async (force) => {
+  ensureInstalledAppsCatalog = async (force) => {
     if (!force && installedAppsCatalogCache
       && Date.now() - installedAppsCatalogCache.at < INSTALLED_APPS_CATALOG_TTL_MS) {
       return installedAppsCatalogCache.apps;
@@ -2314,4 +2316,5 @@ module.exports = {
   createHandleTrustedIpc,
   registerTrustedRendererIpc,
   scheduleInstalledAppsCatalogWarmup: () => scheduleInstalledAppsCatalogWarmup(),
+  ensureInstalledAppsCatalog: (force) => ensureInstalledAppsCatalog(force),
 };

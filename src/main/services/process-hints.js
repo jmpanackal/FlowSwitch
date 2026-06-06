@@ -6,7 +6,7 @@ const { isChromiumFamilyProcessKey } = require('./window-candidate-classifier');
  * Bump when `computeCompanionHintsFromProcessRows` matching rules or exports change
  * so `launch-latest.jsonl` can be correlated without relying on app semver.
  */
-const PROCESS_HINTS_VERSION = '1.1.0';
+const PROCESS_HINTS_VERSION = '1.2.0';
 
 /**
  * Static mapping for UWP/MSIX apps whose runtime process name differs from the
@@ -19,6 +19,8 @@ const UWP_PROCESS_NAME_ALIASES = new Map([
   ['mediaplayer', ['microsoft.media.player', 'music.ui']],
   ['zunevideo', ['video.ui']],
   ['zunemusic', ['music.ui']],
+  ['immersivecontrolpanel', ['systemsettings', 'applicationframehost']],
+  ['systemsettings', ['immersivecontrolpanel', 'applicationframehost']],
   ['msteams', ['ms-teams']],
   ['windowsterminal', ['windowsterminal']],
 ]);

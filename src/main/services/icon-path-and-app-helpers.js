@@ -259,6 +259,30 @@ const createIconPathAndAppHelpers = ({
   };
 
   /**
+   * Derive a stable process hint from a shell AppsFolder launch URL (AUMID).
+   * Example: shell:AppsFolder\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel
+   * -> immersivecontrolpanel
+   */
+  const inferShellAppsFolderProcessKeyFromLaunchUrl = (launchUrl) => {
+    const raw = String(launchUrl || '').trim();
+    if (!raw) return null;
+    const match = raw.match(/^shell:AppsFolder\\([^!]+)!([^\\/?#]+)$/i);
+    if (!match) return null;
+    const packageFamily = String(match[1] || '').trim().toLowerCase();
+    const appId = String(match[2] || '').trim().toLowerCase();
+    if (!packageFamily && !appId) return null;
+
+    const packageNameOnly = packageFamily.split('_')[0] || packageFamily;
+    const packageTail = packageNameOnly.split('.').filter(Boolean).pop() || packageNameOnly;
+    const appTail = appId.split('.').filter(Boolean).pop() || appId;
+    const sanitize = (v) => String(v || '').toLowerCase().replace(/[^a-z0-9_.-]/g, '').replace(/\.exe$/i, '');
+    const candidates = [packageTail, appTail, packageNameOnly, packageFamily]
+      .map(sanitize)
+      .filter(Boolean);
+    return candidates.find((c) => c !== 'app' && c !== 'application') || null;
+  };
+
+  /**
    * Basename for window placement / duplicate detection (steam URL groups as "steam").
    * @param {{ executablePath?: string | null; launchUrl?: string | null; shortcutPath?: string | null; appName?: string }} launchItem
    * @returns {string}
@@ -269,6 +293,8 @@ const createIconPathAndAppHelpers = ({
     }
     const url = String(launchItem.launchUrl || '').toLowerCase();
     if (url.includes('steam://') || url.includes('rungameid')) return 'steam';
+    const shellAppsFolderKey = inferShellAppsFolderProcessKeyFromLaunchUrl(launchItem.launchUrl);
+    if (shellAppsFolderKey) return shellAppsFolderKey;
 
     const inferred = inferBrowserProcessKeyFromHints(launchItem);
     if (inferred) return inferred;
@@ -1231,6 +1257,7 @@ const createIconPathAndAppHelpers = ({
     'Cursor',
     'Cursor (User)',
     'Windsurf',
+    'Control Panel',
   ];
   const INBOX_SHORTCUT_CANONICAL_KEYS = new Set(
     INBOX_START_MENU_APP_LABELS.map((label) => getCanonicalAppKey(label)).filter(Boolean),
