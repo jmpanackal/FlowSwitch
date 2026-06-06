@@ -323,12 +323,12 @@ const createProfileLaunchGatherers = ({
 
     const enrichAppRow = (app) => {
       if (!app || typeof app !== 'object') return app;
-      const hasTarget = Boolean(
-        app.executablePath || app.shortcutPath || app.launchUrl,
-      );
-      if (hasTarget) return app;
       const catalogEntry = byCanonicalKey.get(getCanonicalAppKey(String(app.name || '').trim()));
       if (!catalogEntry) return app;
+      const hasExecutablePath = Boolean(app.executablePath);
+      const hasShortcutPath = Boolean(app.shortcutPath);
+      const hasLaunchUrl = Boolean(app.launchUrl);
+      if (hasExecutablePath && hasShortcutPath && hasLaunchUrl) return app;
       return {
         ...app,
         executablePath: app.executablePath || catalogEntry.executablePath || null,

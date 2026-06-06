@@ -540,3 +540,11 @@ test('getPlacementProcessKey derives package-tail key for shell AppsFolder media
   });
   assert.equal(key, 'zunemusic');
 });
+
+test('getPlacementProcessKey infers immersivecontrolpanel from shortcut-only Control Panel launch item', () => {
+  const key = helpers.getPlacementProcessKey({
+    shortcutPath: 'C:\\Users\\Someone\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Control Panel.lnk',
+    appName: 'Control Panel',
+  });
+  assert.equal(key, 'immersivecontrolpanel');
+});

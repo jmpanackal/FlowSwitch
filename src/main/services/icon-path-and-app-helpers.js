@@ -246,6 +246,9 @@ const createIconPathAndAppHelpers = ({
     const base = path.basename(sc, '.lnk').toLowerCase();
     const hay = `${name}\n${sc}\n${base}`;
 
+    if (hay.includes('control panel') || hay.includes('immersivecontrolpanel')) {
+      return 'immersivecontrolpanel';
+    }
     if (/\bbrave\b/.test(hay) || hay.includes('brave-browser')) return 'brave';
     if (hay.includes('msedge') || hay.includes('microsoft edge')) return 'msedge';
     if (hay.includes('microsoft\\edge\\') || hay.includes('/edge/application/')) return 'msedge';

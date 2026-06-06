@@ -8,9 +8,14 @@ const {
 } = require('./process-hints');
 
 test('getProcessScanNames includes UWP runtime aliases for mediaplayer', () => {
-  const expected = ['mediaplayer', 'microsoft.media.player', 'music.ui'];
+  const expected = ['mediaplayer', 'microsoft.media.player', 'music.ui', 'applicationframehost'];
   assert.deepEqual(getProcessScanNames('mediaplayer'), expected);
   assert.deepEqual(getProcessScanNames('MediaPlayer.EXE'), expected);
+});
+
+test('getProcessScanNames includes packaged host aliases for zunemusic', () => {
+  const expected = ['zunemusic', 'music.ui', 'microsoft.media.player', 'applicationframehost'];
+  assert.deepEqual(getProcessScanNames('zunemusic'), expected);
 });
 
 test('getProcessScanNames returns single entry when no alias map', () => {

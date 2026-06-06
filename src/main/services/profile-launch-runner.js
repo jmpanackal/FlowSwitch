@@ -2325,12 +2325,22 @@ try {
             };
             const rows = Array.isArray(runningWindowProcesses) ? runningWindowProcesses : [];
             const summarize = (row) => ({
-              processName: String(row?.ProcessName || row?.processName || '') || null,
+              processName: String(row?.ProcessName || row?.processName || row?.name || '').trim() || null,
               pid: Number(row?.Id || row?.id || 0) || null,
               title: String(row?.MainWindowTitle || row?.title || '').slice(0, 60) || null,
               className: String(row?.WindowClass || row?.className || '') || null,
-              width: Number(row?.Width || row?.width || 0) || null,
-              height: Number(row?.Height || row?.height || 0) || null,
+              width: Number(
+                row?.Width
+                || row?.width
+                || row?.bounds?.width
+                || 0
+              ) || null,
+              height: Number(
+                row?.Height
+                || row?.height
+                || row?.bounds?.height
+                || 0
+              ) || null,
             });
             launchDiagnostics.decision({
               processHintLc,
