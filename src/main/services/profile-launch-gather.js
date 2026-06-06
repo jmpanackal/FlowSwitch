@@ -300,9 +300,67 @@ const createProfileLaunchGatherers = ({
     };
   };
 
+  /**
+   * Profile tiles saved from layout capture (or older saves) may have name/icon only. Fill missing
+   * launch targets from the installed-apps catalog so shell/UWP apps like Control Panel can launch.
+   *
+   * @param {object} profile
+   * @param {Array<{ name?: string, executablePath?: string|null, shortcutPath?: string|null, launchUrl?: string|null }>} catalogApps
+   * @param {(name: string) => string} getCanonicalAppKey
+   * @returns {object} shallow-cloned profile with enriched app rows
+   */
+  const enrichProfileAppsLaunchTargetsFromCatalog = (profile, catalogApps, getCanonicalAppKey) => {
+    if (!profile || !Array.isArray(catalogApps) || catalogApps.length === 0) return profile;
+    if (typeof getCanonicalAppKey !== 'function') return profile;
+
+    const byCanonicalKey = new Map();
+    for (const entry of catalogApps) {
+      const key = getCanonicalAppKey(String(entry?.name || '').trim());
+      if (!key || byCanonicalKey.has(key)) continue;
+      byCanonicalKey.set(key, entry);
+    }
+    if (byCanonicalKey.size === 0) return profile;
+
+    const enrichAppRow = (app) => {
+      if (!app || typeof app !== 'object') return app;
+      const catalogEntry = byCanonicalKey.get(getCanonicalAppKey(String(app.name || '').trim()));
+      if (!catalogEntry) return app;
+      const hasExecutablePath = Boolean(app.executablePath);
+      const hasShortcutPath = Boolean(app.shortcutPath);
+      const hasLaunchUrl = Boolean(app.launchUrl);
+      if (hasExecutablePath && hasShortcutPath && hasLaunchUrl) return app;
+      return {
+        ...app,
+        executablePath: app.executablePath || catalogEntry.executablePath || null,
+        shortcutPath: app.shortcutPath || catalogEntry.shortcutPath || null,
+        launchUrl: app.launchUrl || catalogEntry.launchUrl || null,
+      };
+    };
+
+    const monitors = Array.isArray(profile.monitors)
+      ? profile.monitors.map((monitor) => ({
+        ...monitor,
+        apps: Array.isArray(monitor?.apps)
+          ? monitor.apps.map(enrichAppRow)
+          : monitor?.apps,
+      }))
+      : profile.monitors;
+
+    const minimizedApps = Array.isArray(profile.minimizedApps)
+      ? profile.minimizedApps.map(enrichAppRow)
+      : profile.minimizedApps;
+
+    return {
+      ...profile,
+      monitors,
+      minimizedApps,
+    };
+  };
+
   return {
     gatherProfileAppLaunches,
     gatherLegacyActionLaunches,
+    enrichProfileAppsLaunchTargetsFromCatalog,
   };
 };
 

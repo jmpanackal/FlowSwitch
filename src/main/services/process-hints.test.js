@@ -8,13 +8,23 @@ const {
 } = require('./process-hints');
 
 test('getProcessScanNames includes UWP runtime aliases for mediaplayer', () => {
-  const expected = ['mediaplayer', 'microsoft.media.player', 'music.ui'];
+  const expected = ['mediaplayer', 'microsoft.media.player', 'music.ui', 'applicationframehost'];
   assert.deepEqual(getProcessScanNames('mediaplayer'), expected);
   assert.deepEqual(getProcessScanNames('MediaPlayer.EXE'), expected);
 });
 
+test('getProcessScanNames includes packaged host aliases for zunemusic', () => {
+  const expected = ['zunemusic', 'music.ui', 'microsoft.media.player', 'applicationframehost'];
+  assert.deepEqual(getProcessScanNames('zunemusic'), expected);
+});
+
 test('getProcessScanNames returns single entry when no alias map', () => {
   assert.deepEqual(getProcessScanNames('notepad'), ['notepad']);
+});
+
+test('getProcessScanNames includes Settings host aliases for immersivecontrolpanel', () => {
+  const expected = ['immersivecontrolpanel', 'systemsettings', 'applicationframehost'];
+  assert.deepEqual(getProcessScanNames('immersivecontrolpanel'), expected);
 });
 
 test('PROCESS_HINTS_VERSION is a non-empty semver-style token', () => {

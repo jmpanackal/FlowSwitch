@@ -92,6 +92,9 @@ const createProfileLaunchRunner = (deps) => {
     minimizeWindowHandle,
     ensureMinimizedAfterLaunch,
     getRunningWindowProcesses,
+    ensureInstalledAppsCatalog,
+    getCanonicalAppKey,
+    enrichProfileAppsLaunchTargetsFromCatalog,
   } = deps;
 
   const normalizeLabel = (value) => String(value || '').trim().toLowerCase();
@@ -1067,10 +1070,28 @@ const launchProfileById = async (profileId, options = {}) => {
   const launchWeightOptions = options.launchWeight && typeof options.launchWeight === 'object'
     ? options.launchWeight
     : {};
-  const profileForLaunch = sliceProfileForExcludedMonitors(
+  let profileForLaunch = sliceProfileForExcludedMonitors(
     profile,
     launchWeightOptions.excludedProfileMonitorIds,
   );
+  if (
+    typeof enrichProfileAppsLaunchTargetsFromCatalog === 'function'
+    && typeof ensureInstalledAppsCatalog === 'function'
+    && typeof getCanonicalAppKey === 'function'
+  ) {
+    try {
+      const catalogApps = await ensureInstalledAppsCatalog(false);
+      if (Array.isArray(catalogApps) && catalogApps.length > 0) {
+        profileForLaunch = enrichProfileAppsLaunchTargetsFromCatalog(
+          profileForLaunch,
+          catalogApps,
+          getCanonicalAppKey,
+        );
+      }
+    } catch {
+      // Best-effort: launch proceeds with saved profile targets when catalog is unavailable.
+    }
+  }
   const systemMonitors = buildSystemMonitorSnapshot();
   const monitorMap = createProfileMonitorMap(profileForLaunch?.monitors, systemMonitors);
   const modernLaunchData = gatherProfileAppLaunches(profileForLaunch, monitorMap);
@@ -2304,12 +2325,22 @@ try {
             };
             const rows = Array.isArray(runningWindowProcesses) ? runningWindowProcesses : [];
             const summarize = (row) => ({
-              processName: String(row?.ProcessName || row?.processName || '') || null,
+              processName: String(row?.ProcessName || row?.processName || row?.name || '').trim() || null,
               pid: Number(row?.Id || row?.id || 0) || null,
               title: String(row?.MainWindowTitle || row?.title || '').slice(0, 60) || null,
               className: String(row?.WindowClass || row?.className || '') || null,
-              width: Number(row?.Width || row?.width || 0) || null,
-              height: Number(row?.Height || row?.height || 0) || null,
+              width: Number(
+                row?.Width
+                || row?.width
+                || row?.bounds?.width
+                || 0
+              ) || null,
+              height: Number(
+                row?.Height
+                || row?.height
+                || row?.bounds?.height
+                || 0
+              ) || null,
             });
             launchDiagnostics.decision({
               processHintLc,

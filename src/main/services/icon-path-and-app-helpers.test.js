@@ -524,3 +524,27 @@ test('resolveBareSystemExecutableFromShimTarget maps taskmgr.exe on Windows', ()
     path.normalize(expected),
   );
 });
+
+test('getPlacementProcessKey derives immersivecontrolpanel from shell AppsFolder AUMID', () => {
+  const key = helpers.getPlacementProcessKey({
+    launchUrl: 'shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel',
+    appName: 'Control Panel',
+  });
+  assert.equal(key, 'immersivecontrolpanel');
+});
+
+test('getPlacementProcessKey derives package-tail key for shell AppsFolder media app', () => {
+  const key = helpers.getPlacementProcessKey({
+    launchUrl: 'shell:AppsFolder\\Microsoft.ZuneMusic_8wekyb3d8bbwe!Microsoft.ZuneMusic',
+    appName: 'Media Player',
+  });
+  assert.equal(key, 'zunemusic');
+});
+
+test('getPlacementProcessKey infers immersivecontrolpanel from shortcut-only Control Panel launch item', () => {
+  const key = helpers.getPlacementProcessKey({
+    shortcutPath: 'C:\\Users\\Someone\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Control Panel.lnk',
+    appName: 'Control Panel',
+  });
+  assert.equal(key, 'immersivecontrolpanel');
+});

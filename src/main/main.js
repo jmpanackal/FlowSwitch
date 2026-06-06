@@ -62,6 +62,7 @@ const {
   createHandleTrustedIpc,
   registerTrustedRendererIpc,
   scheduleInstalledAppsCatalogWarmup,
+  ensureInstalledAppsCatalog,
 } = require('./ipc/trusted-renderer-ipc');
 const {
   createProfileAccessShell,
@@ -173,7 +174,7 @@ const {
 });
 
 const { createProfileLaunchGatherers } = require('./services/profile-launch-gather');
-const { gatherProfileAppLaunches, gatherLegacyActionLaunches } = createProfileLaunchGatherers({
+const { gatherProfileAppLaunches, gatherLegacyActionLaunches, enrichProfileAppsLaunchTargetsFromCatalog } = createProfileLaunchGatherers({
   buildSystemMonitorSnapshot,
   sortMonitorsByLayout,
   normalizeLabel,
@@ -863,6 +864,10 @@ const { launchProfileById: launchProfileByIdCore } = createProfileLaunchRunner({
   stabilizeKnownHandlePlacement,
   minimizeWindowHandle,
   ensureMinimizedAfterLaunch,
+  getRunningWindowProcesses,
+  ensureInstalledAppsCatalog,
+  getCanonicalAppKey,
+  enrichProfileAppsLaunchTargetsFromCatalog,
 });
 
 let profileAccessShell = null;

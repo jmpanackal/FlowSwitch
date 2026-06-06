@@ -183,3 +183,97 @@ test('gatherProfileAppLaunches uses explorer for file-only associated paths on w
     }
   }
 });
+
+test('enrichProfileAppsLaunchTargetsFromCatalog fills missing launch targets from catalog', () => {
+  const { enrichProfileAppsLaunchTargetsFromCatalog } = createProfileLaunchGatherers(stubDeps());
+  const profile = {
+    monitors: [
+      {
+        id: 'm1',
+        apps: [{ name: 'Control Panel', iconPath: 'data:image/png;base64,x' }],
+      },
+    ],
+    minimizedApps: [],
+  };
+  const catalog = [
+    {
+      name: 'Control Panel',
+      launchUrl: 'shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel',
+      shortcutPath: 'C:\\ProgramData\\Microsoft\\Windows\\Start Menu\\Programs\\Control Panel.lnk',
+    },
+  ];
+  const enriched = enrichProfileAppsLaunchTargetsFromCatalog(
+    profile,
+    catalog,
+    (name) => String(name || '').trim().toLowerCase(),
+  );
+  const app = enriched.monitors[0].apps[0];
+  assert.ok(app.launchUrl.startsWith('shell:AppsFolder\\'));
+  assert.ok(String(app.shortcutPath).endsWith('Control Panel.lnk'));
+});
+
+test('enrichProfileAppsLaunchTargetsFromCatalog backfills launchUrl even when a stale executablePath exists', () => {
+  const { enrichProfileAppsLaunchTargetsFromCatalog } = createProfileLaunchGatherers(stubDeps());
+  const profile = {
+    monitors: [
+      {
+        id: 'm1',
+        apps: [{
+          name: 'Control Panel',
+          executablePath: 'Control Panel',
+          iconPath: 'data:image/png;base64,x',
+        }],
+      },
+    ],
+    minimizedApps: [],
+  };
+  const catalog = [
+    {
+      name: 'Control Panel',
+      executablePath: null,
+      shortcutPath: 'C:\\Users\\Someone\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Control Panel.lnk',
+      launchUrl: 'shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel',
+    },
+  ];
+  const enriched = enrichProfileAppsLaunchTargetsFromCatalog(
+    profile,
+    catalog,
+    (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ''),
+  );
+  const app = enriched.monitors[0].apps[0];
+  assert.equal(app.executablePath, 'Control Panel');
+  assert.ok(String(app.shortcutPath).endsWith('Control Panel.lnk'));
+  assert.ok(String(app.launchUrl).startsWith('shell:AppsFolder\\'));
+});
+
+test('enrichProfileAppsLaunchTargetsFromCatalog backfills launchUrl when shortcutPath already exists', () => {
+  const { enrichProfileAppsLaunchTargetsFromCatalog } = createProfileLaunchGatherers(stubDeps());
+  const profile = {
+    monitors: [
+      {
+        id: 'm1',
+        apps: [{
+          name: 'Control Panel',
+          shortcutPath: 'C:\\Users\\Someone\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Control Panel.lnk',
+        }],
+      },
+    ],
+    minimizedApps: [],
+  };
+  const catalog = [
+    {
+      name: 'Control Panel',
+      executablePath: null,
+      shortcutPath: 'C:\\Users\\Someone\\AppData\\Roaming\\Microsoft\\Windows\\Start Menu\\Programs\\System Tools\\Control Panel.lnk',
+      launchUrl: 'shell:AppsFolder\\windows.immersivecontrolpanel_cw5n1h2txyewy!microsoft.windows.immersivecontrolpanel',
+    },
+  ];
+  const enriched = enrichProfileAppsLaunchTargetsFromCatalog(
+    profile,
+    catalog,
+    (name) => String(name || '').trim().toLowerCase().replace(/[^a-z0-9]+/g, ''),
+  );
+  const app = enriched.monitors[0].apps[0];
+  assert.ok(String(app.shortcutPath).endsWith('Control Panel.lnk'));
+  assert.ok(String(app.launchUrl).startsWith('shell:AppsFolder\\'));
+});

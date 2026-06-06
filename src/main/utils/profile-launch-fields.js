@@ -6,6 +6,7 @@
 const path = require('path');
 const { MAX_URL_LENGTH, MAX_SHORTCUT_PATH_LENGTH } = require('./limits');
 const { safeLimitedString } = require('./url-safety');
+const { isSafeWindowsAppsFolderMoniker } = require('../services/windows-shell-item-icon');
 
 /**
  * Protocols allowed for shell.openExternal from saved profiles (not http/https/file).
@@ -43,6 +44,7 @@ const ALLOWED_APP_LAUNCH_PROTOCOLS = new Set([
 const isSafeAppLaunchUrl = (value) => {
   const candidate = safeLimitedString(value, MAX_URL_LENGTH);
   if (!candidate) return false;
+  if (isSafeWindowsAppsFolderMoniker(candidate)) return true;
   try {
     const u = new URL(candidate);
     const p = String(u.protocol || '').replace(/:$/, '').toLowerCase();
